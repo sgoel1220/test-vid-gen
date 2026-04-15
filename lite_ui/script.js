@@ -155,7 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
             button.disabled = isJobRunning || !isModelReady;
         });
 
-        updateGenerationAvailability();
+        updatePreviewSelectionState();
     }
 
     function setInteractiveState(disabled) {
