@@ -34,6 +34,27 @@ _tokenizer = None
 _loaded_model_id: Optional[str] = None
 
 
+def _unload_model():
+    """Unload the Qwen model and free GPU memory."""
+    global _model, _tokenizer, _loaded_model_id
+    if _model is None:
+        return
+    import gc
+    logger.info("Unloading LLM normalisation model…")
+    del _model
+    _model = None
+    _tokenizer = None
+    _loaded_model_id = None
+    gc.collect()
+    try:
+        import torch as _torch
+        if _torch.cuda.is_available():
+            _torch.cuda.empty_cache()
+    except Exception:
+        pass
+    logger.info("LLM normalisation model unloaded.")
+
+
 def _cache_key(text: str, model_id: str) -> str:
     payload = f"{_PROMPT_VERSION}|{model_id}|{text}"
     return hashlib.sha256(payload.encode()).hexdigest()

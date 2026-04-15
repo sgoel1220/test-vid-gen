@@ -32,6 +32,7 @@ from image.models import (
     ScenePrompt,
 )
 from image.prompts import extract_scene_prompts
+from text.normalization import _unload_model as unload_qwen_model
 from job_store import job_store
 from text.chunking import sanitize_filename
 
@@ -109,6 +110,9 @@ def _execute_image_gen(
         )
     if not scenes:
         raise ValueError("No scene prompts could be extracted from the story text.")
+
+    # 2b. Unload Qwen to free VRAM before loading SDXL
+    unload_qwen_model()
 
     # 3. Ensure SDXL is loaded (first run downloads ~6.5GB)
     if progress_callback:
