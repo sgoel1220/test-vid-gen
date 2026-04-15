@@ -623,14 +623,18 @@ def unload_model() -> bool:
         loaded_model_type = None
         loaded_model_class_name = None
 
-    # 3. Force Python Garbage Collection
+    # 3. Force Python Garbage Collection (aggressive — models must swap in/out)
     gc.collect()
+    gc.collect()  # Second pass to catch circular refs
     logger.info("Python garbage collection completed.")
 
     # 4. Clear GPU Cache (CUDA)
     if torch.cuda.is_available():
         logger.info("Clearing CUDA cache...")
         torch.cuda.empty_cache()
+        torch.cuda.synchronize()  # Wait for all CUDA ops to finish
+        free_mem, total_mem = torch.cuda.mem_get_info()
+        logger.info("CUDA memory freed: %.2f GB / %.2f GB available", free_mem / 1024**3, total_mem / 1024**3)
 
     # 5. Clear GPU Cache (MPS - Apple Silicon)
     if torch.backends.mps.is_available():

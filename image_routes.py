@@ -169,6 +169,9 @@ def _execute_image_gen(
     unload_image_model()
     if tts_was_loaded:
         logger.info("Reloading TTS model after image generation…")
+        # Small delay to let GC free SDXL VRAM before TTS loads (single GPU constraint)
+        import time
+        time.sleep(2)
         tts_engine.start_background_model_load()
 
     # 5. Write manifest

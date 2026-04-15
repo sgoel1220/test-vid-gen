@@ -42,14 +42,17 @@ def _unload_model():
     import gc
     logger.info("Unloading LLM normalisation model…")
     del _model
+    del _tokenizer
     _model = None
     _tokenizer = None
     _loaded_model_id = None
     gc.collect()
+    gc.collect()  # Second pass for circular refs
     try:
         import torch as _torch
         if _torch.cuda.is_available():
             _torch.cuda.empty_cache()
+            _torch.cuda.synchronize()
     except Exception:
         pass
     logger.info("LLM normalisation model unloaded.")

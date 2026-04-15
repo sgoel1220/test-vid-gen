@@ -81,14 +81,18 @@ def unload_image_model() -> bool:
         _pipeline = None
         _pipeline_device = None
 
+    # Aggressive memory cleanup — models must swap in/out of single GPU
     gc.collect()
+    gc.collect()  # Second pass to catch circular refs
 
     try:
         import torch as _torch
         if _torch.cuda.is_available():
             _torch.cuda.empty_cache()
-    except Exception:
-        pass
+            _torch.cuda.synchronize()  # Wait for all CUDA ops to finish
+            logger.info("CUDA memory freed: %.2f GB available", _torch.cuda.mem_get_info()[0] / 1024**3)
+    except Exception as e:
+        logger.warning("CUDA cleanup warning: %s", e)
 
     logger.info("SDXL pipeline unloaded and GPU memory released.")
     return True
