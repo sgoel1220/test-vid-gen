@@ -37,7 +37,6 @@ tqdm>=4.65.0
 hf_transfer>=0.1.4
 
 accelerate>=0.26.0
-accelerate>=0.26.0
 Pillow>=10.0.0
 pydub>=0.25.0
 audiotsm>=0.1.2
