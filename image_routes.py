@@ -90,11 +90,13 @@ def _execute_image_gen(
     """Core orchestration: extract prompts → generate images → save artifacts."""
     warnings: List[str] = []
 
-    # 1. Optionally unload TTS to free VRAM
-    if request.unload_tts_for_vram and tts_engine.is_model_ready():
-        logger.info("Unloading TTS model for VRAM headroom…")
+    # 1. Always unload TTS to free VRAM — SDXL needs ~6.5GB and most pods
+    #    can't hold both models simultaneously.
+    tts_was_loaded = tts_engine.is_model_ready()
+    if tts_was_loaded:
+        logger.info("Unloading TTS model to free VRAM for SDXL…")
         tts_engine.unload_model()
-        warnings.append("TTS model was unloaded to free VRAM. Call /api/model-info to check reload status.")
+        warnings.append("TTS model was unloaded to free VRAM for image generation. It will reload automatically after.")
 
     # 2. Resolve prompts
     if request.manual_prompts:
@@ -156,8 +158,10 @@ def _execute_image_gen(
     if progress_callback:
         progress_callback(completed=total, total=total)
 
-    # 4. Optionally reload TTS
-    if request.unload_tts_for_vram:
+    # 4. Unload SDXL and reload TTS so the server is ready for speech again
+    logger.info("Unloading SDXL pipeline after image generation…")
+    unload_image_model()
+    if tts_was_loaded:
         logger.info("Reloading TTS model after image generation…")
         tts_engine.start_background_model_load()
 
