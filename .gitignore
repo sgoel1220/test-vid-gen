@@ -46,3 +46,8 @@ htmlcov/
 
 # Ignore log files
 *.log
+
+# Ignore local AI memory workspace state and generated session notes
+memory/.obsidian/
+memory/04_Sessions/Session_Index.md
+memory/04_Sessions/20*.md

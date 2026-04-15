@@ -4,66 +4,77 @@
 import gc
 import logging
 import random
+import threading
 import numpy as np
 import torch
-from typing import Optional, Tuple
-from pathlib import Path
+from typing import Any, Optional, Tuple
 
 from chatterbox.tts import ChatterboxTTS  # Main TTS engine class
 from chatterbox.models.s3gen.const import (
     S3GEN_SR,
 )  # Default sample rate from the engine
+from cpu_runtime import resolve_cpu_thread_settings, apply_torch_cpu_thread_settings
 
 # Defensive Turbo import - Turbo may not be available in older package versions
 try:
     from chatterbox.tts_turbo import ChatterboxTurboTTS
 
-    TURBO_AVAILABLE = True
+    turbo_available = True
 except ImportError:
     ChatterboxTurboTTS = None
-    TURBO_AVAILABLE = False
+    turbo_available = False
 
 # Defensive Multilingual import
 try:
-    from chatterbox import ChatterboxMultilingualTTS, SUPPORTED_LANGUAGES
+    from chatterbox import (
+        ChatterboxMultilingualTTS,
+        SUPPORTED_LANGUAGES as supported_languages,
+    )
 
-    MULTILINGUAL_AVAILABLE = True
+    multilingual_available = True
 except ImportError:
     ChatterboxMultilingualTTS = None
-    SUPPORTED_LANGUAGES = {}
-    MULTILINGUAL_AVAILABLE = False
+    supported_languages = {}
+    multilingual_available = False
 
 # Import the singleton config_manager
 from config import config_manager
+from config import get_tts_cpu_num_threads, get_tts_cpu_num_interop_threads
+from enums import DeviceType, ModelType
+from models import ModelInfo
 
 logger = logging.getLogger(__name__)
 
 # Log Turbo availability status at module load time
-if TURBO_AVAILABLE:
+if turbo_available:
     logger.info("ChatterboxTurboTTS is available in the installed chatterbox package.")
 else:
     logger.info("ChatterboxTurboTTS not available in installed chatterbox package.")
 
 # Log Multilingual availability status at module load time
-if MULTILINGUAL_AVAILABLE:
-    logger.info("ChatterboxMultilingualTTS is available in the installed chatterbox package.")
-    logger.info(f"Supported languages: {list(SUPPORTED_LANGUAGES.keys())}")
+if multilingual_available:
+    logger.info(
+        "ChatterboxMultilingualTTS is available in the installed chatterbox package."
+    )
+    logger.info(f"Supported languages: {list(supported_languages.keys())}")
 else:
-    logger.info("ChatterboxMultilingualTTS not available in installed chatterbox package.")
+    logger.info(
+        "ChatterboxMultilingualTTS not available in installed chatterbox package."
+    )
 
 # Model selector whitelist - maps config values to model types
-MODEL_SELECTOR_MAP = {
+MODEL_SELECTOR_MAP: dict[str, ModelType] = {
     # Original model selectors
-    "chatterbox": "original",
-    "original": "original",
-    "resembleai/chatterbox": "original",
+    "chatterbox": ModelType.ORIGINAL,
+    "original": ModelType.ORIGINAL,
+    "resembleai/chatterbox": ModelType.ORIGINAL,
     # Turbo model selectors
-    "chatterbox-turbo": "turbo",
-    "turbo": "turbo",
-    "resembleai/chatterbox-turbo": "turbo",
+    "chatterbox-turbo": ModelType.TURBO,
+    "turbo": ModelType.TURBO,
+    "resembleai/chatterbox-turbo": ModelType.TURBO,
     # Multilingual model selectors
-    "chatterbox-multilingual": "multilingual",
-    "multilingual": "multilingual",
+    "chatterbox-multilingual": ModelType.MULTILINGUAL,
+    "multilingual": ModelType.MULTILINGUAL,
 }
 
 # Paralinguistic tags supported by Turbo model
@@ -79,16 +90,54 @@ TURBO_PARALINGUISTIC_TAGS = [
     "shush",
 ]
 
+
 # --- Global Module Variables ---
 chatterbox_model: Optional[ChatterboxTTS] = None
-MODEL_LOADED: bool = False
-model_device: Optional[str] = (
-    None  # Stores the resolved device string ('cuda' or 'cpu')
-)
+model_loaded: bool = False
+model_device: Optional[DeviceType] = None  # Stores the resolved device
 
 # Track which model type is loaded
-loaded_model_type: Optional[str] = None  # "original" or "turbo"
+loaded_model_type: Optional[ModelType] = None
 loaded_model_class_name: Optional[str] = None  # "ChatterboxTTS" or "ChatterboxTurboTTS"
+cpu_interop_threads_configured: bool = False
+model_loading: bool = False
+model_load_error: Optional[str] = None
+model_state_lock = threading.Lock()
+model_load_thread: Optional[threading.Thread] = None
+
+
+def _get_model_state() -> str:
+    if model_loading:
+        return "loading"
+    if model_loaded:
+        return "ready"
+    if model_load_error:
+        return "error"
+    return "not_loaded"
+
+
+def configure_cpu_threading() -> Tuple[int, int]:
+    """Configures PyTorch to use the requested CPU thread counts."""
+    global cpu_interop_threads_configured
+
+    num_threads, interop_threads = resolve_cpu_thread_settings(
+        get_tts_cpu_num_threads(),
+        get_tts_cpu_num_interop_threads(),
+    )
+
+    cpu_interop_threads_configured = apply_torch_cpu_thread_settings(
+        torch,
+        num_threads,
+        interop_threads,
+        cpu_interop_threads_configured,
+        logger,
+    )
+
+    logger.info(
+        "CPU runtime configured for Chatterbox with "
+        f"{num_threads} intra-op threads and {interop_threads} inter-op threads"
+    )
+    return num_threads, interop_threads
 
 
 def set_seed(seed_value: int):
@@ -147,7 +196,7 @@ def _test_mps_functionality() -> bool:
         return False
 
 
-def _get_model_class(selector: str) -> tuple:
+def _get_model_class(selector: str) -> Tuple[Any, str]:
     """
     Determines which model class to use based on the config selector value.
 
@@ -155,7 +204,7 @@ def _get_model_class(selector: str) -> tuple:
         selector: The value from config model.repo_id
 
     Returns:
-        Tuple of (model_class, model_type_string)
+        Tuple of (model_class, model_type)
 
     Raises:
         ImportError: If Turbo or Multilingual is selected but not available in the package
@@ -163,8 +212,8 @@ def _get_model_class(selector: str) -> tuple:
     selector_normalized = selector.lower().strip()
     model_type = MODEL_SELECTOR_MAP.get(selector_normalized)
 
-    if model_type == "turbo":
-        if not TURBO_AVAILABLE:
+    if model_type == ModelType.TURBO:
+        if not turbo_available:
             raise ImportError(
                 f"Model selector '{selector}' requires ChatterboxTurboTTS, "
                 f"but it is not available in the installed chatterbox package. "
@@ -174,10 +223,10 @@ def _get_model_class(selector: str) -> tuple:
         logger.info(
             f"Model selector '{selector}' resolved to Turbo model (ChatterboxTurboTTS)"
         )
-        return ChatterboxTurboTTS, "turbo"
+        return ChatterboxTurboTTS, ModelType.TURBO
 
-    if model_type == "multilingual":
-        if not MULTILINGUAL_AVAILABLE:
+    if model_type == ModelType.MULTILINGUAL:
+        if not multilingual_available:
             raise ImportError(
                 f"Model selector '{selector}' requires ChatterboxMultilingualTTS, "
                 f"but it is not available in the installed chatterbox package. "
@@ -187,13 +236,13 @@ def _get_model_class(selector: str) -> tuple:
         logger.info(
             f"Model selector '{selector}' resolved to Multilingual model (ChatterboxMultilingualTTS)"
         )
-        return ChatterboxMultilingualTTS, "multilingual"
+        return ChatterboxMultilingualTTS, ModelType.MULTILINGUAL
 
-    if model_type == "original":
+    if model_type == ModelType.ORIGINAL:
         logger.info(
             f"Model selector '{selector}' resolved to Original model (ChatterboxTTS)"
         )
-        return ChatterboxTTS, "original"
+        return ChatterboxTTS, ModelType.ORIGINAL
 
     # Unknown selector - default to original with warning
     logger.warning(
@@ -202,94 +251,118 @@ def _get_model_class(selector: str) -> tuple:
         f"ResembleAI/chatterbox, ResembleAI/chatterbox-turbo. "
         f"Defaulting to original ChatterboxTTS model."
     )
-    return ChatterboxTTS, "original"
+    return ChatterboxTTS, ModelType.ORIGINAL
 
 
-def get_model_info() -> dict:
+def get_model_info() -> ModelInfo:
     """
     Returns information about the currently loaded model.
     Used by the API to expose model details to the UI.
-
-    Returns:
-        Dictionary containing model information
     """
-    return {
-        "loaded": MODEL_LOADED,
-        "type": loaded_model_type,  # "original", "turbo", or "multilingual"
-        "class_name": loaded_model_class_name,
-        "device": model_device,
-        "sample_rate": chatterbox_model.sr if chatterbox_model else None,
-        "supports_paralinguistic_tags": loaded_model_type == "turbo",
-        "available_paralinguistic_tags": (
-            TURBO_PARALINGUISTIC_TAGS if loaded_model_type == "turbo" else []
+    with model_state_lock:
+        model_state = _get_model_state()
+        loaded = model_loaded
+        loading = model_loading
+        load_error = model_load_error
+        current_model = chatterbox_model
+        current_model_type = loaded_model_type
+        current_model_class_name = loaded_model_class_name
+        current_device = model_device
+
+    return ModelInfo(
+        state=model_state,
+        loaded=loaded,
+        loading=loading,
+        load_error=load_error,
+        type=current_model_type,
+        class_name=current_model_class_name,
+        device=current_device,
+        sample_rate=current_model.sr if current_model else None,
+        supports_paralinguistic_tags=current_model_type == ModelType.TURBO,
+        available_paralinguistic_tags=(
+            TURBO_PARALINGUISTIC_TAGS if current_model_type == ModelType.TURBO else []
         ),
-        "turbo_available_in_package": TURBO_AVAILABLE,
-        "multilingual_available_in_package": MULTILINGUAL_AVAILABLE,
-        "supports_multilingual": loaded_model_type == "multilingual",
-        "supported_languages": (
-            SUPPORTED_LANGUAGES if loaded_model_type == "multilingual" else {"en": "English"}
+        turbo_available_in_package=turbo_available,
+        multilingual_available_in_package=multilingual_available,
+        supports_multilingual=current_model_type == ModelType.MULTILINGUAL,
+        supported_languages=(
+            supported_languages
+            if current_model_type == ModelType.MULTILINGUAL
+            else {"en": "English"}
         ),
-    }
+    )
 
 
-def load_model() -> bool:
+def is_model_ready() -> bool:
+    with model_state_lock:
+        return model_loaded and chatterbox_model is not None
+
+
+def _load_model_impl(mark_loading_started: bool) -> bool:
     """
     Loads the TTS model.
     This version directly attempts to load from the Hugging Face repository (or its cache)
     using `from_pretrained`, bypassing the local `paths.model_cache` directory.
-    Updates global variables `chatterbox_model`, `MODEL_LOADED`, and `model_device`.
+    Updates global variables `chatterbox_model`, `model_loaded`, and `model_device`.
 
     Returns:
         bool: True if the model was loaded successfully, False otherwise.
     """
-    global chatterbox_model, MODEL_LOADED, model_device
+    global chatterbox_model, model_loaded, model_device, model_loading, model_load_error
     global loaded_model_type, loaded_model_class_name
 
-    if MODEL_LOADED:
-        logger.info("TTS model is already loaded.")
-        return True
-
     try:
-        # Determine processing device with robust CUDA detection and intelligent fallback
-        device_setting = config_manager.get_string("tts_engine.device", "auto")
+        if not mark_loading_started:
+            with model_state_lock:
+                if model_loaded and chatterbox_model is not None:
+                    logger.info("TTS model is already loaded.")
+                    return True
+                if model_loading:
+                    logger.info("TTS model load already in progress.")
+                    return False
+                model_loading = True
+                model_load_error = None
 
-        if device_setting == "auto":
+        # Determine processing device with robust CUDA detection and intelligent fallback
+        device_setting = config_manager.get_string("tts_engine.device", DeviceType.AUTO)
+
+        if device_setting == DeviceType.AUTO:
             if _test_cuda_functionality():
-                resolved_device_str = "cuda"
+                resolved_device_str = DeviceType.CUDA
                 logger.info("CUDA functionality test passed. Using CUDA.")
             elif _test_mps_functionality():
-                resolved_device_str = "mps"
+                resolved_device_str = DeviceType.MPS
                 logger.info("MPS functionality test passed. Using MPS.")
             else:
-                resolved_device_str = "cpu"
+                resolved_device_str = DeviceType.CPU
                 logger.info("CUDA and MPS not functional or not available. Using CPU.")
 
-        elif device_setting == "cuda":
+        elif device_setting == DeviceType.CUDA:
             if _test_cuda_functionality():
-                resolved_device_str = "cuda"
+                resolved_device_str = DeviceType.CUDA
                 logger.info("CUDA requested and functional. Using CUDA.")
             else:
-                resolved_device_str = "cpu"
+                resolved_device_str = DeviceType.CPU
                 logger.warning(
                     "CUDA was requested in config but functionality test failed. "
                     "PyTorch may not be compiled with CUDA support. "
                     "Automatically falling back to CPU."
                 )
 
-        elif device_setting == "mps":
+        elif device_setting == DeviceType.MPS:
             if _test_mps_functionality():
-                resolved_device_str = "mps"
+                resolved_device_str = DeviceType.MPS
                 logger.info("MPS requested and functional. Using MPS.")
             else:
-                resolved_device_str = "cpu"
+                resolved_device_str = DeviceType.CPU
                 logger.warning(
                     "MPS was requested in config but functionality test failed. "
                     "PyTorch may not be compiled with MPS support. "
                     "Automatically falling back to CPU."
                 )
 
-        elif device_setting == "cpu":
-            resolved_device_str = "cpu"
+        elif device_setting == DeviceType.CPU:
+            resolved_device_str = DeviceType.CPU
             logger.info("CPU device explicitly requested in config. Using CPU.")
 
         else:
@@ -298,15 +371,19 @@ def load_model() -> bool:
                 f"Defaulting to auto-detection."
             )
             if _test_cuda_functionality():
-                resolved_device_str = "cuda"
+                resolved_device_str = DeviceType.CUDA
             elif _test_mps_functionality():
-                resolved_device_str = "mps"
+                resolved_device_str = DeviceType.MPS
             else:
-                resolved_device_str = "cpu"
+                resolved_device_str = DeviceType.CPU
             logger.info(f"Auto-detection resolved to: {resolved_device_str}")
 
-        model_device = resolved_device_str
-        logger.info(f"Final device selection: {model_device}")
+        with model_state_lock:
+            model_device = resolved_device_str
+        logger.info(f"Final device selection: {resolved_device_str}")
+
+        if resolved_device_str == DeviceType.CPU:
+            configure_cpu_threading()
 
         # Get the model selector from config
         model_selector = config_manager.get_string("model.repo_id", "chatterbox-turbo")
@@ -318,50 +395,73 @@ def load_model() -> bool:
             model_class, model_type = _get_model_class(model_selector)
 
             logger.info(
-                f"Initializing {model_class.__name__} on device '{model_device}'..."
+                f"Initializing {model_class.__name__} on device '{resolved_device_str}'..."
             )
             logger.info(f"Model type: {model_type}")
-            if model_type == "turbo":
+            if model_type == ModelType.TURBO:
                 logger.info(
                     f"Turbo model supports paralinguistic tags: {TURBO_PARALINGUISTIC_TAGS}"
                 )
 
             # Load the model using from_pretrained - handles HuggingFace downloads automatically
-            chatterbox_model = model_class.from_pretrained(device=model_device)
+            loaded_model = model_class.from_pretrained(device=resolved_device_str)
 
-            # Store model metadata
-            loaded_model_type = model_type
-            loaded_model_class_name = model_class.__name__
-
-            logger.info(f"Successfully loaded {model_class.__name__} on {model_device}")
-            logger.info(f"Model sample rate: {chatterbox_model.sr} Hz")
+            logger.info(
+                f"Successfully loaded {model_class.__name__} on {resolved_device_str}"
+            )
+            logger.info(f"Model sample rate: {loaded_model.sr} Hz")
         except ImportError as e_import:
             logger.error(
                 f"Failed to load model due to import error: {e_import}",
                 exc_info=True,
             )
-            chatterbox_model = None
-            MODEL_LOADED = False
+            with model_state_lock:
+                chatterbox_model = None
+                model_loaded = False
+                model_loading = False
+                model_load_error = str(e_import)
+                loaded_model_type = None
+                loaded_model_class_name = None
             return False
         except Exception as e_hf:
             logger.error(
                 f"Failed to load model using from_pretrained: {e_hf}",
                 exc_info=True,
             )
-            chatterbox_model = None
-            MODEL_LOADED = False
+            with model_state_lock:
+                chatterbox_model = None
+                model_loaded = False
+                model_loading = False
+                model_load_error = str(e_hf)
+                loaded_model_type = None
+                loaded_model_class_name = None
             return False
 
-        MODEL_LOADED = True
-        if chatterbox_model:
+        with model_state_lock:
+            chatterbox_model = loaded_model
+            loaded_model_type = model_type
+            loaded_model_class_name = model_class.__name__
+            model_loaded = True
+            model_loading = False
+            model_load_error = None
+
+        if loaded_model:
             logger.info(
-                f"TTS Model loaded successfully on {model_device}. Engine sample rate: {chatterbox_model.sr} Hz."
+                f"TTS Model loaded successfully on {resolved_device_str}. Engine sample rate: {loaded_model.sr} Hz."
             )
         else:
             logger.error(
                 "Model loading sequence completed, but chatterbox_model is None. This indicates an unexpected issue."
             )
-            MODEL_LOADED = False
+            with model_state_lock:
+                chatterbox_model = None
+                model_loaded = False
+                model_loading = False
+                model_load_error = (
+                    "Model loading completed without an instantiated model."
+                )
+                loaded_model_type = None
+                loaded_model_class_name = None
             return False
 
         return True
@@ -370,9 +470,42 @@ def load_model() -> bool:
         logger.error(
             f"An unexpected error occurred during model loading: {e}", exc_info=True
         )
-        chatterbox_model = None
-        MODEL_LOADED = False
+        with model_state_lock:
+            chatterbox_model = None
+            model_loaded = False
+            model_loading = False
+            model_load_error = str(e)
+            loaded_model_type = None
+            loaded_model_class_name = None
         return False
+
+
+def load_model() -> bool:
+    return _load_model_impl(mark_loading_started=False)
+
+
+def start_background_model_load() -> bool:
+    global model_loading, model_load_error, model_load_thread
+
+    with model_state_lock:
+        if model_loaded and chatterbox_model is not None:
+            logger.info("TTS model is already loaded.")
+            return False
+        if model_loading and model_load_thread and model_load_thread.is_alive():
+            logger.info("TTS model background load already in progress.")
+            return False
+
+        model_loading = True
+        model_load_error = None
+
+        model_load_thread = threading.Thread(
+            target=_load_model_impl,
+            args=(True,),
+            name="chatterbox-model-loader",
+            daemon=True,
+        )
+        model_load_thread.start()
+        return True
 
 
 def synthesize(
@@ -403,7 +536,12 @@ def synthesize(
     """
     global chatterbox_model
 
-    if not MODEL_LOADED or chatterbox_model is None:
+    with model_state_lock:
+        model = chatterbox_model
+        model_type = loaded_model_type
+        is_loaded = model_loaded
+
+    if not is_loaded or model is None:
         logger.error("TTS model is not loaded. Cannot synthesize audio.")
         return None, None
 
@@ -425,8 +563,8 @@ def synthesize(
 
         # Call the core model's generate method
         # Multilingual model requires language_id parameter
-        if loaded_model_type == "multilingual":
-            wav_tensor = chatterbox_model.generate(
+        if model_type == ModelType.MULTILINGUAL:
+            wav_tensor = model.generate(
                 text=text,
                 language_id=language,
                 audio_prompt_path=audio_prompt_path,
@@ -435,7 +573,7 @@ def synthesize(
                 cfg_weight=cfg_weight,
             )
         else:
-            wav_tensor = chatterbox_model.generate(
+            wav_tensor = model.generate(
                 text=text,
                 audio_prompt_path=audio_prompt_path,
                 temperature=temperature,
@@ -444,7 +582,7 @@ def synthesize(
             )
 
         # The ChatterboxTTS.generate method already returns a CPU tensor.
-        return wav_tensor, chatterbox_model.sr
+        return wav_tensor, model.sr
 
     except Exception as e:
         logger.error(f"Error during TTS synthesis: {e}", exc_info=True)
@@ -459,7 +597,14 @@ def unload_model() -> bool:
     Returns:
         bool: True if the model was unloaded successfully, False otherwise.
     """
-    global chatterbox_model, MODEL_LOADED, model_device, loaded_model_type, loaded_model_class_name
+    global \
+        chatterbox_model, \
+        model_loaded, \
+        model_loading, \
+        model_load_error, \
+        model_device, \
+        loaded_model_type, \
+        loaded_model_class_name
 
     logger.info("Initiating model unload sequence...")
 
@@ -470,10 +615,13 @@ def unload_model() -> bool:
         chatterbox_model = None
 
     # 2. Reset state flags
-    MODEL_LOADED = False
-    model_device = None
-    loaded_model_type = None
-    loaded_model_class_name = None
+    with model_state_lock:
+        model_loaded = False
+        model_loading = False
+        model_load_error = None
+        model_device = None
+        loaded_model_type = None
+        loaded_model_class_name = None
 
     # 3. Force Python Garbage Collection
     gc.collect()
@@ -507,7 +655,14 @@ def reload_model() -> bool:
     Returns:
         bool: True if the new model loaded successfully, False otherwise.
     """
-    global chatterbox_model, MODEL_LOADED, model_device, loaded_model_type, loaded_model_class_name
+    global \
+        chatterbox_model, \
+        model_loaded, \
+        model_loading, \
+        model_load_error, \
+        model_device, \
+        loaded_model_type, \
+        loaded_model_class_name
 
     logger.info("Initiating model hot-swap/reload sequence...")
 
@@ -518,9 +673,13 @@ def reload_model() -> bool:
         chatterbox_model = None
 
     # 2. Reset state flags
-    MODEL_LOADED = False
-    loaded_model_type = None
-    loaded_model_class_name = None
+    with model_state_lock:
+        model_loaded = False
+        model_loading = False
+        model_load_error = None
+        model_device = None
+        loaded_model_type = None
+        loaded_model_class_name = None
 
     # 3. Force Python Garbage Collection
     gc.collect()

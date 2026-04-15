@@ -29,6 +29,8 @@ DEFAULT_REFERENCE_AUDIO_PATH = Path(
 )  # For user-uploaded reference audio
 DEFAULT_MODEL_FILES_PATH = Path("./model_cache")  # For downloaded model files
 DEFAULT_OUTPUT_PATH = Path("./outputs")  # For server-saved audio outputs (if any)
+DEFAULT_STORY_HISTORY_PATH = DEFAULT_OUTPUT_PATH / "story_history"
+DEFAULT_STORY_HISTORY_DB_PATH = DEFAULT_STORY_HISTORY_PATH / "stories.db"
 
 # --- Default Configuration Structure ---
 # This dictionary defines the complete expected structure of 'config.yaml',
@@ -51,11 +53,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "ssl_keyfile": None,  # Path to SSL private key file for HTTPS. None = HTTP only.
     },
     "model": {  # Added section for model source configuration
-        "repo_id": "chatterbox-turbo",  # UPDATED: Default to Turbo model
+        "repo_id": "chatterbox",
     },
     "tts_engine": {
-        "device": "auto",  # TTS processing device: 'auto', 'cuda', 'mps', or 'cpu'.
-        # 'auto' will attempt to use 'cuda' if available, then 'mps' if available, otherwise 'cpu'.
+        "device": "cuda",  # TTS processing device: 'auto', 'cuda', 'mps', or 'cpu'.
+        # 'cuda' is the default for GPU-focused deployments; runtime checks still fall back to CPU if CUDA is unavailable.
         "predefined_voices_path": str(
             DEFAULT_VOICES_PATH
         ),  # Directory for predefined voice files.
@@ -63,6 +65,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             DEFAULT_REFERENCE_AUDIO_PATH
         ),  # Directory for reference audio files for cloning.
         "default_voice_id": "default_sample.wav",  # Default voice file to use if none is specified.
+        "cpu_num_threads": 0,  # 0 means auto-detect and use all logical CPUs.
+        "cpu_num_interop_threads": 1,  # Keep inter-op conservative to avoid CPU oversubscription.
     },
     "paths": {  # General configurable paths for the application.
         "model_cache": str(
@@ -86,6 +90,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "max_reference_duration_sec": 30,  # Maximum duration for reference audio files.
         "save_to_disk": False,  # If true, save generated audio files to disk in outputs folder.
     },
+    "story_history": {
+        "enabled": True,
+        "storage_path": str(DEFAULT_STORY_HISTORY_PATH),
+        "database_path": str(DEFAULT_STORY_HISTORY_DB_PATH),
+        "recent_items_limit": 8,
+    },
     "ui_state": {  # Stores user interface preferences and last-used values.
         "last_text": "",  # Last text entered by the user.
         "last_voice_mode": "predefined",  # Last selected voice mode ('predefined' or 'clone').
@@ -106,6 +116,17 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "debug": {  # Settings for debugging purposes
         "save_intermediate_audio": False  # If true, save intermediate audio files for debugging
     },
+    "chunk_validation": {
+        "enabled": False,
+        "max_retries": 3,
+        "min_rms_energy": 1e-4,
+        "min_peak_amplitude": 1e-3,
+        "min_voiced_ratio": 0.05,
+    },
+    "text_normalization": {
+        "enabled": False,
+        "model_id": "Qwen/Qwen2.5-1.5B-Instruct",
+    },
 }
 
 
@@ -122,6 +143,8 @@ def _ensure_default_paths_exist():
         Path(DEFAULT_CONFIG["tts_engine"]["reference_audio_path"]),
         Path(DEFAULT_CONFIG["paths"]["model_cache"]),
         Path(DEFAULT_CONFIG["paths"]["output"]),
+        Path(DEFAULT_CONFIG["story_history"]["storage_path"]),
+        Path(DEFAULT_CONFIG["story_history"]["database_path"]).parent,
     ]
     for path in paths_to_check:
         try:
@@ -130,7 +153,9 @@ def _ensure_default_paths_exist():
             logger.error(f"Error creating default directory {path}: {e}", exc_info=True)
 
 
-def _deep_merge_dicts(source: Dict, destination: Dict) -> Dict:
+def _deep_merge_dicts(
+    source: Dict[str, Any], destination: Dict[str, Any]
+) -> Dict[str, Any]:
     """
     Recursively merges the 'source' dictionary into the 'destination' dictionary.
     Keys from 'source' will overwrite existing keys in 'destination'.
@@ -151,14 +176,14 @@ def _deep_merge_dicts(source: Dict, destination: Dict) -> Dict:
     return destination
 
 
-def _set_nested_value(d: Dict, keys: List[str], value: Any):
+def _set_nested_value(d: Dict[str, Any], keys: List[str], value: Any):
     """Helper function to set a value in a nested dictionary using a list of keys."""
     for key in keys[:-1]:
         d = d.setdefault(key, {})
     d[keys[-1]] = value
 
 
-def _get_nested_value(d: Dict, keys: List[str], default: Any = None) -> Any:
+def _get_nested_value(d: Dict[str, Any], keys: List[str], default: Any = None) -> Any:
     """Helper function to get a value from a nested dictionary using a list of keys."""
     for key in keys:
         if isinstance(d, dict) and key in d:
@@ -218,6 +243,7 @@ class YamlConfigManager:
             "server": ["log_file_path"],
             "tts_engine": ["predefined_voices_path", "reference_audio_path"],
             "paths": ["model_cache", "output"],
+            "story_history": ["storage_path", "database_path"],
         }
         for section, keys_list in path_key_map_for_conversion.items():
             if section in config_data:
@@ -281,6 +307,7 @@ class YamlConfigManager:
             "server": ["log_file_path"],
             "tts_engine": ["predefined_voices_path", "reference_audio_path"],
             "paths": ["model_cache", "output"],
+            "story_history": ["storage_path", "database_path"],
         }
         for section, keys_list in path_key_map_for_conversion.items():
             if section in config_copy_for_saving:
@@ -743,7 +770,9 @@ def get_ssl_config() -> Dict[str, str]:
     keypath = Path(str(keyfile))
 
     if not certpath.is_file():
-        logger.error(f"SSL certificate file not found: {certpath} — falling back to HTTP")
+        logger.error(
+            f"SSL certificate file not found: {certpath} — falling back to HTTP"
+        )
         return {}
     if not keypath.is_file():
         logger.error(f"SSL key file not found: {keypath} — falling back to HTTP")
@@ -814,6 +843,22 @@ def get_default_voice_id() -> str:
     return config_manager.get_string(
         "tts_engine.default_voice_id",
         _get_default_from_structure("tts_engine.default_voice_id"),
+    )
+
+
+def get_tts_cpu_num_threads() -> int:
+    """Returns the configured CPU intra-op thread count. 0 means auto/all logical CPUs."""
+    return config_manager.get_int(
+        "tts_engine.cpu_num_threads",
+        _get_default_from_structure("tts_engine.cpu_num_threads"),
+    )
+
+
+def get_tts_cpu_num_interop_threads() -> int:
+    """Returns the configured CPU inter-op thread count."""
+    return config_manager.get_int(
+        "tts_engine.cpu_num_interop_threads",
+        _get_default_from_structure("tts_engine.cpu_num_interop_threads"),
     )
 
 
@@ -896,6 +941,42 @@ def get_audio_sample_rate() -> int:
     return config_manager.get_int(
         "audio_output.sample_rate",
         _get_default_from_structure("audio_output.sample_rate"),
+    )
+
+
+def get_story_history_enabled() -> bool:
+    """Returns whether story-history persistence is enabled."""
+    return config_manager.get_bool(
+        "story_history.enabled",
+        _get_default_from_structure("story_history.enabled"),
+    )
+
+
+def get_story_history_storage_path(ensure_absolute: bool = True) -> Path:
+    """Returns the path used for persisted story-history artifacts."""
+    default_path_str = str(_get_default_from_structure("story_history.storage_path"))
+    return config_manager.get_path(
+        "story_history.storage_path",
+        default_path_str,
+        ensure_absolute=ensure_absolute,
+    )
+
+
+def get_story_history_db_path(ensure_absolute: bool = True) -> Path:
+    """Returns the SQLite database path for story history."""
+    default_path_str = str(_get_default_from_structure("story_history.database_path"))
+    return config_manager.get_path(
+        "story_history.database_path",
+        default_path_str,
+        ensure_absolute=ensure_absolute,
+    )
+
+
+def get_story_history_recent_items_limit() -> int:
+    """Returns the default number of recent stories for UI bootstrap."""
+    return config_manager.get_int(
+        "story_history.recent_items_limit",
+        _get_default_from_structure("story_history.recent_items_limit"),
     )
 
 

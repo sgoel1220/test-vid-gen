@@ -1,0 +1,50 @@
+# Python virtual environments
+venv/
+.venv*/
+env/
+.env*/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Output and cache dirs (mounted at runtime)
+outputs/
+logs/
+model_cache/
+hf_cache/
+
+# Git
+.git/
+.github/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test artifacts
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Notebooks
+*.ipynb
+
+# Memory and docs
+memory/
