@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Story Engine</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Story Engine</h1>
+
+    <section id="generate-section">
+      <h2>Generate Story</h2>
+      <div class="form-group">
+        <label for="premise">Premise</label>
+        <textarea id="premise" rows="4" placeholder="A retired lighthouse keeper discovers that the fog rolling in each night carries whispers from the drowned..."></textarea>
+      </div>
+      <div class="form-group">
+        <label for="label">Label (optional)</label>
+        <input id="label" type="text" placeholder="lighthouse-fog-v1">
+      </div>
+      <div class="form-group">
+        <label for="api-key">API Key</label>
+        <input id="api-key" type="password" placeholder="Bearer token">
+      </div>
+      <button id="generate-btn" onclick="generateStory()">Generate</button>
+      <div id="generate-status" class="status"></div>
+    </section>
+
+    <section id="stories-section">
+      <h2>Stories</h2>
+      <button onclick="loadStories()">Refresh</button>
+      <div id="stories-list"></div>
+    </section>
+
+    <section id="detail-section" class="hidden">
+      <h2>Story Detail</h2>
+      <div id="story-detail"></div>
+    </section>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>
