@@ -25,7 +25,7 @@ _SYSTEM_PROMPT = (
     '- "text_segment": the short excerpt (1-2 sentences) from the story this scene represents\n'
     '- "prompt": a detailed Stable Diffusion prompt describing the visual scene '
     "(include composition, lighting, mood, colors, setting details; "
-    "50-120 words; DO NOT include any text or words in the image)\n"
+    "30-50 words max; DO NOT include any text or words in the image)\n"
     '- "negative_prompt": things to avoid (keep short, comma-separated)\n\n'
     "Output ONLY valid JSON — no explanation, no markdown fences, no preamble."
 )
@@ -72,15 +72,27 @@ def _cache_key(text: str, num_scenes: int, style: ImageStyle, model_id: str) -> 
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+_MAX_PROMPT_WORDS = 55  # CLIP caps at ~77 tokens; ~55 words stays safe
+
+
+def _trim_prompt(prompt: str) -> str:
+    """Trim prompt to stay within CLIP's 77-token limit."""
+    words = prompt.split()
+    if len(words) <= _MAX_PROMPT_WORDS:
+        return prompt
+    return " ".join(words[:_MAX_PROMPT_WORDS])
+
+
 def _apply_style_suffix(scenes: List[ScenePrompt], style: ImageStyle) -> List[ScenePrompt]:
     suffix = _STYLE_SUFFIXES.get(style, _STYLE_SUFFIXES[ImageStyle.DARK_ATMOSPHERIC])
     styled: List[ScenePrompt] = []
     for scene in scenes:
+        combined = _trim_prompt(f"{scene.prompt}, {suffix}")
         styled.append(
             ScenePrompt(
                 scene_index=scene.scene_index,
                 text_segment=scene.text_segment,
-                prompt=f"{scene.prompt}, {suffix}",
+                prompt=combined,
                 negative_prompt=scene.negative_prompt,
             )
         )

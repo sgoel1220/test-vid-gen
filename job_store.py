@@ -44,6 +44,14 @@ class JobStore:
             raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
         return LiteCloneJobStatusResponse.model_validate(entry)
 
+    def get_raw(self, job_id: str) -> dict[str, Any]:
+        """Return raw dict for jobs that use a different response model."""
+        with self._lock:
+            entry = self._store.get(job_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+        return dict(entry)
+
     def status_url(self, job_id: str) -> str:
         return f"/api/jobs/{job_id}"
 

@@ -250,8 +250,8 @@ async def create_image_job(request: ImageGenRequest) -> ImageJobCreatedResponse:
 @image_router.get("/jobs/{job_id}", response_model=ImageJobStatusResponse)
 async def get_image_job(job_id: str) -> ImageJobStatusResponse:
     """Poll an async image gen job."""
-    entry = job_store.get(job_id)
-    return ImageJobStatusResponse.model_validate(entry.model_dump())
+    raw = job_store.get_raw(job_id)
+    return ImageJobStatusResponse.model_validate(raw)
 
 
 @image_router.post("/prompts/preview", response_model=list[ScenePrompt])
