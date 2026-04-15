@@ -478,6 +478,105 @@ audio {
     box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
 }
 
+/* Tabs */
+.tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 0;
+}
+
+.tab-btn {
+    padding: 12px 24px;
+    background: transparent;
+    color: var(--muted);
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    margin-bottom: -2px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.tab-btn:hover {
+    color: var(--text);
+    background: rgba(124, 156, 255, 0.1);
+}
+
+.tab-btn.active {
+    color: var(--accent-strong);
+    border-bottom-color: var(--accent-strong);
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* History panel */
+.history-runs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.history-run-card {
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: #0d1527;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.history-run-card:hover {
+    background: #111d35;
+    border-color: var(--accent);
+}
+
+.history-run-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.history-run-card__title {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.history-run-card__meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+
+.history-run-card__meta-item {
+    display: flex;
+    gap: 6px;
+}
+
+.history-run-card__meta-item strong {
+    color: var(--text);
+}
+
+.pagination-controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 16px;
+    margin-top: 16px;
+}
+
 @media (max-width: 900px) {
     .hero,
     .actions,
@@ -491,6 +590,15 @@ audio {
     .form-grid,
     .two-up,
     .three-up {
+        grid-template-columns: 1fr;
+    }
+
+    .history-run-card__header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .history-run-card__meta {
         grid-template-columns: 1fr;
     }
 }

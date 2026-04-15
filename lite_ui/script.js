@@ -1010,6 +1010,277 @@ document.addEventListener('DOMContentLoaded', () => {
     imgPreviewBtn.addEventListener('click', handleImgPreview);
     imgGenerateBtn.addEventListener('click', handleImgGenerate);
 
+    // History panel
+    const tabGenerateBtn = document.getElementById('tab-generate');
+    const tabHistoryBtn = document.getElementById('tab-history');
+    const generateTab = document.getElementById('generate-tab');
+    const historyTab = document.getElementById('history-tab');
+    const historyEmpty = document.getElementById('history-empty');
+    const historyUnavailable = document.getElementById('history-unavailable');
+    const historyContent = document.getElementById('history-content');
+    const historyRunsList = document.getElementById('history-runs-list');
+    const historyPrevBtn = document.getElementById('history-prev-btn');
+    const historyNextBtn = document.getElementById('history-next-btn');
+    const historyPageInfo = document.getElementById('history-page-info');
+    const historyDetailPanel = document.getElementById('history-detail-panel');
+    const historyDetailCloseBtn = document.getElementById('history-detail-close-btn');
+    const historyDetailRunId = document.getElementById('history-detail-run-id');
+    const historyDetailLabel = document.getElementById('history-detail-label');
+    const historyDetailStatus = document.getElementById('history-detail-status');
+    const historyDetailCreated = document.getElementById('history-detail-created');
+    const historyDetailVoice = document.getElementById('history-detail-voice');
+    const historyDetailChunkCount = document.getElementById('history-detail-chunk-count');
+    const historyDetailFinalAudioBlock = document.getElementById('history-detail-final-audio-block');
+    const historyDetailFinalAudio = document.getElementById('history-detail-final-audio');
+    const historyDetailChunksBlock = document.getElementById('history-detail-chunks-block');
+    const historyDetailChunksList = document.getElementById('history-detail-chunks-list');
+    const historyReloadBtn = document.getElementById('history-reload-btn');
+
+    let historyOffset = 0;
+    let historyLimit = 50;
+    let currentDetailRun = null;
+
+    function switchTab(tabName) {
+        if (tabName === 'generate') {
+            tabGenerateBtn.classList.add('active');
+            tabHistoryBtn.classList.remove('active');
+            generateTab.classList.add('active');
+            historyTab.classList.remove('hidden');
+            historyTab.classList.remove('active');
+        } else if (tabName === 'history') {
+            tabHistoryBtn.classList.add('active');
+            tabGenerateBtn.classList.remove('active');
+            historyTab.classList.add('active');
+            historyTab.classList.remove('hidden');
+            generateTab.classList.remove('active');
+            loadHistory();
+        }
+    }
+
+    tabGenerateBtn.addEventListener('click', () => switchTab('generate'));
+    tabHistoryBtn.addEventListener('click', () => switchTab('history'));
+
+    async function loadHistory() {
+        try {
+            const response = await fetch(`/api/history?limit=${historyLimit}&offset=${historyOffset}`);
+
+            if (response.status === 503) {
+                historyEmpty.classList.add('hidden');
+                historyUnavailable.classList.remove('hidden');
+                historyContent.classList.add('hidden');
+                return;
+            }
+
+            const runs = await parseJsonResponse(response);
+            if (!response.ok) throw new Error(runs.detail || 'Failed to load history.');
+
+            historyUnavailable.classList.add('hidden');
+
+            if (!runs || !runs.length) {
+                historyEmpty.classList.remove('hidden');
+                historyContent.classList.add('hidden');
+                return;
+            }
+
+            historyEmpty.classList.add('hidden');
+            historyContent.classList.remove('hidden');
+            renderHistoryRuns(runs);
+
+            const page = Math.floor(historyOffset / historyLimit) + 1;
+            historyPageInfo.textContent = `Page ${page}`;
+            historyPrevBtn.disabled = historyOffset === 0;
+            historyNextBtn.disabled = runs.length < historyLimit;
+        } catch (error) {
+            historyEmpty.classList.add('hidden');
+            historyUnavailable.classList.remove('hidden');
+            historyContent.classList.add('hidden');
+        }
+    }
+
+    function renderHistoryRuns(runs) {
+        historyRunsList.innerHTML = '';
+        runs.forEach((run) => {
+            const card = createHistoryRunCard(run);
+            historyRunsList.appendChild(card);
+        });
+    }
+
+    function createHistoryRunCard(run) {
+        const card = document.createElement('div');
+        card.className = 'history-run-card';
+        card.addEventListener('click', () => loadRunDetail(run.run_id));
+
+        const header = document.createElement('div');
+        header.className = 'history-run-card__header';
+
+        const title = document.createElement('div');
+        title.className = 'history-run-card__title';
+        title.textContent = run.run_label || run.run_id;
+        header.appendChild(title);
+
+        const statusPill = document.createElement('span');
+        statusPill.className = 'pill';
+        statusPill.textContent = formatJobStatus(run.status || 'unknown');
+        statusPill.dataset.status = run.status || 'unknown';
+        header.appendChild(statusPill);
+
+        card.appendChild(header);
+
+        const meta = document.createElement('div');
+        meta.className = 'history-run-card__meta';
+
+        const created = document.createElement('div');
+        created.className = 'history-run-card__meta-item';
+        created.innerHTML = `<strong>Created:</strong> ${formatTimestamp(run.created_at)}`;
+        meta.appendChild(created);
+
+        const chunks = document.createElement('div');
+        chunks.className = 'history-run-card__meta-item';
+        chunks.innerHTML = `<strong>Chunks:</strong> ${run.chunk_count || 0}`;
+        meta.appendChild(chunks);
+
+        if (run.duration_sec) {
+            const duration = document.createElement('div');
+            duration.className = 'history-run-card__meta-item';
+            duration.innerHTML = `<strong>Duration:</strong> ${run.duration_sec.toFixed(1)}s`;
+            meta.appendChild(duration);
+        }
+
+        card.appendChild(meta);
+        return card;
+    }
+
+    function formatTimestamp(timestamp) {
+        if (!timestamp) return '-';
+        try {
+            const date = new Date(timestamp);
+            return date.toLocaleString();
+        } catch {
+            return timestamp;
+        }
+    }
+
+    async function loadRunDetail(runId) {
+        try {
+            const response = await fetch(`/api/history/${runId}`);
+            const run = await parseJsonResponse(response);
+            if (!response.ok) throw new Error(run.detail || 'Failed to load run detail.');
+
+            currentDetailRun = run;
+            renderRunDetail(run);
+            historyDetailPanel.classList.remove('hidden');
+        } catch (error) {
+            alert('Failed to load run detail: ' + error.message);
+        }
+    }
+
+    function renderRunDetail(run) {
+        historyDetailRunId.textContent = run.run_id || '-';
+        historyDetailLabel.textContent = run.run_label || '-';
+        historyDetailStatus.textContent = formatJobStatus(run.status || 'unknown');
+        historyDetailStatus.dataset.status = run.status || 'unknown';
+        historyDetailCreated.textContent = formatTimestamp(run.created_at);
+        historyDetailVoice.textContent = run.voice_filename || '-';
+        historyDetailChunkCount.textContent = run.chunks ? run.chunks.length : 0;
+
+        // Final audio
+        if (run.final_audio_id) {
+            historyDetailFinalAudio.src = `/api/history/audio/${run.final_audio_id}`;
+            historyDetailFinalAudioBlock.classList.remove('hidden');
+        } else {
+            historyDetailFinalAudioBlock.classList.add('hidden');
+        }
+
+        // Chunks
+        if (run.chunks && run.chunks.length) {
+            historyDetailChunksList.innerHTML = '';
+            run.chunks.forEach((chunk) => {
+                const chunkCard = createHistoryChunkCard(chunk);
+                historyDetailChunksList.appendChild(chunkCard);
+            });
+            historyDetailChunksBlock.classList.remove('hidden');
+        } else {
+            historyDetailChunksBlock.classList.add('hidden');
+        }
+    }
+
+    function createHistoryChunkCard(chunk) {
+        const card = document.createElement('div');
+        card.className = 'chunk-card';
+
+        const header = document.createElement('div');
+        header.className = 'chunk-card__header';
+        header.innerHTML = `<strong>Chunk ${chunk.chunk_index}</strong>`;
+        card.appendChild(header);
+
+        if (chunk.text) {
+            const text = document.createElement('p');
+            text.textContent = chunk.text;
+            card.appendChild(text);
+        }
+
+        if (chunk.audio_blob_id) {
+            const audio = document.createElement('audio');
+            audio.controls = true;
+            audio.src = `/api/history/audio/${chunk.audio_blob_id}`;
+            card.appendChild(audio);
+        }
+
+        return card;
+    }
+
+    function reloadFromRun() {
+        if (!currentDetailRun || !currentDetailRun.settings) {
+            alert('No settings available to reload.');
+            return;
+        }
+
+        const settings = currentDetailRun.settings;
+
+        // Switch to generate tab
+        switchTab('generate');
+
+        // Populate form fields from settings
+        if (settings.target_sample_rate) document.getElementById('target-sample-rate').value = settings.target_sample_rate;
+        if (settings.output_format) document.getElementById('output-format').value = settings.output_format;
+        if (settings.chunk_size) document.getElementById('chunk-size').value = settings.chunk_size;
+        if (settings.temperature !== undefined) document.getElementById('temperature').value = settings.temperature;
+        if (settings.exaggeration !== undefined) document.getElementById('exaggeration').value = settings.exaggeration;
+        if (settings.cfg_weight !== undefined) document.getElementById('cfg-weight').value = settings.cfg_weight;
+        if (settings.seed !== undefined) document.getElementById('seed').value = settings.seed;
+        if (settings.speed_factor !== undefined) document.getElementById('speed-factor').value = settings.speed_factor;
+        if (settings.language) document.getElementById('language').value = settings.language;
+        if (settings.sentence_pause_ms !== undefined) document.getElementById('sentence-pause-ms').value = settings.sentence_pause_ms;
+        if (settings.crossfade_ms !== undefined) document.getElementById('crossfade-ms').value = settings.crossfade_ms;
+        if (settings.safety_fade_ms !== undefined) document.getElementById('safety-fade-ms').value = settings.safety_fade_ms;
+
+        // Checkboxes
+        if (settings.split_text !== undefined) document.getElementById('split-text').checked = settings.split_text;
+        if (settings.enable_smart_stitching !== undefined) document.getElementById('enable-smart-stitching').checked = settings.enable_smart_stitching;
+        if (settings.enable_dc_removal !== undefined) document.getElementById('enable-dc-removal').checked = settings.enable_dc_removal;
+
+        alert('Settings reloaded from run ' + currentDetailRun.run_label);
+    }
+
+    historyDetailCloseBtn.addEventListener('click', () => {
+        historyDetailPanel.classList.add('hidden');
+        currentDetailRun = null;
+    });
+
+    historyReloadBtn.addEventListener('click', reloadFromRun);
+
+    historyPrevBtn.addEventListener('click', () => {
+        if (historyOffset >= historyLimit) {
+            historyOffset -= historyLimit;
+            loadHistory();
+        }
+    });
+
+    historyNextBtn.addEventListener('click', () => {
+        historyOffset += historyLimit;
+        loadHistory();
+    });
+
     resetJobStatus();
     clearPreview();
     updateGenerationAvailability();

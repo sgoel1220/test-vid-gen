@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import warnings
 from contextlib import asynccontextmanager
@@ -14,9 +15,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import engine
+import persistence as _persist
 from config import config_manager, get_host, get_output_path, get_ssl_config
 from routes import router
 from image_routes import image_router
+from routes_history import history_router
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +46,36 @@ async def _lifespan(app: FastAPI):
     logger.info("Starting background TTS model load...")
     if not engine.start_background_model_load():
         logger.info("Startup found an existing model load state.")
+
+    # --- Persistence outbox lifecycle ---
+    _drain_task: asyncio.Task | None = None
+    _outbox: _persist.Outbox | None = None
+    _client: _persist.PersistenceClient | None = None
+    if _persist.is_enabled():
+        _client = _persist.get_client()
+        _outbox = _persist.Outbox()
+        await _outbox.open()
+        _persist.set_outbox(_outbox)
+        # Start background drain loop immediately, but don't block startup
+        _drain_task = asyncio.create_task(_outbox.background_drain_loop(_client))
+        logger.info("Persistence outbox started (background drain active).")
+    else:
+        logger.info("Persistence disabled (METADATA_API_URL not set).")
+
     yield
+
+    # --- Shutdown: cancel drain loop, close outbox and client ---
+    if _drain_task is not None:
+        _drain_task.cancel()
+        try:
+            await _drain_task
+        except asyncio.CancelledError:
+            pass
+    if _outbox is not None:
+        await _outbox.aclose()
+    if _client is not None:
+        await _client.aclose()
+    _persist.set_outbox(None)
 
 
 def create_app() -> FastAPI:
@@ -76,6 +108,7 @@ def create_app() -> FastAPI:
 
     app.include_router(router)
     app.include_router(image_router)
+    app.include_router(history_router)
 
     @app.get("/", include_in_schema=False)
     async def root():

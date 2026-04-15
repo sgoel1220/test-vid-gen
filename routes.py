@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
-import threading
 import uuid
 from pathlib import Path
 from typing import Tuple
@@ -121,14 +121,14 @@ async def chunk_preview(request: ChunkPreviewRequest) -> ChunkPreviewResponse:
 
 @router.post("/tts", response_model=LiteCloneRunResponse)
 async def tts_endpoint(request: LiteCloneTTSRequest) -> LiteCloneRunResponse:
-    return execute_lite_clone_run(request)
+    return await execute_lite_clone_run(request)
 
 
 @router.post("/api/jobs", response_model=LiteCloneJobCreatedResponse)
 async def create_job(request: LiteCloneTTSRequest) -> LiteCloneJobCreatedResponse:
     job_id = uuid.uuid4().hex
     job_store.create(job_id, request.selected_chunk_indices)
-    threading.Thread(target=run_lite_clone_job, args=(job_id, request), daemon=True).start()
+    asyncio.create_task(run_lite_clone_job(job_id, request))
     return LiteCloneJobCreatedResponse(job_id=job_id, status_url=job_store.status_url(job_id))
 
 

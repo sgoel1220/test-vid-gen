@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import logging
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
@@ -41,7 +44,40 @@ from models import (
 )
 from text import chunk_text_by_sentences, normalize_text_with_llm, sanitize_filename
 
+from creepy_pasta_protocol.chunks import ChunkSpec
+from creepy_pasta_protocol.common import AudioFormat as _ProtoAF, RunStatus
+from creepy_pasta_protocol.runs import CreateRunRequest, PatchRunRequest
+from creepy_pasta_protocol.settings import ResolvedSettingsSnapshot
+from creepy_pasta_protocol.validation import ChunkValidationSnapshot
+
+import persistence as _persist
+
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Persistence helpers
+# ---------------------------------------------------------------------------
+
+_MIME_TYPE: dict[AudioFormat, str] = {
+    AudioFormat.WAV: "audio/wav",
+    AudioFormat.MP3: "audio/mpeg",
+    AudioFormat.OPUS: "audio/ogg; codecs=opus",
+}
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _to_settings_snapshot(settings: ResolvedSettings) -> ResolvedSettingsSnapshot:
+    data = settings.model_dump()
+    data["output_format"] = _ProtoAF(settings.output_format.value)
+    return ResolvedSettingsSnapshot(**data)
+
+
+def _to_validation_snapshot(v: ChunkValidationResult) -> ChunkValidationSnapshot:
+    return ChunkValidationSnapshot(**v.model_dump())
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +256,7 @@ def _write_manifest(output_dir: Path, response: LiteCloneRunResponse) -> Path:
 # Core run execution
 # ---------------------------------------------------------------------------
 
-def execute_lite_clone_run(
+async def execute_lite_clone_run(
     request: LiteCloneTTSRequest,
     progress_callback: Optional[Callable[..., None]] = None,
 ) -> LiteCloneRunResponse:
@@ -237,12 +273,22 @@ def execute_lite_clone_run(
     if settings.enable_text_normalization:
         norm_cache = get_output_path(ensure_absolute=True) / "text_norm_cache"
         norm_cache.mkdir(parents=True, exist_ok=True)
-        normalized, _ = normalize_text_with_llm(
-            synthesis_text, model_id=settings.text_normalization_model_id, cache_dir=norm_cache
+        normalized, _ = await asyncio.to_thread(
+            normalize_text_with_llm,
+            synthesis_text,
+            model_id=settings.text_normalization_model_id,
+            cache_dir=norm_cache,
         )
         if normalized != synthesis_text:
             normalized_text = normalized
             synthesis_text = normalized
+
+    # --- Persistence: enqueue create_script (outbox causal ordering handles sequencing) ---
+    _outbox = _persist.get_outbox() if _persist.is_enabled() else None
+    script_sha256: Optional[str] = None
+    if _outbox is not None:
+        script_sha256 = hashlib.sha256(synthesis_text.encode()).hexdigest()
+        await _outbox.enqueue_create_script(synthesis_text)
 
     preview = build_chunk_preview(synthesis_text, settings.split_text, settings.chunk_size)
     if not preview:
@@ -266,178 +312,267 @@ def execute_lite_clone_run(
     run_root = outputs_root / "lite_clone_runs" / run_id
     run_root.mkdir(parents=True, exist_ok=True)
 
+    # --- Persistence: enqueue create_run + create_chunks + patch_run(RUNNING) ---
+    # Causal ordering in the outbox ensures create_script drains first.
+    _run_registered = False
+    if _outbox is not None and script_sha256 is not None:
+        settings_snap = _to_settings_snapshot(settings)
+        chunk_specs = [ChunkSpec(chunk_index=i, text=t) for i, t in selected_entries]
+        await _outbox.enqueue_create_run(CreateRunRequest(
+            script_sha256=script_sha256,
+            run_label=settings.run_label,
+            settings=settings_snap,
+            output_format=_ProtoAF(settings.output_format.value),
+            source_chunk_count=len(preview),
+            selected_chunk_indices=selected_indices,
+            normalized_text=normalized_text,
+            pod_run_id=run_id,
+        ))
+        await _outbox.enqueue_create_chunks(run_id, chunk_specs)
+        await _outbox.enqueue_patch_run(run_id, PatchRunRequest(
+            status=RunStatus.RUNNING,
+            started_at=_utcnow(),
+        ))
+        _run_registered = True
+
     run_warnings: List[str] = []
     chunk_records: List[SavedChunkInfo] = []
     raw_chunks: List[np.ndarray] = []
     engine_sr: Optional[int] = None
 
-    for done_count, (chunk_idx, chunk_text) in enumerate(selected_entries, start=1):
-        logger.info("Synthesising chunk %d/%d.", chunk_idx, len(preview))
-        if progress_callback:
-            progress_callback(
-                message=f"Synthesising chunk {chunk_idx} ({done_count}/{len(selected_entries)})",
-                progress_completed=done_count - 1,
-                progress_total=total_steps,
-                current_chunk_index=chunk_idx,
-                selected_chunk_indices=selected_indices,
-            )
+    try:
+        for done_count, (chunk_idx, chunk_text) in enumerate(selected_entries, start=1):
+            logger.info("Synthesising chunk %d/%d.", chunk_idx, len(preview))
+            if progress_callback:
+                progress_callback(
+                    message=f"Synthesising chunk {chunk_idx} ({done_count}/{len(selected_entries)})",
+                    progress_completed=done_count - 1,
+                    progress_total=total_steps,
+                    current_chunk_index=chunk_idx,
+                    selected_chunk_indices=selected_indices,
+                )
 
-        base_seed = settings.seed
-        max_attempts = (1 + settings.max_chunk_retries) if settings.enable_chunk_validation else 1
-        best_audio: Optional[np.ndarray] = None
-        best_sr: Optional[int] = None
-        validation_result: Optional[ChunkValidationResult] = None
-        attempts_used = 0
+            base_seed = settings.seed
+            max_attempts = (1 + settings.max_chunk_retries) if settings.enable_chunk_validation else 1
+            best_audio: Optional[np.ndarray] = None
+            best_sr: Optional[int] = None
+            validation_result: Optional[ChunkValidationResult] = None
+            attempts_used = 0
 
-        for attempt in range(max_attempts):
-            attempt_seed = base_seed + attempt if attempt > 0 else base_seed
-            tensor, chunk_sr = engine.synthesize(
-                text=chunk_text,
-                audio_prompt_path=str(ref_path),
-                temperature=settings.temperature,
-                exaggeration=settings.exaggeration,
-                cfg_weight=settings.cfg_weight,
-                seed=attempt_seed,
-                language=settings.language,
-            )
-            if tensor is None or chunk_sr is None:
+            for attempt in range(max_attempts):
+                attempt_seed = base_seed + attempt if attempt > 0 else base_seed
+                tensor, chunk_sr = await asyncio.to_thread(
+                    engine.synthesize,
+                    text=chunk_text,
+                    audio_prompt_path=str(ref_path),
+                    temperature=settings.temperature,
+                    exaggeration=settings.exaggeration,
+                    cfg_weight=settings.cfg_weight,
+                    seed=attempt_seed,
+                    language=settings.language,
+                )
+                if tensor is None or chunk_sr is None:
+                    raise HTTPException(status_code=500, detail=f"TTS engine failed on chunk {chunk_idx}.")
+
+                if settings.speed_factor != 1.0:
+                    tensor, _ = await asyncio.to_thread(
+                        apply_speed_factor, tensor, chunk_sr, settings.speed_factor
+                    )
+
+                attempt_audio = tensor.cpu().numpy().squeeze().astype(np.float32)
+                attempts_used = attempt + 1
+
+                if not settings.enable_chunk_validation:
+                    best_audio = attempt_audio
+                    best_sr = chunk_sr
+                    break
+
+                v = await asyncio.to_thread(
+                    validate_chunk_audio,
+                    attempt_audio,
+                    chunk_sr,
+                    min_rms_energy=settings.chunk_validation_min_rms,
+                    min_peak_amplitude=settings.chunk_validation_min_peak,
+                    min_voiced_ratio=settings.chunk_validation_min_voiced_ratio,
+                )
+                validation_result = v
+                if best_audio is None:
+                    best_audio, best_sr = attempt_audio, chunk_sr
+                if v.passed:
+                    best_audio, best_sr = attempt_audio, chunk_sr
+                    break
+                logger.warning("Chunk %d attempt %d failed: %s", chunk_idx, attempt + 1, v.failures)
+
+            if best_audio is None or best_sr is None:
                 raise HTTPException(status_code=500, detail=f"TTS engine failed on chunk {chunk_idx}.")
 
-            if settings.speed_factor != 1.0:
-                tensor, _ = apply_speed_factor(tensor, chunk_sr, settings.speed_factor)
+            if settings.enable_chunk_validation and validation_result and not validation_result.passed:
+                run_warnings.append(
+                    f"Chunk {chunk_idx}: all {attempts_used} attempt(s) failed validation "
+                    f"({validation_result.failures}); using best-effort audio."
+                )
 
-            attempt_audio = tensor.cpu().numpy().squeeze().astype(np.float32)
-            attempts_used = attempt + 1
+            chunk_sr = best_sr
+            if engine_sr is None:
+                engine_sr = chunk_sr
+            elif engine_sr != chunk_sr:
+                run_warnings.append(f"Chunk {chunk_idx} returned SR {chunk_sr}, keeping {engine_sr}.")
 
-            if not settings.enable_chunk_validation:
-                best_audio = attempt_audio
-                best_sr = chunk_sr
-                break
+            raw_chunks.append(best_audio)
 
-            v = validate_chunk_audio(
-                attempt_audio, chunk_sr,
-                min_rms_energy=settings.chunk_validation_min_rms,
-                min_peak_amplitude=settings.chunk_validation_min_peak,
-                min_voiced_ratio=settings.chunk_validation_min_voiced_ratio,
-            )
-            validation_result = v
-            if best_audio is None:
-                best_audio, best_sr = attempt_audio, chunk_sr
-            if v.passed:
-                best_audio, best_sr = attempt_audio, chunk_sr
-                break
-            logger.warning("Chunk %d attempt %d failed: %s", chunk_idx, attempt + 1, v.failures)
+            artifact = None
+            if settings.save_chunk_audio:
+                chunk_file = run_root / f"chunk_{chunk_idx:03d}.{settings.output_format.value}"
+                artifact = save_audio_artifact(
+                    outputs_root, chunk_file, best_audio, chunk_sr,
+                    settings.output_format, settings.target_sample_rate,
+                )
 
-        if best_audio is None or best_sr is None:
-            raise HTTPException(status_code=500, detail=f"TTS engine failed on chunk {chunk_idx}.")
+            # --- Persistence: enqueue chunk audio upload ---
+            if _outbox is not None:
+                mime = _MIME_TYPE.get(settings.output_format, "audio/wav")
+                chunk_dur = _duration_sec(best_audio, best_sr)
+                chunk_bytes = await asyncio.to_thread(
+                    encode_audio, best_audio, best_sr,
+                    settings.output_format, settings.target_sample_rate,
+                )
+                proto_vld = (
+                    _to_validation_snapshot(validation_result)
+                    if validation_result is not None
+                    else None
+                )
+                await _outbox.enqueue_upload_chunk_audio(
+                    run_id=run_id,
+                    chunk_index=chunk_idx,
+                    data=chunk_bytes,
+                    format=_ProtoAF(settings.output_format.value),
+                    sample_rate=best_sr,
+                    duration_sec=chunk_dur,
+                    mime_type=mime,
+                    attempts_used=attempts_used,
+                    validation=proto_vld,
+                )
 
-        if settings.enable_chunk_validation and validation_result and not validation_result.passed:
-            run_warnings.append(
-                f"Chunk {chunk_idx}: all {attempts_used} attempt(s) failed validation "
-                f"({validation_result.failures}); using best-effort audio."
-            )
+            chunk_records.append(SavedChunkInfo(
+                index=chunk_idx, text=chunk_text, artifact=artifact,
+                validation=validation_result, attempts_used=attempts_used,
+            ))
 
-        chunk_sr = best_sr
+            if progress_callback:
+                progress_callback(
+                    message=f"Finished chunk {chunk_idx} ({done_count}/{len(selected_entries)})",
+                    progress_completed=done_count,
+                    progress_total=total_steps,
+                    current_chunk_index=chunk_idx,
+                    selected_chunk_indices=selected_indices,
+                )
+
         if engine_sr is None:
-            engine_sr = chunk_sr
-        elif engine_sr != chunk_sr:
-            run_warnings.append(f"Chunk {chunk_idx} returned SR {chunk_sr}, keeping {engine_sr}.")
-
-        raw_chunks.append(best_audio)
-
-        artifact = None
-        if settings.save_chunk_audio:
-            chunk_file = run_root / f"chunk_{chunk_idx:03d}.{settings.output_format.value}"
-            artifact = save_audio_artifact(
-                outputs_root, chunk_file, best_audio, chunk_sr,
-                settings.output_format, settings.target_sample_rate,
-            )
-
-        chunk_records.append(SavedChunkInfo(
-            index=chunk_idx, text=chunk_text, artifact=artifact,
-            validation=validation_result, attempts_used=attempts_used,
-        ))
+            raise HTTPException(status_code=500, detail="Engine sample rate could not be determined.")
 
         if progress_callback:
             progress_callback(
-                message=f"Finished chunk {chunk_idx} ({done_count}/{len(selected_entries)})",
-                progress_completed=done_count,
+                message="Stitching audio chunks",
+                progress_completed=len(selected_entries),
                 progress_total=total_steps,
-                current_chunk_index=chunk_idx,
+                current_chunk_index=None,
                 selected_chunk_indices=selected_indices,
             )
 
-    if engine_sr is None:
-        raise HTTPException(status_code=500, detail="Engine sample rate could not be determined.")
+        stitched = await asyncio.to_thread(stitch_audio_chunks, raw_chunks, engine_sr, settings)
+        final_audio = await asyncio.to_thread(
+            post_process_final_audio, stitched, engine_sr, settings, run_warnings
+        )
 
-    if progress_callback:
-        progress_callback(
-            message="Stitching audio chunks",
-            progress_completed=len(selected_entries),
-            progress_total=total_steps,
-            current_chunk_index=None,
+        if progress_callback:
+            progress_callback(
+                message="Finalising saved output",
+                progress_completed=len(selected_entries) + 1,
+                progress_total=total_steps,
+                current_chunk_index=None,
+                selected_chunk_indices=selected_indices,
+            )
+
+        final_artifact = None
+        if settings.save_final_audio:
+            final_artifact = save_audio_artifact(
+                outputs_root,
+                run_root / _build_final_audio_filename(request.reference_audio_filename, settings),
+                final_audio, engine_sr, settings.output_format, settings.target_sample_rate,
+            )
+
+        # --- Persistence: enqueue final audio upload + patch_run(COMPLETED) ---
+        if _outbox is not None:
+            mime = _MIME_TYPE.get(settings.output_format, "audio/wav")
+            final_dur = _duration_sec(final_audio, engine_sr)
+            final_bytes = await asyncio.to_thread(
+                encode_audio, final_audio, engine_sr,
+                settings.output_format, settings.target_sample_rate,
+            )
+            await _outbox.enqueue_upload_final_audio(
+                run_id=run_id,
+                data=final_bytes,
+                format=_ProtoAF(settings.output_format.value),
+                sample_rate=engine_sr,
+                duration_sec=final_dur,
+                mime_type=mime,
+            )
+            await _outbox.enqueue_patch_run(run_id, PatchRunRequest(
+                status=RunStatus.COMPLETED,
+                completed_at=_utcnow(),
+                warnings=run_warnings or None,
+            ))
+
+        manifest_rel = (Path("lite_clone_runs") / run_id / "manifest.json")
+        response = LiteCloneRunResponse(
+            run_id=run_id,
+            output_dir=(Path("lite_clone_runs") / run_id).as_posix(),
+            reference_audio_filename=request.reference_audio_filename,
+            source_chunk_count=len(preview),
+            chunk_count=len(chunk_records),
             selected_chunk_indices=selected_indices,
+            resolved_settings=settings,
+            chunks=chunk_records,
+            final_audio=final_artifact,
+            manifest_relative_path=manifest_rel.as_posix(),
+            manifest_url=_artifact_url(manifest_rel),
+            warnings=run_warnings,
+            normalized_text=normalized_text,
         )
 
-    stitched = stitch_audio_chunks(raw_chunks, engine_sr, settings)
-    final_audio = post_process_final_audio(stitched, engine_sr, settings, run_warnings)
+        _write_manifest(run_root, response)
 
-    if progress_callback:
-        progress_callback(
-            message="Finalising saved output",
-            progress_completed=len(selected_entries) + 1,
-            progress_total=total_steps,
-            current_chunk_index=None,
-            selected_chunk_indices=selected_indices,
-        )
+        if progress_callback:
+            progress_callback(
+                message=f"Saved run {run_id}",
+                progress_completed=total_steps,
+                progress_total=total_steps,
+                current_chunk_index=None,
+                selected_chunk_indices=selected_indices,
+            )
 
-    final_artifact = None
-    if settings.save_final_audio:
-        final_artifact = save_audio_artifact(
-            outputs_root,
-            run_root / _build_final_audio_filename(request.reference_audio_filename, settings),
-            final_audio, engine_sr, settings.output_format, settings.target_sample_rate,
-        )
+        return response
 
-    manifest_rel = (Path("lite_clone_runs") / run_id / "manifest.json")
-    response = LiteCloneRunResponse(
-        run_id=run_id,
-        output_dir=(Path("lite_clone_runs") / run_id).as_posix(),
-        reference_audio_filename=request.reference_audio_filename,
-        source_chunk_count=len(preview),
-        chunk_count=len(chunk_records),
-        selected_chunk_indices=selected_indices,
-        resolved_settings=settings,
-        chunks=chunk_records,
-        final_audio=final_artifact,
-        manifest_relative_path=manifest_rel.as_posix(),
-        manifest_url=_artifact_url(manifest_rel),
-        warnings=run_warnings,
-        normalized_text=normalized_text,
-    )
-
-    _write_manifest(run_root, response)
-
-    if progress_callback:
-        progress_callback(
-            message=f"Saved run {run_id}",
-            progress_completed=total_steps,
-            progress_total=total_steps,
-            current_chunk_index=None,
-            selected_chunk_indices=selected_indices,
-        )
-
-    return response
+    except BaseException:
+        if _run_registered and _outbox is not None:
+            try:
+                await _outbox.enqueue_patch_run(run_id, PatchRunRequest(
+                    status=RunStatus.FAILED,
+                    completed_at=_utcnow(),
+                ))
+            except Exception:
+                logger.warning("Failed to enqueue patch_run(FAILED) for run %s", run_id)
+        raise
 
 
 # ---------------------------------------------------------------------------
 # Background job worker
 # ---------------------------------------------------------------------------
 
-def run_lite_clone_job(job_id: str, request: LiteCloneTTSRequest) -> None:
+async def run_lite_clone_job(job_id: str, request: LiteCloneTTSRequest) -> None:
     try:
         job_store.update(job_id, status=JobStatus.RUNNING, message="Preparing run")
-        result = execute_lite_clone_run(
+        result = await execute_lite_clone_run(
             request,
             progress_callback=lambda **kw: job_store.update(
                 job_id, status=JobStatus.RUNNING, error=None, **kw
