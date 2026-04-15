@@ -29,6 +29,8 @@ from image.models import (
     ImageGenResponse,
     ImageJobCreatedResponse,
     ImageJobStatusResponse,
+    ManualImageGenRequest,
+    ManualImageGenResponse,
     PromptPreviewRequest,
     SavedImageArtifact,
     ScenePrompt,
@@ -71,10 +73,10 @@ def _resolve_guidance(request: ImageGenRequest) -> float:
 
 def _ensure_image_model(device: str = "cuda") -> None:
     if not is_image_model_loaded():
-        model_id = str(_img_cfg("model_id", "stabilityai/stable-diffusion-xl-base-1.0"))
+        model_id = str(_img_cfg("model_id", "Tongyi-MAI/Z-Image-Turbo"))
         ok = load_image_model(device=device, model_id=model_id)
         if not ok:
-            raise RuntimeError("Failed to load SDXL pipeline.")
+            raise RuntimeError("Failed to load Z-Image pipeline.")
 
 
 def _make_run_dir(label: Optional[str] = None) -> tuple[str, Path]:
@@ -276,6 +278,82 @@ async def preview_prompts(request: PromptPreviewRequest) -> list[ScenePrompt]:
         raise
     except Exception as exc:
         logger.error("Prompt preview failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Manual single-image generation
+# ---------------------------------------------------------------------------
+
+@image_router.post("/manual", response_model=ManualImageGenResponse)
+async def generate_manual_image(request: ManualImageGenRequest) -> ManualImageGenResponse:
+    """Generate a single image from a manual prompt — no LLM scene extraction."""
+    try:
+        # Unload TTS if loaded (single GPU constraint)
+        tts_was_loaded = tts_engine.is_model_ready()
+        if tts_was_loaded:
+            logger.info("Unloading TTS model to free VRAM for Z-Image…")
+            tts_engine.unload_model()
+
+        # Ensure Z-Image is loaded
+        device = config_manager.get_string("tts_engine.device", "cuda")
+        _ensure_image_model(device=device)
+
+        steps = request.steps or int(_img_cfg("default_steps", 9))
+        guidance = request.guidance_scale if request.guidance_scale is not None else float(_img_cfg("default_guidance_scale", 0.0))
+        run_id, run_dir = _make_run_dir(request.run_label or "manual")
+
+        pil_img = generate_image(
+            prompt=request.prompt,
+            negative_prompt=request.negative_prompt,
+            width=request.width,
+            height=request.height,
+            steps=steps,
+            guidance_scale=guidance,
+            seed=request.seed,
+        )
+
+        filename = "image.png"
+        filepath = run_dir / filename
+        pil_img.save(filepath, format="PNG")
+
+        rel_path = f"image_gen_runs/{run_id}/{filename}"
+        artifact = SavedImageArtifact(
+            filename=filename,
+            relative_path=rel_path,
+            url=f"/outputs/{rel_path}",
+            width=request.width,
+            height=request.height,
+            prompt_used=request.prompt,
+            negative_prompt_used=request.negative_prompt,
+            seed_used=request.seed if request.seed is not None else -1,
+        )
+
+        # Write manifest
+        manifest_name = "manifest.json"
+        response = ManualImageGenResponse(
+            run_id=run_id,
+            output_dir=str(run_dir),
+            image=artifact,
+            manifest_url=f"/outputs/image_gen_runs/{run_id}/{manifest_name}",
+        )
+        manifest_path = run_dir / manifest_name
+        manifest_path.write_text(
+            json.dumps(jsonable_encoder(response), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        # Unload Z-Image and reload TTS
+        unload_image_model()
+        if tts_was_loaded:
+            import time
+            time.sleep(2)
+            tts_engine.start_background_model_load()
+
+        return response
+
+    except Exception as exc:
+        logger.error("Manual image generation failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

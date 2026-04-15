@@ -43,9 +43,9 @@ debug:
   save_intermediate_audio: false
 
 image_generation:
-  model_id: stabilityai/stable-diffusion-xl-base-1.0
-  default_steps: 30
-  default_guidance_scale: 7.5
+  model_id: Tongyi-MAI/Z-Image-Turbo
+  default_steps: 9
+  default_guidance_scale: 0.0
   default_width: 1024
   default_height: 1024
   default_style: dark_atmospheric
