@@ -33,13 +33,25 @@ def load_image_model(
         import torch as _torch
         from diffusers import StableDiffusionXLPipeline
 
-        logger.info("Loading SDXL pipeline: %s on %s…", model_id, device)
-        pipe = StableDiffusionXLPipeline.from_pretrained(
-            model_id,
-            torch_dtype=_torch.float16,
-            use_safetensors=True,
-            variant="fp16",
-        )
+        logger.info("Downloading/loading SDXL pipeline: %s (this may take several minutes on first run)…", model_id)
+
+        # Try fp16 variant first (smaller download), fall back to full weights
+        try:
+            pipe = StableDiffusionXLPipeline.from_pretrained(
+                model_id,
+                torch_dtype=_torch.float16,
+                use_safetensors=True,
+                variant="fp16",
+            )
+        except Exception as fp16_exc:
+            logger.warning("fp16 variant not available (%s), loading full weights…", fp16_exc)
+            pipe = StableDiffusionXLPipeline.from_pretrained(
+                model_id,
+                torch_dtype=_torch.float16,
+                use_safetensors=True,
+            )
+
+        logger.info("SDXL weights loaded, moving to %s…", device)
         pipe = pipe.to(device)
         pipe.enable_attention_slicing()
 
@@ -47,7 +59,7 @@ def load_image_model(
             _pipeline = pipe
             _pipeline_device = device
 
-        logger.info("SDXL pipeline loaded successfully on %s.", device)
+        logger.info("SDXL pipeline ready on %s.", device)
         return True
 
     except Exception as exc:
@@ -113,6 +125,7 @@ def generate_image(
         device = _pipeline_device or "cuda"
         generator = _torch.Generator(device=device).manual_seed(seed)
 
+    logger.info("Running SDXL inference (%d steps, guidance=%.1f)…", steps, guidance_scale)
     result = pipe(
         prompt=prompt,
         negative_prompt=negative_prompt or None,
@@ -123,4 +136,5 @@ def generate_image(
         generator=generator,
     )
 
+    logger.info("SDXL inference complete.")
     return result.images[0]
