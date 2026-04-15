@@ -85,6 +85,29 @@ class ImageJobStatusResponse(BaseModel):
     error: Optional[str] = None
 
 
+class ManualImageGenRequest(BaseModel):
+    """Simple manual prompt → single image generation."""
+    prompt: str = Field(..., min_length=1, description="Text prompt for image generation.")
+    negative_prompt: str = Field(
+        "",
+        description="Negative prompt (things to avoid in the image).",
+    )
+    width: int = Field(1024, ge=512, le=2048, description="Output image width in pixels.")
+    height: int = Field(1024, ge=512, le=2048, description="Output image height in pixels.")
+    steps: Optional[int] = Field(None, ge=1, le=100, description="Override inference steps.")
+    guidance_scale: Optional[float] = Field(None, ge=0.0, le=30.0, description="Override CFG scale.")
+    seed: Optional[int] = Field(None, ge=0, description="Random seed for reproducibility.")
+    run_label: Optional[str] = Field(None, description="Optional label for the output directory.")
+
+
+class ManualImageGenResponse(BaseModel):
+    """Response for single manual image generation."""
+    run_id: str
+    output_dir: str
+    image: SavedImageArtifact
+    manifest_url: str
+
+
 class ChunkBasedImageGenRequest(BaseModel):
     """Request for chunk-based image generation (post-TTS workflow)."""
     chunks: List[str] = Field(..., min_length=1, description="TTS text chunks to group and generate images for.")
