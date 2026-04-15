@@ -363,6 +363,121 @@ audio {
     margin-top: 8px;
 }
 
+/* Image generation section */
+.panel--accent {
+    border-color: #3b2d6b;
+    background: rgba(17, 20, 39, 0.97);
+}
+
+.image-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    margin-top: 12px;
+}
+
+.image-card {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    background: #0d1527;
+}
+
+.image-card img {
+    width: 100%;
+    height: auto;
+    display: block;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.image-card img:hover {
+    opacity: 0.85;
+}
+
+.image-card__info {
+    padding: 12px 14px;
+}
+
+.image-card__info strong {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.image-card__prompt {
+    color: var(--muted);
+    font-size: 0.85rem;
+    line-height: 1.4;
+    max-height: 4.2em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 4px 0;
+}
+
+.image-card__meta {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-top: 6px;
+}
+
+.prompt-card {
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: #0d1527;
+}
+
+.prompt-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.prompt-card__segment {
+    color: var(--accent);
+    font-size: 0.85rem;
+    font-style: italic;
+    margin-bottom: 8px;
+}
+
+.prompt-card__positive {
+    color: var(--text);
+    font-size: 0.9rem;
+    line-height: 1.4;
+    margin-bottom: 6px;
+}
+
+.prompt-card__negative {
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
+.prompt-card__negative::before {
+    content: "Neg: ";
+    color: var(--danger);
+    font-weight: 600;
+}
+
+/* Lightbox overlay */
+.lightbox-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-out;
+}
+
+.lightbox-overlay img {
+    max-width: 95vw;
+    max-height: 95vh;
+    border-radius: 8px;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+}
+
 @media (max-width: 900px) {
     .hero,
     .actions,

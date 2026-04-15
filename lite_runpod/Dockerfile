@@ -36,9 +36,10 @@ RUN python -m pip install --no-cache-dir --upgrade pip && \
     python -m pip install --no-cache-dir "protobuf>=4.25.0"
 
 COPY lite_runpod/config.yaml /app/config.yaml
-COPY app.py config.py cpu_runtime.py engine.py enums.py files.py job_store.py lite_clone_server.py models.py routes.py run_orchestrator.py utils.py /app/
+COPY app.py config.py cpu_runtime.py engine.py enums.py files.py image_routes.py job_store.py lite_clone_server.py models.py routes.py run_orchestrator.py utils.py /app/
 COPY audio /app/audio
 COPY text /app/text
+COPY image /app/image
 COPY lite_ui /app/lite_ui
 
 RUN mkdir -p /app/model_cache /app/reference_audio /app/outputs /app/logs /app/hf_cache /app/voices

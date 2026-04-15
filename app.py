@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 import engine
 from config import config_manager, get_host, get_output_path, get_ssl_config
 from routes import router
+from image_routes import image_router
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
         )
 
     app.include_router(router)
+    app.include_router(image_router)
 
     @app.get("/", include_in_schema=False)
     async def root():

@@ -36,6 +36,7 @@ inflect>=7.0.0
 tqdm>=4.65.0
 hf_transfer>=0.1.4
 
+Pillow>=10.0.0
 pydub>=0.25.0
 audiotsm>=0.1.2
 praat-parselmouth>=0.4.0

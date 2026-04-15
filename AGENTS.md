@@ -15,29 +15,44 @@ The active runtime loop:
 - Start `lite_clone_server.py` on a GPU machine
 - Generate audio from plain text via the UI or API
 - Voice cloning via reference audio upload
+- Supports three model variants: original, turbo, and multilingual
 
 ## Architecture
 
-| File | Role |
-|------|------|
-| `app.py` | FastAPI app factory, middleware, mounts, lifespan |
+| File / Dir | Role |
+|------------|------|
+| `app.py` | FastAPI app factory, middleware, static file mounts, lifespan |
 | `lite_clone_server.py` | Entrypoint — re-exports `app` from `app.py` for backward compat |
 | `routes.py` | All API route handlers |
-| `engine.py` | Model loading and synthesis orchestration |
+| `engine.py` | Model loading (original/turbo/multilingual) and synthesis orchestration |
+| `run_orchestrator.py` | TTS job execution: settings resolution, chunk synthesis, artifact saving |
 | `config.py` | `config.yaml` defaults and access helpers |
-| `cpu_runtime.py` | CPU/MPS fallback runtime |
-| `enums.py` | Shared enumerations |
-| `files.py` | Reference audio validation and listing |
-| `job_store.py` | In-memory async job state |
+| `cpu_runtime.py` | CPU/MPS fallback runtime thread configuration |
+| `enums.py` | Shared enumerations (AudioFormat, ModelType, DeviceType, JobStatus) |
+| `files.py` | Reference audio validation, predefined voice listing, PerformanceMonitor |
+| `job_store.py` | Thread-safe in-memory async job state (Repository pattern) |
 | `models.py` | Pydantic request/response models |
-| `run_orchestrator.py` | TTS job execution logic |
-| `utils.py` | Audio and file helpers |
-| `text/` | Text chunking and normalization package |
+| `utils.py` | Backward-compat shim — re-exports from `audio/`, `text/`, `files.py`, `models.py` |
+| `audio/` | Audio encoding (`encoding.py`), processing (`processing.py`), stitching (`stitching.py`) |
+| `text/` | Text chunking (`chunking.py`) and LLM-based normalization (`normalization.py`) |
 | `lite_ui/` | Minimal browser-facing frontend (HTML/CSS/JS) |
-| `lite_runpod/` | Dockerfile, requirements, entrypoint for RunPod deployment |
+| `lite_runpod/` | Dockerfile, requirements, entrypoint, config for RunPod deployment |
 | `config.yaml` | Runtime configuration source of truth |
-| `voices/` | Predefined voice WAV assets |
+| `voices/` | Predefined voice WAV assets (27 built-in voices) |
 | `reference_audio/` | Voice-cloning reference inputs |
+
+## API Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/` | Serve lite UI |
+| GET | `/api/model-info` | Model status, capabilities, supported languages |
+| GET | `/api/reference-audio` | List valid reference audio files |
+| POST | `/api/reference-audio/upload` | Upload a .wav/.mp3 reference file |
+| POST | `/api/chunks/preview` | Preview text chunking without synthesis |
+| POST | `/tts` | Synchronous TTS generation (returns full run response) |
+| POST | `/api/jobs` | Create async TTS job (returns job_id + status_url) |
+| GET | `/api/jobs/{job_id}` | Poll async job progress and result |
 
 ## Commands
 

@@ -25,3 +25,14 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class ImageStyle(str, Enum):
+    DARK_ATMOSPHERIC = "dark_atmospheric"
+    COSMIC_HORROR = "cosmic_horror"
+    GOTHIC = "gothic"
+    SURREAL_NIGHTMARE = "surreal_nightmare"
+    FOUND_FOOTAGE = "found_footage"
+    PSYCHOLOGICAL = "psychological"
+    FOLK_HORROR = "folk_horror"
+    BODY_HORROR = "body_horror"

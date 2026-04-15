@@ -29,8 +29,6 @@ DEFAULT_REFERENCE_AUDIO_PATH = Path(
 )  # For user-uploaded reference audio
 DEFAULT_MODEL_FILES_PATH = Path("./model_cache")  # For downloaded model files
 DEFAULT_OUTPUT_PATH = Path("./outputs")  # For server-saved audio outputs (if any)
-DEFAULT_STORY_HISTORY_PATH = DEFAULT_OUTPUT_PATH / "story_history"
-DEFAULT_STORY_HISTORY_DB_PATH = DEFAULT_STORY_HISTORY_PATH / "stories.db"
 
 # --- Default Configuration Structure ---
 # This dictionary defines the complete expected structure of 'config.yaml',
@@ -90,12 +88,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "max_reference_duration_sec": 30,  # Maximum duration for reference audio files.
         "save_to_disk": False,  # If true, save generated audio files to disk in outputs folder.
     },
-    "story_history": {
-        "enabled": True,
-        "storage_path": str(DEFAULT_STORY_HISTORY_PATH),
-        "database_path": str(DEFAULT_STORY_HISTORY_DB_PATH),
-        "recent_items_limit": 8,
-    },
     "ui_state": {  # Stores user interface preferences and last-used values.
         "last_text": "",  # Last text entered by the user.
         "last_voice_mode": "predefined",  # Last selected voice mode ('predefined' or 'clone').
@@ -123,6 +115,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "min_peak_amplitude": 1e-3,
         "min_voiced_ratio": 0.05,
     },
+    "image_generation": {
+        "model_id": "stabilityai/stable-diffusion-xl-base-1.0",
+        "default_steps": 30,
+        "default_guidance_scale": 7.5,
+        "default_width": 1024,
+        "default_height": 1024,
+        "default_style": "dark_atmospheric",
+    },
     "text_normalization": {
         "enabled": False,
         "model_id": "Qwen/Qwen2.5-1.5B-Instruct",
@@ -143,8 +143,6 @@ def _ensure_default_paths_exist():
         Path(DEFAULT_CONFIG["tts_engine"]["reference_audio_path"]),
         Path(DEFAULT_CONFIG["paths"]["model_cache"]),
         Path(DEFAULT_CONFIG["paths"]["output"]),
-        Path(DEFAULT_CONFIG["story_history"]["storage_path"]),
-        Path(DEFAULT_CONFIG["story_history"]["database_path"]).parent,
     ]
     for path in paths_to_check:
         try:
@@ -1005,6 +1003,49 @@ def get_full_config_for_template() -> Dict[str, Any]:
     config_snapshot = config_manager.get_all()  # Gets a deep copy.
     # Convert Path objects in this snapshot to strings for serialization.
     return config_manager._prepare_config_for_saving(config_snapshot)
+
+
+# Image Generation Settings Accessors
+def get_image_model_id() -> str:
+    return config_manager.get_string(
+        "image_generation.model_id",
+        _get_default_from_structure("image_generation.model_id"),
+    )
+
+
+def get_image_default_steps() -> int:
+    return config_manager.get_int(
+        "image_generation.default_steps",
+        _get_default_from_structure("image_generation.default_steps"),
+    )
+
+
+def get_image_default_guidance_scale() -> float:
+    return config_manager.get_float(
+        "image_generation.default_guidance_scale",
+        _get_default_from_structure("image_generation.default_guidance_scale"),
+    )
+
+
+def get_image_default_width() -> int:
+    return config_manager.get_int(
+        "image_generation.default_width",
+        _get_default_from_structure("image_generation.default_width"),
+    )
+
+
+def get_image_default_height() -> int:
+    return config_manager.get_int(
+        "image_generation.default_height",
+        _get_default_from_structure("image_generation.default_height"),
+    )
+
+
+def get_image_default_style() -> str:
+    return config_manager.get_string(
+        "image_generation.default_style",
+        _get_default_from_structure("image_generation.default_style"),
+    )
 
 
 # --- End File: config.py ---

@@ -252,6 +252,116 @@
                 </details>
             </div>
         </section>
+
+        <section class="panel panel--accent">
+            <div class="section-header">
+                <div>
+                    <p class="eyebrow">Visual</p>
+                    <h2>Image Generation</h2>
+                </div>
+                <span id="img-status" class="pill" data-status="idle">Idle</span>
+            </div>
+
+            <div class="form-grid" id="img-form">
+                <div class="field field--full">
+                    <label for="img-text">Story text (for scene extraction)</label>
+                    <textarea id="img-text" rows="6" placeholder="Paste story text here — or it will use the TTS text above if empty."></textarea>
+                    <p class="muted">Leave empty to reuse the TTS text field above.</p>
+                </div>
+
+                <div class="field">
+                    <label for="img-style">Style</label>
+                    <select id="img-style">
+                        <option value="dark_atmospheric" selected>Dark Atmospheric</option>
+                        <option value="cosmic_horror">Cosmic Horror</option>
+                        <option value="gothic">Gothic</option>
+                        <option value="surreal_nightmare">Surreal Nightmare</option>
+                        <option value="found_footage">Found Footage</option>
+                        <option value="psychological">Psychological</option>
+                        <option value="folk_horror">Folk Horror</option>
+                        <option value="body_horror">Body Horror</option>
+                    </select>
+                </div>
+
+                <div class="field">
+                    <label for="img-num-scenes">Number of scenes</label>
+                    <input id="img-num-scenes" type="number" min="1" max="20" step="1" value="4">
+                </div>
+
+                <div class="field">
+                    <label for="img-width">Width</label>
+                    <input id="img-width" type="number" min="512" max="2048" step="64" value="1024">
+                </div>
+
+                <div class="field">
+                    <label for="img-height">Height</label>
+                    <input id="img-height" type="number" min="512" max="2048" step="64" value="1024">
+                </div>
+
+                <div class="field">
+                    <label for="img-steps">Inference steps</label>
+                    <input id="img-steps" type="number" min="1" max="100" step="1" value="30">
+                </div>
+
+                <div class="field">
+                    <label for="img-guidance">Guidance scale</label>
+                    <input id="img-guidance" type="number" min="1" max="30" step="0.5" value="7.5">
+                </div>
+
+                <div class="field">
+                    <label for="img-seed">Seed</label>
+                    <input id="img-seed" type="number" min="0" step="1" value="42">
+                </div>
+
+                <div class="field">
+                    <label for="img-label">Run label</label>
+                    <input id="img-label" type="text" value="" placeholder="optional">
+                </div>
+
+                <div class="field field--full">
+                    <label class="checkbox">
+                        <input id="img-unload-tts" type="checkbox">
+                        <span>Unload TTS model for extra VRAM</span>
+                    </label>
+                </div>
+
+                <div class="actions field--full">
+                    <button id="img-preview-btn" type="button" class="secondary">Preview prompts</button>
+                    <button id="img-generate-btn" type="button">Generate images</button>
+                    <span id="img-request-status" class="muted">Idle</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel" id="img-prompts-panel">
+            <div class="section-header">
+                <h2>Scene Prompts</h2>
+                <span id="img-prompt-count" class="muted">Extract or preview prompts to see them here.</span>
+            </div>
+            <div id="img-prompts-empty" class="empty-state">Use "Preview prompts" to extract scene descriptions from the story text.</div>
+            <div id="img-prompts-content" class="hidden">
+                <div id="img-prompts-list" class="chunk-list"></div>
+            </div>
+        </section>
+
+        <section class="panel" id="img-gallery-panel">
+            <div class="section-header">
+                <h2>Generated Images</h2>
+                <a id="img-manifest-link" href="#" target="_blank" rel="noreferrer" class="hidden">Open manifest</a>
+            </div>
+            <div id="img-gallery-empty" class="empty-state">Generated images will appear here after running image generation.</div>
+            <div id="img-gallery-content" class="hidden">
+                <div class="result-meta">
+                    <div><strong>Run ID:</strong> <span id="img-run-id"></span></div>
+                    <div><strong>Images:</strong> <span id="img-count"></span></div>
+                </div>
+                <div id="img-warnings-block" class="hidden">
+                    <h3>Warnings</h3>
+                    <ul id="img-warnings-list"></ul>
+                </div>
+                <div id="img-gallery-grid" class="image-gallery"></div>
+            </div>
+        </section>
     </main>
 
     <script src="/script.js" defer></script>

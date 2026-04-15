@@ -672,6 +672,344 @@ document.addEventListener('DOMContentLoaded', () => {
     form.elements.chunk_size.addEventListener('input', invalidatePreview);
     form.elements.split_text.addEventListener('change', invalidatePreview);
 
+    // -----------------------------------------------------------------------
+    // Image Generation
+    // -----------------------------------------------------------------------
+    const imgText = document.getElementById('img-text');
+    const imgStyle = document.getElementById('img-style');
+    const imgNumScenes = document.getElementById('img-num-scenes');
+    const imgWidth = document.getElementById('img-width');
+    const imgHeight = document.getElementById('img-height');
+    const imgSteps = document.getElementById('img-steps');
+    const imgGuidance = document.getElementById('img-guidance');
+    const imgSeed = document.getElementById('img-seed');
+    const imgLabel = document.getElementById('img-label');
+    const imgUnloadTts = document.getElementById('img-unload-tts');
+    const imgPreviewBtn = document.getElementById('img-preview-btn');
+    const imgGenerateBtn = document.getElementById('img-generate-btn');
+    const imgRequestStatus = document.getElementById('img-request-status');
+    const imgStatusPill = document.getElementById('img-status');
+
+    const imgPromptsEmpty = document.getElementById('img-prompts-empty');
+    const imgPromptsContent = document.getElementById('img-prompts-content');
+    const imgPromptsList = document.getElementById('img-prompts-list');
+    const imgPromptCount = document.getElementById('img-prompt-count');
+
+    const imgGalleryEmpty = document.getElementById('img-gallery-empty');
+    const imgGalleryContent = document.getElementById('img-gallery-content');
+    const imgGalleryGrid = document.getElementById('img-gallery-grid');
+    const imgRunId = document.getElementById('img-run-id');
+    const imgCount = document.getElementById('img-count');
+    const imgManifestLink = document.getElementById('img-manifest-link');
+    const imgWarningsBlock = document.getElementById('img-warnings-block');
+    const imgWarningsList = document.getElementById('img-warnings-list');
+
+    let imgJobPollHandle = null;
+    let activeImgJobId = null;
+
+    function setImgStatus(message, isError = false) {
+        imgRequestStatus.textContent = message;
+        imgRequestStatus.style.color = isError ? '#ff9b9b' : '';
+    }
+
+    function setImgPill(status, text) {
+        imgStatusPill.dataset.status = status;
+        imgStatusPill.textContent = text || status.charAt(0).toUpperCase() + status.slice(1);
+    }
+
+    function getImgStoryText() {
+        const t = imgText.value.trim();
+        if (t) return t;
+        return form.elements.text.value.trim();
+    }
+
+    function buildImgPayload() {
+        return {
+            story_text: getImgStoryText(),
+            num_scenes: parseInt(imgNumScenes.value, 10),
+            style: imgStyle.value,
+            width: parseInt(imgWidth.value, 10),
+            height: parseInt(imgHeight.value, 10),
+            steps: parseInt(imgSteps.value, 10),
+            guidance_scale: parseFloat(imgGuidance.value),
+            seed: parseInt(imgSeed.value, 10),
+            run_label: imgLabel.value || null,
+            unload_tts_for_vram: imgUnloadTts.checked,
+        };
+    }
+
+    function renderPromptCard(scene) {
+        const card = document.createElement('article');
+        card.className = 'prompt-card';
+
+        const header = document.createElement('div');
+        header.className = 'prompt-card__header';
+        const title = document.createElement('strong');
+        title.textContent = `Scene ${scene.scene_index + 1}`;
+        header.appendChild(title);
+        card.appendChild(header);
+
+        if (scene.text_segment) {
+            const segment = document.createElement('div');
+            segment.className = 'prompt-card__segment';
+            segment.textContent = scene.text_segment;
+            card.appendChild(segment);
+        }
+
+        const positive = document.createElement('div');
+        positive.className = 'prompt-card__positive';
+        positive.textContent = scene.prompt;
+        card.appendChild(positive);
+
+        const negative = document.createElement('div');
+        negative.className = 'prompt-card__negative';
+        negative.textContent = scene.negative_prompt;
+        card.appendChild(negative);
+
+        return card;
+    }
+
+    function renderScenePrompts(scenes) {
+        imgPromptsList.innerHTML = '';
+        if (!scenes || !scenes.length) {
+            imgPromptsEmpty.classList.remove('hidden');
+            imgPromptsContent.classList.add('hidden');
+            imgPromptCount.textContent = 'No prompts extracted.';
+            return;
+        }
+        imgPromptsEmpty.classList.add('hidden');
+        imgPromptsContent.classList.remove('hidden');
+        imgPromptCount.textContent = `${scenes.length} scene(s)`;
+        scenes.forEach((scene) => {
+            imgPromptsList.appendChild(renderPromptCard(scene));
+        });
+    }
+
+    function renderImageCard(img) {
+        const card = document.createElement('article');
+        card.className = 'image-card';
+
+        const imgEl = document.createElement('img');
+        imgEl.src = img.url;
+        imgEl.alt = img.prompt_used.slice(0, 100);
+        imgEl.loading = 'lazy';
+        imgEl.addEventListener('click', () => openLightbox(img.url));
+        card.appendChild(imgEl);
+
+        const info = document.createElement('div');
+        info.className = 'image-card__info';
+
+        const title = document.createElement('strong');
+        title.textContent = img.filename;
+        info.appendChild(title);
+
+        const prompt = document.createElement('div');
+        prompt.className = 'image-card__prompt';
+        prompt.textContent = img.prompt_used;
+        prompt.title = img.prompt_used;
+        info.appendChild(prompt);
+
+        const meta = document.createElement('div');
+        meta.className = 'image-card__meta';
+        meta.textContent = `${img.width}x${img.height} · seed ${img.seed_used}`;
+        info.appendChild(meta);
+
+        const link = document.createElement('a');
+        link.href = img.url;
+        link.target = '_blank';
+        link.rel = 'noreferrer';
+        link.textContent = 'Open full size';
+        link.style.fontSize = '0.85rem';
+        info.appendChild(link);
+
+        card.appendChild(info);
+        return card;
+    }
+
+    function renderImageGallery(result) {
+        imgGalleryGrid.innerHTML = '';
+
+        if (!result || !result.images || !result.images.length) {
+            imgGalleryEmpty.classList.remove('hidden');
+            imgGalleryContent.classList.add('hidden');
+            return;
+        }
+
+        imgGalleryEmpty.classList.add('hidden');
+        imgGalleryContent.classList.remove('hidden');
+        imgRunId.textContent = result.run_id;
+        imgCount.textContent = String(result.images.length);
+
+        if (result.manifest_url) {
+            imgManifestLink.href = result.manifest_url;
+            imgManifestLink.classList.remove('hidden');
+        }
+
+        // Warnings
+        imgWarningsList.innerHTML = '';
+        if (result.warnings && result.warnings.length) {
+            result.warnings.forEach((w) => {
+                const li = document.createElement('li');
+                li.textContent = w;
+                imgWarningsList.appendChild(li);
+            });
+            imgWarningsBlock.classList.remove('hidden');
+        } else {
+            imgWarningsBlock.classList.add('hidden');
+        }
+
+        // Also show the prompts used
+        if (result.scenes) {
+            renderScenePrompts(result.scenes);
+        }
+
+        result.images.forEach((img) => {
+            imgGalleryGrid.appendChild(renderImageCard(img));
+        });
+    }
+
+    function openLightbox(imgUrl) {
+        const overlay = document.createElement('div');
+        overlay.className = 'lightbox-overlay';
+        const img = document.createElement('img');
+        img.src = imgUrl;
+        overlay.appendChild(img);
+        overlay.addEventListener('click', () => overlay.remove());
+        document.addEventListener('keydown', function handler(e) {
+            if (e.key === 'Escape') {
+                overlay.remove();
+                document.removeEventListener('keydown', handler);
+            }
+        });
+        document.body.appendChild(overlay);
+    }
+
+    function stopImgJobPolling() {
+        if (imgJobPollHandle !== null) {
+            window.clearTimeout(imgJobPollHandle);
+            imgJobPollHandle = null;
+        }
+    }
+
+    function setImgInteractive(disabled) {
+        imgPreviewBtn.disabled = disabled;
+        imgGenerateBtn.disabled = disabled;
+    }
+
+    async function pollImgJob(jobIdToPoll) {
+        if (!jobIdToPoll || activeImgJobId !== jobIdToPoll) return;
+
+        try {
+            const response = await fetch(`/api/images/jobs/${jobIdToPoll}`);
+            const job = await parseJsonResponse(response);
+            if (!response.ok) throw new Error(job.detail || 'Failed to load image job status.');
+
+            const completed = Number(job.progress_completed || 0);
+            const total = Number(job.progress_total || 0);
+            setImgPill(job.status, `${formatJobStatus(job.status)} ${total > 0 ? completed + '/' + total : ''}`);
+            setImgStatus(job.message || job.error || '');
+
+            if (job.status === 'completed') {
+                activeImgJobId = null;
+                setImgInteractive(false);
+                setImgPill('completed', 'Completed');
+                if (job.result) renderImageGallery(job.result);
+                setImgStatus(`Done — ${(job.result && job.result.images && job.result.images.length) || 0} image(s) generated.`);
+                stopImgJobPolling();
+                return;
+            }
+
+            if (job.status === 'failed') {
+                activeImgJobId = null;
+                setImgInteractive(false);
+                setImgPill('failed', 'Failed');
+                setImgStatus(job.error || job.message || 'Image generation failed.', true);
+                stopImgJobPolling();
+                return;
+            }
+
+            imgJobPollHandle = window.setTimeout(() => pollImgJob(jobIdToPoll), 1500);
+        } catch (error) {
+            activeImgJobId = null;
+            setImgInteractive(false);
+            setImgPill('failed', 'Error');
+            setImgStatus(error.message, true);
+            stopImgJobPolling();
+        }
+    }
+
+    async function handleImgPreview() {
+        const storyText = getImgStoryText();
+        if (!storyText) {
+            setImgStatus('Enter story text (or fill the TTS text field above).', true);
+            return;
+        }
+
+        imgPreviewBtn.disabled = true;
+        setImgStatus('Extracting scene prompts...');
+        setImgPill('running', 'Extracting...');
+
+        try {
+            const response = await fetch('/api/images/prompts/preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    story_text: storyText,
+                    num_scenes: parseInt(imgNumScenes.value, 10),
+                    style: imgStyle.value,
+                }),
+            });
+            const scenes = await parseJsonResponse(response);
+            if (!response.ok) throw new Error(scenes.detail || 'Failed to extract prompts.');
+
+            renderScenePrompts(Array.isArray(scenes) ? scenes : []);
+            setImgStatus(`Extracted ${Array.isArray(scenes) ? scenes.length : 0} scene prompt(s).`);
+            setImgPill('ready', 'Ready');
+        } catch (error) {
+            setImgStatus(error.message, true);
+            setImgPill('failed', 'Error');
+        } finally {
+            imgPreviewBtn.disabled = false;
+        }
+    }
+
+    async function handleImgGenerate() {
+        const storyText = getImgStoryText();
+        if (!storyText) {
+            setImgStatus('Enter story text (or fill the TTS text field above).', true);
+            return;
+        }
+
+        setImgInteractive(true);
+        stopImgJobPolling();
+        setImgStatus('Queueing image generation...');
+        setImgPill('queued', 'Queued');
+
+        try {
+            const payload = buildImgPayload();
+            const response = await fetch('/api/images/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const job = await parseJsonResponse(response);
+            if (!response.ok) throw new Error(job.detail || 'Failed to create image job.');
+
+            activeImgJobId = job.job_id;
+            setImgStatus(`Job ${job.job_id} queued.`);
+            setImgPill('queued', 'Queued');
+            pollImgJob(job.job_id);
+        } catch (error) {
+            activeImgJobId = null;
+            setImgInteractive(false);
+            setImgStatus(error.message, true);
+            setImgPill('failed', 'Error');
+        }
+    }
+
+    imgPreviewBtn.addEventListener('click', handleImgPreview);
+    imgGenerateBtn.addEventListener('click', handleImgGenerate);
+
     resetJobStatus();
     clearPreview();
     updateGenerationAvailability();

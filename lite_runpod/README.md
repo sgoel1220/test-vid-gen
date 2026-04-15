@@ -10,16 +10,19 @@ The image copies only the runtime files required by the lite flow:
 - `files.py`, `job_store.py`, `models.py`
 - `routes.py`, `run_orchestrator.py`
 - `utils.py`
-- `text/` (text processing package)
+- `audio/` (audio encoding, processing, stitching)
+- `text/` (text chunking and normalization)
 - `lite_ui/`
 - `lite_runpod/config.yaml`
 
 ## Build
 
-Run this from the repo root:
+Run this from the repo root. **Always specify `--platform linux/amd64`** for RunPod compatibility:
 
 ```bash
-docker build -f lite_runpod/Dockerfile -t chatterbox-lite-runpod .
+docker buildx build --platform linux/amd64 \
+  -f lite_runpod/Dockerfile \
+  -t chatterbox-lite-runpod .
 ```
 
 ## Local run
