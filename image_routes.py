@@ -110,7 +110,9 @@ def _execute_image_gen(
     if not scenes:
         raise ValueError("No scene prompts could be extracted from the story text.")
 
-    # 3. Ensure SDXL is loaded
+    # 3. Ensure SDXL is loaded (first run downloads ~6.5GB)
+    if progress_callback:
+        progress_callback(completed=0, total=0, message="Loading SDXL model (first run downloads ~6.5GB)…")
     device = config_manager.get_string("tts_engine.device", "cuda")
     _ensure_image_model(device=device)
 
@@ -122,7 +124,7 @@ def _execute_image_gen(
     images: List[SavedImageArtifact] = []
     for i, scene in enumerate(scenes):
         if progress_callback:
-            progress_callback(completed=i, total=total)
+            progress_callback(completed=i, total=total, message=f"Generating image {i + 1}/{total}…")
 
         seed = request.seed + i if request.seed is not None else None
         logger.info("Generating image %d/%d (seed=%s)…", i + 1, total, seed)
@@ -156,7 +158,7 @@ def _execute_image_gen(
         )
 
     if progress_callback:
-        progress_callback(completed=total, total=total)
+        progress_callback(completed=total, total=total, message="Finalizing…")
 
     # 4. Unload SDXL and reload TTS so the server is ready for speech again
     logger.info("Unloading SDXL pipeline after image generation…")
@@ -188,14 +190,14 @@ def _execute_image_gen(
 def _run_image_job(job_id: str, request: ImageGenRequest) -> None:
     """Background worker for async image gen jobs."""
     try:
-        job_store.update(job_id, status=JobStatus.RUNNING, message="Generating images…")
+        job_store.update(job_id, status=JobStatus.RUNNING, message="Starting image generation…")
 
-        def _progress(completed: int, total: int):
+        def _progress(completed: int, total: int, message: str = ""):
             job_store.update(
                 job_id,
                 progress_completed=completed,
                 progress_total=total,
-                message=f"Generating image {completed + 1}/{total}…" if completed < total else "Finalizing…",
+                message=message or (f"Generating image {completed + 1}/{total}…" if completed < total else "Finalizing…"),
             )
 
         result = _execute_image_gen(request, progress_callback=_progress)
