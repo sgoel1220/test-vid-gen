@@ -48,9 +48,10 @@ def _load_model(model_id: str):
         import torch as _torch
         logger.info("Loading LLM normalisation model: %s", model_id)
         _tokenizer = AutoTokenizer.from_pretrained(model_id)
+        device = "cuda" if _torch.cuda.is_available() else "cpu"
         _model = AutoModelForCausalLM.from_pretrained(
-            model_id, torch_dtype=_torch.float16, device_map="auto"
-        )
+            model_id, torch_dtype=_torch.float16,
+        ).to(device)
         _loaded_model_id = model_id
         logger.info("LLM normalisation model loaded: %s", model_id)
         return _model, _tokenizer
