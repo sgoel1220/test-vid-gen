@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: metadata
+      POSTGRES_USER: metadata
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metadata"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  metadata-svc:
+    build:
+      context: ..
+      dockerfile: metadata-server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://metadata:${POSTGRES_PASSWORD:-changeme}@postgres:5432/metadata
+    ports:
+      - "${LISTEN_PORT:-8080}:8080"
+    volumes:
+      - audio_data:/data/audio
+
+volumes:
+  pg_data:
+  audio_data:
