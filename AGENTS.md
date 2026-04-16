@@ -175,13 +175,16 @@ When implementing beads (work items tracked in the `.beads/` system), **ALWAYS**
    - Complete the merge before proceeding
 9. **Mark done** - Close the bead with `mcp__beads__close` ONLY after successful merge
 10. **Push** - Push changes to remote with `git push origin main`
-11. **Delete the worktree branch** - ONLY after `git push` succeeds:
+11. **Clean up the worktree** - ONLY after `git push` succeeds. Run ALL commands from the **repo root** (not inside the worktree):
     ```bash
-    git branch -d worktree-<name>          # local branch
-    git worktree prune                      # clean any stale worktree entries
+    git worktree remove .claude/worktrees/<name>   # remove worktree directory first
+    git branch -d worktree-<name>                   # then delete local branch
+    git worktree prune                              # clean any stale worktree entries
+    git status                                      # verify clean state
     ```
     - Use `-d` (safe delete), not `-D`, so git refuses if the branch isn't merged
     - If the branch has an upstream on origin, also delete it: `git push origin --delete worktree-<name>`
+    - **IMPORTANT**: You cannot delete a branch while your shell is inside that worktree — always `cd` to repo root first or use `git -C /path/to/repo`
 
 **CRITICAL RULES:**
 - NEVER pick a bead with status "in_progress" - another agent is working on it
