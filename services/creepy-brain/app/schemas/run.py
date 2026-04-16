@@ -8,7 +8,22 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import RunStatus
+from app.models.enums import ChunkStatus, RunStatus
+
+
+class RunChunkResponse(BaseModel):
+    """Serialized chunk within a run."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    run_id: uuid.UUID
+    chunk_index: int
+    chunk_text: str
+    audio_blob_id: Optional[uuid.UUID] = None
+    duration_sec: Optional[float] = None
+    status: ChunkStatus
+    created_at: datetime
 
 
 class RunResponse(BaseModel):
@@ -26,6 +41,7 @@ class RunResponse(BaseModel):
     total_duration_sec: Optional[float] = None
     completed_at: Optional[datetime] = None
     created_at: datetime
+    chunks: list[RunChunkResponse] = Field(default_factory=list)
 
 
 class CreateRunRequest(BaseModel):
