@@ -17,9 +17,13 @@ RUN pip install --no-cache-dir -e .
 COPY app/ ./app/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
+COPY entrypoint.sh ./
+
+RUN chmod +x entrypoint.sh
 
 # Expose the application port
 EXPOSE 8006
 
-# Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8006"]
+# RUN_MIGRATIONS=true (default): run alembic upgrade head before uvicorn.
+# Set RUN_MIGRATIONS=false to skip (e.g. migrations run as a separate job in prod).
+ENTRYPOINT ["./entrypoint.sh"]
