@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  brain:
+    build: .
+    container_name: creepy-brain
+    ports:
+      - "8006:8006"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=creepy_brain
+      - POSTGRES_PASSWORD=dev_password
+      - POSTGRES_DB=creepy_brain
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: creepy-brain-postgres
+    environment:
+      - POSTGRES_USER=creepy_brain
+      - POSTGRES_PASSWORD=dev_password
+      - POSTGRES_DB=creepy_brain
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # Avoid conflict with default postgres port
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U creepy_brain"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
