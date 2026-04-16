@@ -49,6 +49,11 @@ def create_app() -> FastAPI:
     # Add request context middleware
     app.add_middleware(RequestContextMiddleware)
 
+    # Register routers
+    from app.routes.stories import router as stories_router
+
+    app.include_router(stories_router)
+
     @app.get("/health")
     async def health_check() -> HealthResponse:
         """Health check endpoint"""

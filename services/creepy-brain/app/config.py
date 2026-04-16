@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     postgres_db: str = "creepy_brain"
     db_echo: bool = False
 
+    # LLM settings
+    anthropic_api_key: str = ""
+    llm_model: str = "claude-opus-4-6"
+    max_concurrent_generations: int = 2
+
     @property
     def database_url(self) -> str:
         """Construct async postgres connection URL"""
