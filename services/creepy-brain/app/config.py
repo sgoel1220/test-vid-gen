@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     postgres_db: str = "creepy_brain"
     db_echo: bool = False
 
+    # Hatchet workflow engine settings
+    hatchet_client_token: str = ""
+
     # LLM settings
     anthropic_api_key: str = ""
     llm_model: str = "claude-opus-4-6"

@@ -17,6 +17,7 @@ dependencies = [
     "prometheus-fastapi-instrumentator>=6.0.0",
     "anthropic>=0.25.0",
     "python-multipart>=0.0.9",
+    "hatchet-sdk>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -48,5 +49,5 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["prometheus_client.*", "prometheus_fastapi_instrumentator.*"]
+module = ["prometheus_client.*", "prometheus_fastapi_instrumentator.*", "hatchet_sdk.*"]
 ignore_missing_imports = true

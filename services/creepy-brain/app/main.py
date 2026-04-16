@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Interim task registry — replaced by Hatchet in bead Chatterbox-TTS-Server-104
     app.state.background_tasks: set[asyncio.Task[None]] = set()  # type: ignore[assignment]
 
-    # TODO: Initialize Hatchet client
+    # Hatchet worker runs as a separate process (see app/workflows/worker.py)
 
     yield
 
