@@ -4,7 +4,10 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
 import structlog
+
+import app.metrics as _metrics  # noqa: F401 — registers all metric objects
 
 from app.config import settings
 from app.db import close_db, init_db
@@ -48,6 +51,9 @@ def create_app() -> FastAPI:
 
     # Add request context middleware
     app.add_middleware(RequestContextMiddleware)
+
+    # Auto-instrument HTTP metrics and expose /metrics endpoint
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
     @app.get("/health")
     async def health_check() -> HealthResponse:
