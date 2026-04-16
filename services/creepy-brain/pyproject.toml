@@ -13,6 +13,8 @@ dependencies = [
     "pydantic-settings>=2.1.0",
     "httpx>=0.26.0",
     "structlog>=24.1.0",
+    "prometheus-client>=0.20.0",
+    "prometheus-fastapi-instrumentator>=6.0.0",
 ]
 
 [project.optional-dependencies]
@@ -42,3 +44,7 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["prometheus_client.*", "prometheus_fastapi_instrumentator.*"]
+ignore_missing_imports = true
