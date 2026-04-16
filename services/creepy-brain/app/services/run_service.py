@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -12,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.enums import RunStatus
-from app.models.run import Run, RunChunk
+from app.models.run import Run
 from app.schemas.run import CreateRunRequest, PatchRunRequest
 
 
