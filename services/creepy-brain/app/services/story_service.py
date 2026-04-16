@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Any, Optional, Sequence
 
 from sqlalchemy import select
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.enums import StoryStatus
+from app.models.schemas import StoryActOutline, StoryOutlineSchema
 from app.models.story import Story, StoryAct
 
 
@@ -58,34 +60,30 @@ class StoryService:
         outline_json: dict[str, Any],
         title: Optional[str] = None,
     ) -> None:
-        """Persist architect output (title not stored directly — stored in acts)."""
+        """Persist architect output: title and a simplified outline JSONB."""
         story = await self._get_or_raise(story_id)
         if title:
             story.title = title
-        # Store outline in the story's outline JSONB field
-        from app.models.schemas import StoryOutlineSchema
 
-        # Build a simplified outline summary for the JSONB field
-        acts_summary = [
-            {
-                "act_number": act.get("act_number", i + 1),
-                "title": act.get("title", ""),
-                "summary": act.get("act_hook", ""),
-                "target_word_count": act.get("target_word_count", 0),
-                "key_events": [b.get("description", "") for b in act.get("beats", [])],
-            }
+        acts_summary: list[StoryActOutline] = [
+            StoryActOutline(
+                act_number=act.get("act_number", i + 1),
+                title=act.get("title", ""),
+                summary=act.get("act_hook", ""),
+                target_word_count=act.get("target_word_count", 0),
+                key_events=[b.get("description", "") for b in act.get("beats", [])],
+            )
             for i, act in enumerate(outline_json.get("acts", []))
         ]
-        outline_schema = StoryOutlineSchema(
+        story.outline = StoryOutlineSchema(
             title=title or "",
             total_acts=len(acts_summary),
-            total_target_words=sum(a["target_word_count"] for a in acts_summary),
-            acts=acts_summary,  # type: ignore[arg-type]
+            total_target_words=sum(a.target_word_count for a in acts_summary),
+            acts=acts_summary,
             themes=[],
             setting=bible_json.get("setting", {}).get("location", ""),
             tone=bible_json.get("horror_rules", {}).get("horror_subgenre", ""),
         )
-        story.outline = outline_schema
         await self._session.commit()
 
     async def upsert_act(
@@ -124,8 +122,6 @@ class StoryService:
         self, story_id: uuid.UUID, full_text: str, word_count: int
     ) -> None:
         """Mark story as completed with final text."""
-        from datetime import datetime
-
         story = await self._get_or_raise(story_id)
         story.status = StoryStatus.COMPLETED
         story.full_text = full_text
@@ -133,7 +129,7 @@ class StoryService:
         story.completed_at = datetime.utcnow()
         await self._session.commit()
 
-    async def fail_story(self, story_id: uuid.UUID, error: str) -> None:
+    async def fail_story(self, story_id: uuid.UUID) -> None:
         """Mark story as failed."""
         story = await self._get_or_raise(story_id)
         story.status = StoryStatus.FAILED

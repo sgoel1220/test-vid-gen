@@ -6,7 +6,6 @@ Runs as a background asyncio task. Persists to Postgres via SQLAlchemy.
 from __future__ import annotations
 
 import logging
-import traceback
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -172,8 +171,7 @@ async def run_pipeline(
 
     except Exception:
         log.exception("pipeline failed for story %s", story_id)
-        error_summary = traceback.format_exc()[-500:]
         try:
-            await svc.fail_story(story_id, error=error_summary)
+            await svc.fail_story(story_id)
         except Exception:
             log.exception("failed to mark story %s as failed", story_id)
