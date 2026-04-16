@@ -1,5 +1,6 @@
 """FastAPI application factory for Creepy Brain service"""
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -26,6 +27,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Initialize database connection pool
     await init_db()
     logger.info("database_initialized", database_url=settings.database_url.split('@')[1])
+
+    # Interim task registry — replaced by Hatchet in bead Chatterbox-TTS-Server-104
+    app.state.background_tasks: set[asyncio.Task[None]] = set()  # type: ignore[assignment]
 
     # TODO: Initialize Hatchet client
 

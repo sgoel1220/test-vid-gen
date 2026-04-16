@@ -6,7 +6,8 @@ import asyncio
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+import structlog
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +16,8 @@ from app.db import get_session
 from app.models.enums import StoryStatus
 from app.models.story import Story
 from app.services.story_service import StoryService
+
+log = structlog.get_logger()
 
 router = APIRouter(prefix="/api/stories", tags=["stories"])
 
@@ -96,6 +99,7 @@ def _story_to_response(story: Story) -> StoryResponse:
 
 @router.post("/generate", response_model=GenerateStoryResponse, status_code=202)
 async def generate_story(
+    request: Request,
     body: GenerateStoryRequest,
     session: AsyncSession = Depends(get_session),
 ) -> GenerateStoryResponse:
@@ -113,11 +117,27 @@ async def generate_story(
 
         if async_session_maker is None:
             return
-        async with async_session_maker() as bg_session:
-            async with _get_semaphore():
-                await orchestrator.run_pipeline(story.id, body.premise, bg_session)
+        try:
+            async with async_session_maker() as bg_session:
+                async with _get_semaphore():
+                    await orchestrator.run_pipeline(story.id, body.premise, bg_session)
+        except Exception:
+            log.exception("pipeline_failed", story_id=str(story.id))
+            # Best-effort: mark story as failed in a fresh session
+            if async_session_maker is not None:
+                try:
+                    async with async_session_maker() as fail_session:
+                        await StoryService(fail_session).fail_story(story.id)
+                except Exception:
+                    log.exception("pipeline_fail_status_update_failed", story_id=str(story.id))
 
-    asyncio.create_task(_run())
+    # Retain a reference so the task is not garbage-collected mid-flight.
+    # Interim solution — will be replaced by Hatchet (bead Chatterbox-TTS-Server-104).
+    bg_tasks: set[asyncio.Task[None]] = request.app.state.background_tasks
+    task: asyncio.Task[None] = asyncio.create_task(_run())
+    bg_tasks.add(task)
+    task.add_done_callback(bg_tasks.discard)
+
     return GenerateStoryResponse(story_id=story.id, status=story.status)
 
 
