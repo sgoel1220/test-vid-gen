@@ -7,17 +7,68 @@ This is the canonical repo instruction file. `CLAUDE.md` is a symlink to this fi
 - Keep responses short by default.
 - Expand only when explicitly asked.
 
+## Bead Workflow
+
+When implementing beads (work items tracked in the `.beads/` system), **ALWAYS** follow this workflow:
+
+1. **Pick a bead** - Choose a ready bead (no blockers)
+2. **Implement** - Complete all required changes
+3. **Test** - Thoroughly verify everything works
+4. **Commit** - Create a proper git commit with descriptive message
+5. **Merge** - Exit worktree and merge branch back to main
+6. **Mark done** - Close the bead with `mcp__beads__close`
+7. **Push** - Push changes to remote with `git push`
+
+**CRITICAL RULES:**
+- NEVER mark a bead as done before committing, merging, and pushing
+- Work is NOT complete until `git push` succeeds
+- Test thoroughly before committing
+- Only close the bead after all changes are pushed to remote
+
 ## Current Product Shape
 
-This repo is the **lite self-hosted Chatterbox TTS server** — a FastAPI backend with an OpenAI-compatible API and a minimal web UI (`lite_ui/`). It is designed to run on RunPod (GPU) via the `lite_runpod/` Docker setup.
+This repo is a **monorepo** containing multiple services for the Creepy Pasta audio production pipeline:
 
-The active runtime loop:
-- Start `lite_clone_server.py` on a GPU machine
-- Generate audio from plain text via the UI or API
-- Voice cloning via reference audio upload
-- Supports three model variants: original, turbo, and multilingual
+- **tts-server** — FastAPI TTS backend with OpenAI-compatible API and web UI
+- **metadata-server** — Run metadata storage and audio blob service
+- **story-engine** — LLM-powered story generation pipeline
 
-## Architecture
+## Project Structure
+
+```
+Chatterbox-TTS-Server/
+├── services/
+│   ├── tts-server/           # Main TTS service
+│   │   ├── app.py            # FastAPI app factory
+│   │   ├── lite_clone_server.py  # Entrypoint
+│   │   ├── routes.py         # Core API handlers
+│   │   ├── engine.py         # Model loading & synthesis
+│   │   ├── audio/            # Audio encoding, processing
+│   │   ├── text/             # Text chunking, normalization
+│   │   ├── image/            # Image generation
+│   │   ├── persistence/      # SQLite outbox + httpx client
+│   │   ├── lite_ui/          # Web frontend
+│   │   ├── Dockerfile
+│   │   └── requirements.txt
+│   │
+│   ├── metadata-server/      # Run metadata storage
+│   │   ├── app/
+│   │   ├── alembic/
+│   │   ├── Dockerfile
+│   │   └── pyproject.toml
+│   │
+│   └── story-engine/         # LLM story generation
+│       ├── app/
+│       ├── Dockerfile
+│       └── pyproject.toml
+│
+├── creepy_pasta_protocol/    # Shared Pydantic models
+├── AGENTS.md                 # This file
+├── CLAUDE.md -> AGENTS.md
+└── README.md
+```
+
+## TTS Server Architecture
 
 | File / Dir | Role |
 |------------|------|
@@ -36,14 +87,9 @@ The active runtime loop:
 | `utils.py` | Backward-compat shim — re-exports from `audio/`, `text/`, `files.py`, `models.py` |
 | `audio/` | Audio encoding (`encoding.py`), processing (`processing.py`), stitching (`stitching.py`) |
 | `text/` | Text chunking (`chunking.py`) and LLM-based normalization (`normalization.py`) |
-| `lite_ui/` | Minimal browser-facing frontend (HTML/CSS/JS) |
-| `lite_runpod/` | Dockerfile, requirements, entrypoint, config for RunPod deployment |
-| `config.yaml` | Runtime configuration source of truth |
-| `voices/` | Predefined voice WAV assets (27 built-in voices) |
-| `reference_audio/` | Voice-cloning reference inputs |
 | `persistence/` | SQLite outbox + typed httpx client for the metadata server |
 
-## API Endpoints
+## API Endpoints (TTS Server)
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -62,18 +108,18 @@ The active runtime loop:
 ## Commands
 
 ```bash
-# Install dependencies (also install creepy_pasta_protocol from sibling directory)
-python3 -m pip install -r lite_runpod/requirements.txt
+# Install dependencies (from repo root)
+cd services/tts-server && python3 -m pip install -r requirements.txt
 python3 -m pip install -e ./creepy_pasta_protocol
 
-# Start the lite server
-python3 lite_clone_server.py
+# Start the TTS server
+cd services/tts-server && python3 lite_clone_server.py
 
-# Syntax-check all modules
-python3 -m py_compile app.py config.py cpu_runtime.py engine.py enums.py files.py job_store.py lite_clone_server.py models.py routes.py routes_history.py run_orchestrator.py utils.py && echo OK
+# Syntax-check TTS server modules
+cd services/tts-server && python3 -m py_compile app.py config.py cpu_runtime.py engine.py enums.py files.py job_store.py lite_clone_server.py models.py routes.py routes_history.py run_orchestrator.py utils.py && echo OK
 
-# Type-check persistence layer and protocol (run from repo root)
-python3 -m mypy persistence creepy_pasta_protocol/src
+# Type-check persistence layer and protocol (from repo root)
+python3 -m mypy services/tts-server/persistence creepy_pasta_protocol/src
 ```
 
 ## GPU Rules
@@ -85,17 +131,59 @@ python3 -m mypy persistence creepy_pasta_protocol/src
 
 Build and push from the **repo root** (`Chatterbox-TTS-Server/`). **Always specify `--platform linux/amd64`** — RunPod runs on amd64 and a Mac arm64 build will fail with "no matching manifest" at pod start.
 
+### TTS Server
 ```bash
-# Run from Chatterbox-TTS-Server/ (repo root)
 docker buildx build --platform linux/amd64 \
-  -f lite_runpod/Dockerfile \
-  -t shubh67678/chatterbox-lite-runpod:latest \
+  -f services/tts-server/Dockerfile \
   -t shubh67678/chatterbox-tts-server:latest \
   --push .
 ```
 
+### Metadata Server
+```bash
+docker buildx build --platform linux/amd64 \
+  -f services/metadata-server/Dockerfile \
+  -t shubh67678/metadata-server:latest \
+  --push .
+```
+
+### Story Engine
+```bash
+docker buildx build --platform linux/amd64 \
+  -f services/story-engine/Dockerfile \
+  -t shubh67678/story-engine:latest \
+  --push .
+```
+
 Docker Hub images:
-- `shubh67678/chatterbox-lite-runpod:latest` — primary
-- `shubh67678/chatterbox-tts-server:latest` — alias (same digest)
+- `shubh67678/chatterbox-tts-server:latest` — TTS server
+- `shubh67678/metadata-server:latest` — Metadata server
+- `shubh67678/story-engine:latest` — Story engine
 
 RunPod template: `chatterbox-lite` · port 8005 · Nvidia GPU · 25 GB container disk · ≥20 GB volume disk (to persist model cache across restarts).
+
+## Landing the Plane (Session Completion)
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **PUSH TO REMOTE** - This is MANDATORY:
+   ```bash
+   git pull --rebase
+   bd sync
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds
