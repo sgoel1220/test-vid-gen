@@ -48,7 +48,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip && \
     python -m pip install --no-cache-dir -r /tmp/requirements.txt && \
     python -m pip install --no-cache-dir --no-deps git+https://github.com/devnen/chatterbox-v2.git@cc0357396d9c73fc1e6c544ee40bb596020edd09 s3tokenizer==0.3.0 onnx==1.16.0 && \
     python -m pip install --no-cache-dir "protobuf>=4.25.0" && \
-    python -m pip install --no-cache-dir git+https://github.com/huggingface/diffusers
+    python -m pip install --no-cache-dir git+https://github.com/huggingface/diffusers@29b91098f68847f4e50d099735532c7d5735b17e
 
 COPY lite_runpod/config.yaml /app/config.yaml
 COPY app.py config.py cpu_runtime.py engine.py enums.py files.py image_routes.py job_store.py lite_clone_server.py models.py routes.py routes_history.py run_orchestrator.py utils.py /app/
