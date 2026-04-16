@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
-from app.models.enums import RunStatus
+from app.models.enums import ChunkStatus, RunStatus
 
 
 class Run(BaseModel):
@@ -65,10 +65,10 @@ class RunChunk(BaseModel):
     chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
     audio_blob_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     duration_sec: Mapped[Optional[float]] = mapped_column(nullable=True)
-    status: Mapped[RunStatus] = mapped_column(
-        SQLEnum(RunStatus, native_enum=False, length=20),
+    status: Mapped[ChunkStatus] = mapped_column(
+        SQLEnum(ChunkStatus, native_enum=False, length=20),
         nullable=False,
-        default=RunStatus.PENDING,
+        default=ChunkStatus.PENDING,
     )
 
     # Relationships
