@@ -23,8 +23,7 @@ services:
         condition: service_started
     restart: unless-stopped
 
-  # Idempotent bootstrap: creates hatchet user+database on every startup.
-  # Handles both fresh volumes and existing postgres_data volumes safely.
+  # hatchet-setup: create hatchet user+db on every start (idempotent)
   hatchet-setup:
     image: postgres:16-alpine
     command: >
@@ -37,33 +36,29 @@ services:
         condition: service_healthy
     restart: on-failure
 
-  hatchet-migration:
-    image: ghcr.io/hatchet-dev/hatchet/hatchet-engine:latest
-    command: /hatchet-admin migration run
+  # hatchet-lite: all-in-one Hatchet for dev (no separate RabbitMQ/migration needed)
+  # Dashboard UI: http://localhost:8888  |  gRPC: localhost:7070
+  hatchet-engine:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:latest
     environment:
       DATABASE_URL: "postgresql://hatchet:hatchet@postgres:5432/hatchet"
+      SERVER_AUTH_COOKIE_SECRETS: "${HATCHET_COOKIE_SECRETS:-devtokensecret16 devtokensecret32}"
+      SERVER_AUTH_COOKIE_DOMAIN: localhost
+      SERVER_GRPC_BROADCAST_ADDRESS: "hatchet-engine:7070"
+      SERVER_URL: "http://localhost:8888"
+    ports:
+      - "127.0.0.1:8888:8888"  # Dashboard UI
+      - "127.0.0.1:7070:7070"  # gRPC for workers
+    volumes:
+      - hatchet_data:/hatchet/config
     depends_on:
       hatchet-setup:
         condition: service_completed_successfully
-    restart: on-failure
-
-  hatchet-engine:
-    image: ghcr.io/hatchet-dev/hatchet/hatchet-engine:latest
-    environment:
-      DATABASE_URL: "postgresql://hatchet:hatchet@postgres:5432/hatchet"
-      # Auth secret — override with HATCHET_COOKIE_SECRETS in .env for production
-      SERVER_AUTH_COOKIE_SECRETS: "${HATCHET_COOKIE_SECRETS:-devtokensecret16}"
-      SERVER_AUTH_COOKIE_DOMAIN: localhost
-      # Use service name so brain container can reach gRPC inside Docker network
-      SERVER_GRPC_BROADCAST_ADDRESS: "hatchet-engine:7070"
-      SERVER_URL: "http://localhost:8080"
-    ports:
-      # Bound to localhost only — do not expose to public interfaces in dev
-      - "127.0.0.1:8080:8080"  # Dashboard UI
-      - "127.0.0.1:7070:7070"  # gRPC for workers
-    depends_on:
-      hatchet-migration:
-        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/api/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
     restart: unless-stopped
 
   postgres:
@@ -88,3 +83,4 @@ services:
 
 volumes:
   postgres_data:
+  hatchet_data:
