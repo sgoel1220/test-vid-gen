@@ -29,10 +29,9 @@ This service uses Hatchet for workflow orchestration and provides a unified API 
 ### Running with Docker
 
 ```bash
-# 1. Create .env from example and fill in your LLM provider credentials
+# 1. Create .env from example and fill in ANTHROPIC_API_KEY
 cp .env.example .env
-# Anthropic: set LLM_PROVIDER=anthropic, ANTHROPIC_API_KEY, and LLM_MODEL=claude-opus-4-6
-# OpenRouter: set LLM_PROVIDER=openrouter, OPENROUTER_API_KEY, and LLM_MODEL=anthropic/claude-opus-4-6
+# Edit .env: set ANTHROPIC_API_KEY=sk-ant-...
 
 # 2. Start the service and postgres
 docker-compose up
@@ -40,9 +39,8 @@ docker-compose up
 # The service will be available at http://localhost:8006
 ```
 
-> Story generation requires credentials for the configured `LLM_PROVIDER` in `.env`.
-> Without them the generate endpoint returns 202 but background generation will fail
-> with status `failed`.
+> Story generation requires `ANTHROPIC_API_KEY` in `.env`. Without it the generate
+> endpoint returns 202 but background generation will fail with status `failed`.
 
 ### Local Development
 
@@ -52,7 +50,7 @@ pip install -e .
 
 # Copy environment file and set your API key
 cp .env.example .env
-# Edit .env: set LLM_PROVIDER plus ANTHROPIC_API_KEY or OPENROUTER_API_KEY
+# Edit .env: set ANTHROPIC_API_KEY=sk-ant-...
 # .env.example uses POSTGRES_PORT=5433 to match the docker-compose host mapping
 
 # Start postgres via docker-compose (listens on host port 5433)
@@ -98,10 +96,7 @@ Key settings:
 - `POSTGRES_DB` - Database name
 - `POSTGRES_USER` - Database user
 - `POSTGRES_PASSWORD` - Database password
-- `LLM_PROVIDER` - `anthropic` or `openrouter`
-- `ANTHROPIC_API_KEY` - Anthropic API key for story generation
-- `OPENROUTER_API_KEY` - OpenRouter API key for story generation
-- `LLM_MODEL` - Provider model name, e.g. `claude-opus-4-6` or `anthropic/claude-opus-4-6`
+- `ANTHROPIC_API_KEY` - API key for story generation
 - `JSON_LOGS` - `true` for JSON logs (production), `false` for pretty logs (dev)
 
 ## Development Roadmap
