@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 import structlog
 
 from app.config import settings
+from app.logging import configure_logging
+from app.middleware import RequestContextMiddleware
 
 logger = structlog.get_logger()
 
@@ -29,6 +31,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application"""
 
+    # Configure structured logging
+    configure_logging(json_logs=settings.json_logs)
+
     app = FastAPI(
         title="Creepy Brain",
         description="Content Pipeline Workflow Orchestration Service",
@@ -36,8 +41,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Add request context middleware
+    app.add_middleware(RequestContextMiddleware)
+
     @app.get("/health")
-    async def health_check():
+    async def health_check() -> JSONResponse:
         """Health check endpoint"""
         return JSONResponse(
             content={"status": "ok"},
@@ -45,7 +53,7 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/")
-    async def root():
+    async def root() -> dict[str, str]:
         """Root endpoint"""
         return {
             "service": "creepy-brain",

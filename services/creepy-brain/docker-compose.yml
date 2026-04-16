@@ -12,6 +12,7 @@ services:
       - POSTGRES_USER=creepy_brain
       - POSTGRES_PASSWORD=dev_password
       - POSTGRES_DB=creepy_brain
+      # - JSON_LOGS=true  # Set to false for pretty dev logs, true for production JSON
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,0 +1,42 @@
+"""Structured logging configuration using structlog"""
+
+import logging
+import sys
+
+import structlog
+
+
+def configure_logging(json_logs: bool = True) -> None:
+    """Configure structlog for the application
+
+    Args:
+        json_logs: If True, output JSON logs. If False, use pretty console output for dev.
+    """
+
+    processors = [
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+    ]
+
+    if json_logs:
+        processors.append(structlog.processors.JSONRenderer())
+    else:
+        # Pretty print for development
+        processors.append(structlog.dev.ConsoleRenderer())
+
+    structlog.configure(
+        processors=processors,
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+        context_class=dict,
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+    # Also configure standard library logging
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stdout,
+        level=logging.INFO,
+    )

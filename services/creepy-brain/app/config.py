@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     port: int = 8006
     reload: bool = False
 
+    # Logging settings
+    json_logs: bool = True  # False for pretty dev logs, True for production JSON
+
     # Database settings
     postgres_host: str = "postgres"
     postgres_port: int = 5432
