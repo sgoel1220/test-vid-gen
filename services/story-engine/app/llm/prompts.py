@@ -12,12 +12,50 @@ Voice rules for the narrator:
 - He is recalling events or reading from a diary/journal
 - No dialogue from other characters — only the narrator's voice
 - No multi-character scenes
-- Rich sensory and visual descriptions (listeners must imagine the scene)
-- Natural sentence rhythm suited for spoken delivery / text-to-speech
-- Vary sentence length: mix short punchy sentences with longer flowing ones
 - NO markdown, headers, asterisks, or any formatting in the output
 - NO chapter titles or act labels in the prose itself
-- Write as continuous flowing prose"""
+- Write as continuous flowing prose
+
+AUDIO NARRATION OPTIMIZATION (for 1-hour sleep listening):
+
+Pacing & Rhythm:
+- Keep paragraphs SHORT (2-4 sentences max) — these are breath units for narration
+- Vary sentence length: short punchy lines create pauses, longer ones create flow
+- Insert natural pause points — the narrator reflecting, pausing, noticing
+- Add "routine nights" and calm patrol sections between horror peaks
+- Stretch escalation gradually — let unease build slowly across multiple nights
+
+Sensory Focus (audio over visual):
+- Prioritize SOUND-based descriptions: hums, creaks, footsteps, silence, echoes
+- Describe how silence FEELS, not just that it exists
+- Use phrases like "the sound of..." "I heard..." "the quiet was..."
+- Visual descriptions should evoke imagination, not be too precise
+
+Cognitive Load:
+- Introduce ONE concept at a time, let it sit, reinforce later, THEN explain
+- Avoid stacking multiple revelations or lore dumps together
+- Space out information — listeners drift in and out
+- Repeat key details naturally (location names, motifs, unsettling observations)
+
+Repetition & Anchors:
+- Create 2-3 recurring phrases/motifs that appear throughout (e.g., "the building was never truly empty")
+- Describe patrol routes, routines, and familiar details multiple times with small variations
+- Repetition is GOOD for sleep content — it creates hypnotic rhythm and helps drifting listeners
+
+Emotional Curve:
+- Build in WAVES, not continuous escalation — calm sections between peaks
+- Include reflective moments where narrator processes what happened
+- Horror peaks should be followed by quiet recovery before next escalation
+
+Voice Tone:
+- More OBSERVATIONAL than explanatory — "that's when I noticed..." not "I realized that..."
+- Slightly circular, meditative quality — the narrator is processing trauma
+- Grounded, methodical delivery — this is a man trying to make sense of the impossible
+
+Endings:
+- Prefer LINGERING UNEASE over sharp shocks
+- Let ambiguity stretch — describe slowly, hint at meaning
+- Final images should be unsettling but not jarring — listener should drift off uneasy, not jolted awake"""
 
 # ---------------------------------------------------------------------------
 # Step 1: ARCHITECT
@@ -43,6 +81,14 @@ Requirements:
 - Each act must end with a hook or cliffhanger (except the final act which ends with a coda)
 - Tension curve must generally escalate: Act 1 < Act 2 < Act 3 < Act 4 >= Act 5
 - The horror must have clear internal rules/logic
+
+Audio narration structure requirements:
+- Plan for SLOW escalation — include "routine nights" in early acts before scares hit
+- Each act should have calm/reflective beats between horror moments (emotional breathing room)
+- Include 2-3 RECURRING MOTIFS in the bible (sounds, phrases, observations) that repeat throughout
+- Space out lore/exposition across multiple acts — avoid info-dumps
+- Final act should build to lingering unease, not a sharp shock ending
+- Prioritize atmospheric SOUND descriptions in setting (humming, creaking, silence quality)
 
 Output a JSON object with two top-level keys: "bible" and "outline".
 
@@ -296,15 +342,24 @@ Write the corrected prose for this act now."""
 # ---------------------------------------------------------------------------
 
 FULL_REVIEW_SYSTEM = """\
-You are a senior fiction editor reviewing a complete ~9,000-word horror narration.
+You are a senior fiction editor reviewing a complete ~9,000-word horror narration \
+optimized for 1-hour audio listening (including sleep/ambient listening).
 
 Score each dimension 1-10:
 - subplot_completion: Are all subplot threads resolved?
 - foreshadowing_payoff: Does everything planted get used?
 - character_consistency: Is the narrator voice steady throughout?
-- pacing: Does the tension curve match the intended arc?
-- ending_impact: Does the ending land emotionally?
-- overall_score: Weighted average (character_consistency and ending_impact weigh 2x)
+- pacing: Does the tension curve match the intended arc? Are there calm sections between peaks?
+- ending_impact: Does the ending create lingering unease (not jarring shock)?
+- audio_rhythm: Are paragraphs short enough for narration? Is there good sentence variety?
+- overall_score: Weighted average (character_consistency, pacing, and audio_rhythm weigh 2x)
+
+Audio narration checklist:
+- Paragraphs should be 2-4 sentences (breath units)
+- Sound-based sensory details should dominate over purely visual
+- Recurring motifs/phrases should appear throughout
+- Information should be spaced out, not dumped
+- Calm/reflective sections should exist between horror peaks
 
 If overall_score < 8, provide specific fix instructions for which acts need changes \
 and what to change.
@@ -317,6 +372,7 @@ Output a JSON object with this exact structure:
     "character_consistency": 9.0,
     "pacing": 8.0,
     "ending_impact": 8.5,
+    "audio_rhythm": 8.0,
     "overall_score": 8.2
   }},
   "fix_instructions": [

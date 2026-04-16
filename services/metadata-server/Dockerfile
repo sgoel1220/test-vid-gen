@@ -12,12 +12,12 @@ COPY creepy_pasta_protocol /srv/creepy_pasta_protocol
 RUN pip install --no-cache-dir /srv/creepy_pasta_protocol
 
 # Install app dependencies.
-COPY metadata-server/pyproject.toml /srv/metadata-server/pyproject.toml
+COPY services/metadata-server/pyproject.toml /srv/metadata-server/pyproject.toml
 WORKDIR /srv/metadata-server
 RUN pip install --no-cache-dir -e ".[dev]" || pip install --no-cache-dir -e .
 
 # Copy app source.
-COPY metadata-server/ /srv/metadata-server/
+COPY services/metadata-server/ /srv/metadata-server/
 
 EXPOSE 8080
 

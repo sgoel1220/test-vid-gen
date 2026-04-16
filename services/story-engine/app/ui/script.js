@@ -101,6 +101,8 @@ async function loadStories() {
   }
 }
 
+let currentStory = null;
+
 async function showStory(storyId) {
   const section = document.getElementById("detail-section");
   const detailEl = document.getElementById("story-detail");
@@ -115,6 +117,7 @@ async function showStory(storyId) {
       return;
     }
     const s = await resp.json();
+    currentStory = s;
 
     let actsHtml = "";
     if (s.acts && s.acts.length) {
@@ -127,11 +130,15 @@ async function showStory(storyId) {
       `).join("");
     }
 
+    const copyBtn = s.acts && s.acts.length ? `<button onclick="copyStory()" class="copy-btn">Copy Full Story</button>` : "";
+
     detailEl.innerHTML = `
-      <div style="margin-bottom:1rem">
+      <div style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
         ${statusBadge(s.status)}
         ${s.review_score ? `<span class="score">${s.review_score.toFixed(1)}</span>` : ""}
         <span class="meta"> | ${s.total_word_count ?? 0} words | ${s.review_loops} review loops</span>
+        ${copyBtn}
+        <span id="copy-status" style="color:#4a9;font-size:0.9rem"></span>
       </div>
       <div class="form-group">
         <label>Premise</label>
@@ -142,6 +149,27 @@ async function showStory(storyId) {
     `;
   } catch (e) {
     detailEl.textContent = `Error: ${e.message}`;
+  }
+}
+
+async function copyStory() {
+  if (!currentStory || !currentStory.acts) return;
+
+  const title = currentStory.bible_json?.title || "Untitled";
+  const acts = currentStory.acts
+    .sort((a, b) => a.act_number - b.act_number)
+    .map(a => `--- Act ${a.act_number}: ${a.title} ---\n\n${a.text}`)
+    .join("\n\n\n");
+
+  const fullText = `# ${title}\n\n${acts}`;
+
+  try {
+    await navigator.clipboard.writeText(fullText);
+    const statusEl = document.getElementById("copy-status");
+    statusEl.textContent = "Copied!";
+    setTimeout(() => { statusEl.textContent = ""; }, 2000);
+  } catch (e) {
+    alert("Failed to copy: " + e.message);
   }
 }
 

@@ -23,6 +23,7 @@ class DimensionScore(Frozen):
     character_consistency: float
     pacing: float
     ending_impact: float
+    audio_rhythm: float = 8.0  # default for backward compat
     overall_score: float
 
 

@@ -1,8 +1,8 @@
 # Build context: Chatterbox-TTS-Server/ (repo root)
 # Build command (from Chatterbox-TTS-Server/):
 #   docker buildx build --platform linux/amd64 \
-#     -f lite_runpod/Dockerfile \
-#     -t shubh67678/chatterbox-lite-runpod:latest --push .
+#     -f services/tts-server/Dockerfile \
+#     -t shubh67678/chatterbox-tts-server:latest --push .
 
 FROM docker.io/nvidia/cuda:12.1.1-runtime-ubuntu22.04
 
@@ -35,12 +35,12 @@ RUN ln -sf /usr/bin/python3 /usr/bin/python
 
 WORKDIR /app
 
-COPY lite_runpod/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY services/tts-server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-COPY lite_runpod/requirements.txt /tmp/requirements.txt
+COPY services/tts-server/requirements.txt /tmp/requirements.txt
 
-# Install creepy_pasta_protocol (sibling package within repo)
+# Install creepy_pasta_protocol (shared package at repo root)
 COPY creepy_pasta_protocol /tmp/creepy_pasta_protocol
 RUN python -m pip install --no-cache-dir -e /tmp/creepy_pasta_protocol
 
@@ -50,13 +50,13 @@ RUN python -m pip install --no-cache-dir --upgrade pip && \
     python -m pip install --no-cache-dir "protobuf>=4.25.0" && \
     python -m pip install --no-cache-dir git+https://github.com/huggingface/diffusers@29b91098f68847f4e50d099735532c7d5735b17e
 
-COPY lite_runpod/config.yaml /app/config.yaml
-COPY app.py config.py cpu_runtime.py engine.py enums.py files.py image_routes.py job_store.py lite_clone_server.py models.py routes.py routes_history.py run_orchestrator.py utils.py /app/
-COPY audio /app/audio
-COPY text /app/text
-COPY image /app/image
-COPY lite_ui /app/lite_ui
-COPY persistence /app/persistence
+COPY services/tts-server/config.yaml /app/config.yaml
+COPY services/tts-server/app.py services/tts-server/config.py services/tts-server/cpu_runtime.py services/tts-server/engine.py services/tts-server/enums.py services/tts-server/files.py services/tts-server/image_routes.py services/tts-server/job_store.py services/tts-server/lite_clone_server.py services/tts-server/models.py services/tts-server/routes.py services/tts-server/routes_history.py services/tts-server/run_orchestrator.py services/tts-server/utils.py /app/
+COPY services/tts-server/audio /app/audio
+COPY services/tts-server/text /app/text
+COPY services/tts-server/image /app/image
+COPY services/tts-server/lite_ui /app/lite_ui
+COPY services/tts-server/persistence /app/persistence
 
 RUN mkdir -p /app/model_cache /app/reference_audio /app/outputs /app/logs /app/hf_cache /app/voices
 

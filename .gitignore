@@ -24,20 +24,29 @@ Thumbs.db
 # Ignore virtual environment directories
 .venv/
 venv/
-*/.venv/
-*/venv/
+**/.venv/
+**/venv/
 env/
-*/env/
+**/env/
 
 # Ignore sensitive environment file
 .env
+**/.env
 
 # Ignore generated output and user data directories
 outputs/
-reference_audio/
-voices/
+**/outputs/
 temp_audio_outputs/
-model_cache/ # Also good practice to ignore the model cache
+**/temp_audio_outputs/
+model_cache/
+**/model_cache/
+hf_cache/
+**/hf_cache/
+
+# Ignore editor/AI tool directories
+.opencode/
+.serena/
+.claude/
 
 # Ignore test reports/coverage
 .coverage

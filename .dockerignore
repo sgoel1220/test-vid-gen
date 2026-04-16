@@ -3,9 +3,12 @@ venv/
 .venv*/
 env/
 .env*/
+**/venv/
+**/.venv*/
 
 # Python cache
 __pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
@@ -22,6 +25,10 @@ outputs/
 logs/
 model_cache/
 hf_cache/
+**/outputs/
+**/logs/
+**/model_cache/
+**/hf_cache/
 
 # Git
 .git/
@@ -36,15 +43,24 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+.opencode/
+.serena/
+.claude/
 
 # Test artifacts
 .pytest_cache/
 .ruff_cache/
 htmlcov/
 .coverage
+**/.pytest_cache/
+**/.ruff_cache/
 
 # Notebooks
 *.ipynb
 
 # Memory and docs
 memory/
+
+# Service-specific ignores
+services/*/voices/
+services/*/reference_audio/

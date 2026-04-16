@@ -148,3 +148,14 @@ button:disabled { background: #555; cursor: not-allowed; }
   font-weight: 700;
   color: #ff6b35;
 }
+
+.copy-btn {
+  background: #2a5a3a;
+  color: #e0e0e0;
+  font-size: 0.85rem;
+  padding: 0.4rem 1rem;
+}
+
+.copy-btn:hover {
+  background: #3a7a4a;
+}
