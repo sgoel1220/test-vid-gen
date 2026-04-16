@@ -4,12 +4,12 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 import structlog
 
 from app.config import settings
 from app.logging import configure_logging
 from app.middleware import RequestContextMiddleware
+from app.schemas import HealthResponse, ServiceInfo
 
 logger = structlog.get_logger()
 
@@ -45,21 +45,18 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
 
     @app.get("/health")
-    async def health_check() -> JSONResponse:
+    async def health_check() -> HealthResponse:
         """Health check endpoint"""
-        return JSONResponse(
-            content={"status": "ok"},
-            status_code=200,
-        )
+        return HealthResponse(status="ok")
 
     @app.get("/")
-    async def root() -> dict[str, str]:
+    async def root() -> ServiceInfo:
         """Root endpoint"""
-        return {
-            "service": "creepy-brain",
-            "version": "0.1.0",
-            "status": "running",
-        }
+        return ServiceInfo(
+            service="creepy-brain",
+            version="0.1.0",
+            status="running",
+        )
 
     return app
 
