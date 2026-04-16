@@ -159,7 +159,7 @@ When implementing beads (work items tracked in the `.beads/` system), **ALWAYS**
    - Avoid over-engineering, premature abstractions, or unnecessary complexity
    - Write clear, straightforward code
 5. **Test** - Thoroughly verify everything works
-6. **Adversarial review** - MANDATORY: inside the worktree, run `/codex:adversarial-review` in the **foreground** (never background):
+6. **Adversarial review** - MANDATORY: inside the worktree, run `/adversarial-review` in the **foreground** (never background):
    - Wait for the review to complete — do NOT proceed while it is still running
    - Implement every actionable finding in the worktree before moving on
    - If findings conflict with the bead's intent, stop and ASK — do not silently ignore them
@@ -193,8 +193,8 @@ When implementing beads (work items tracked in the `.beads/` system), **ALWAYS**
 - NEVER start implementing without understanding the context - review docs first
 - NEVER assume - ASK QUESTIONS if anything is unclear or ambiguous
 - ALWAYS prioritize SIMPLICITY over cleverness or premature optimization
-- NEVER skip `/codex:adversarial-review` - it is a required gate before merging
-- NEVER run `/codex:adversarial-review` in the background - it MUST run in the foreground so its findings are applied before commit/merge
+- NEVER skip `/adversarial-review` - it is a required gate before merging
+- NEVER run `/adversarial-review` in the background - it MUST run in the foreground so its findings are applied before commit/merge
 - NEVER merge before applying adversarial-review findings
 - NEVER mark a bead as done before committing, merging, and pushing
 - NEVER delete the worktree branch before `git push origin main` succeeds
