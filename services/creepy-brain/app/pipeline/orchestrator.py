@@ -50,12 +50,7 @@ async def run_pipeline(
         bible = arch_output.bible
         outline = arch_output.outline
 
-        await svc.update_bible_and_outline(
-            story_id,
-            bible_json=bible.model_dump(mode="json"),
-            outline_json=outline.model_dump(mode="json"),
-            title=bible.title,
-        )
+        await svc.update_bible_and_outline(story_id, bible=bible, outline=outline)
         await session.commit()
 
         # ── Step 2: Outline review (max 2 loops) ────────────────────
@@ -79,12 +74,7 @@ async def run_pipeline(
             bible = fix_result.bible
             outline = fix_result.outline
 
-            await svc.update_bible_and_outline(
-                story_id,
-                bible_json=bible.model_dump(mode="json"),
-                outline_json=outline.model_dump(mode="json"),
-                title=bible.title,
-            )
+            await svc.update_bible_and_outline(story_id, bible=bible, outline=outline)
             await session.commit()
 
         # ── Step 3: Write acts + inline checks ──────────────────────

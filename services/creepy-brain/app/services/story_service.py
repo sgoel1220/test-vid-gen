@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional, Sequence
+from typing import Optional, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,7 @@ from sqlalchemy.orm import selectinload
 from app.models.enums import StoryStatus
 from app.models.schemas import StoryActOutline, StoryOutlineSchema
 from app.models.story import Story, StoryAct
+from app.pipeline.models import FiveActOutline, StoryBible
 
 
 class StoryService:
@@ -69,33 +70,31 @@ class StoryService:
     async def update_bible_and_outline(
         self,
         story_id: uuid.UUID,
-        bible_json: dict[str, Any],
-        outline_json: dict[str, Any],
-        title: Optional[str] = None,
+        bible: StoryBible,
+        outline: FiveActOutline,
     ) -> None:
         """Persist architect output: title and a simplified outline JSONB (flush only)."""
         story = await self._get_or_raise(story_id)
-        if title:
-            story.title = title
+        story.title = bible.title
 
         acts_summary: list[StoryActOutline] = [
             StoryActOutline(
-                act_number=act.get("act_number", i + 1),
-                title=act.get("title", ""),
-                summary=act.get("act_hook", ""),
-                target_word_count=act.get("target_word_count", 0),
-                key_events=[b.get("description", "") for b in act.get("beats", [])],
+                act_number=act.act_number,
+                title=act.title,
+                summary=act.act_hook,
+                target_word_count=act.target_word_count,
+                key_events=[b.description for b in act.beats],
             )
-            for i, act in enumerate(outline_json.get("acts", []))
+            for act in outline.acts
         ]
         story.outline = StoryOutlineSchema(
-            title=title or "",
+            title=bible.title,
             total_acts=len(acts_summary),
             total_target_words=sum(a.target_word_count for a in acts_summary),
             acts=acts_summary,
             themes=[],
-            setting=bible_json.get("setting", {}).get("location", ""),
-            tone=bible_json.get("horror_rules", {}).get("horror_subgenre", ""),
+            setting=bible.setting.location,
+            tone=bible.horror_rules.horror_subgenre,
         )
         await self._session.flush()
 
