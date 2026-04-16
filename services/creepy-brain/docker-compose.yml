@@ -14,7 +14,7 @@ services:
       - POSTGRES_PASSWORD=dev_password
       - POSTGRES_DB=creepy_brain
       # - JSON_LOGS=true  # Set to false for pretty dev logs, true for production JSON
-      # ANTHROPIC_API_KEY and LLM_MODEL are loaded from .env (copy .env.example → .env)
+      # LLM_PROVIDER, ANTHROPIC_API_KEY/OPENROUTER_API_KEY, and LLM_MODEL are loaded from .env
       # HATCHET_CLIENT_TOKEN is loaded from .env (create token in Hatchet dashboard)
     depends_on:
       postgres:
