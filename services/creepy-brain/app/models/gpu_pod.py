@@ -1,10 +1,10 @@
 """GPU pod tracking model."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, Index, Integer, String
+from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, Index, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,7 +35,12 @@ class GpuPod(Base):
     gpu_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     cost_per_hour_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     total_cost_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
     ready_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     terminated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     termination_reason: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
