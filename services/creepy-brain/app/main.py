@@ -14,7 +14,6 @@ from app.db import close_db, init_db
 from app.logging import configure_logging
 from app.middleware import RequestContextMiddleware
 from app.routes import blobs, health, runs, voices
-from app.schemas import HealthResponse, ServiceInfo
 
 logger = structlog.get_logger()
 
@@ -57,20 +56,6 @@ def create_app() -> FastAPI:
     from app.routes.stories import router as stories_router
 
     app.include_router(stories_router)
-
-    @app.get("/health")
-    async def health_check() -> HealthResponse:
-        """Health check endpoint"""
-        return HealthResponse(status="ok")
-
-    @app.get("/")
-    async def root() -> ServiceInfo:
-        """Root endpoint"""
-        return ServiceInfo(
-            service="creepy-brain",
-            version="0.1.0",
-            status="running",
-        )
 
     return app
 
