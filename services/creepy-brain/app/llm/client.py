@@ -1,13 +1,14 @@
-"""Anthropic client wrapper for structured and text generation."""
+"""LLM client abstraction supporting Anthropic and OpenRouter."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import re
-from typing import Any, Type, TypeVar
+from typing import Any, Protocol, Type, TypeVar
 
 import anthropic
+import httpx
 from pydantic import BaseModel
 
 from app.config import settings
@@ -19,14 +20,90 @@ T = TypeVar("T", bound=BaseModel)
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 5  # seconds
 
-_client: anthropic.AsyncAnthropic | None = None
+
+class LLMProvider(Protocol):
+    """Minimal interface for an LLM backend."""
+
+    async def complete(self, system: str, messages: list[dict[str, Any]]) -> str: ...
 
 
-def _get_client() -> anthropic.AsyncAnthropic:
-    global _client
-    if _client is None:
-        _client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-    return _client
+class AnthropicProvider:
+    """Calls the Anthropic API using the official SDK."""
+
+    def __init__(self, api_key: str, model: str) -> None:
+        self._client = anthropic.AsyncAnthropic(api_key=api_key)
+        self._model = model
+
+    async def complete(self, system: str, messages: list[dict[str, Any]]) -> str:
+        response = await self._client.messages.create(
+            model=self._model,
+            max_tokens=8192,
+            system=system,
+            messages=messages,  # type: ignore[arg-type]
+        )
+        log.info(
+            "llm call provider=anthropic input_tokens=%d output_tokens=%d",
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+        )
+        parts: list[str] = []
+        for block in response.content:
+            if hasattr(block, "text"):
+                parts.append(block.text)  # type: ignore[union-attr]
+        return "".join(parts)
+
+
+class OpenRouterProvider:
+    """Calls the OpenRouter API (OpenAI-compatible REST) using httpx."""
+
+    _BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+    def __init__(self, api_key: str, model: str) -> None:
+        self._api_key = api_key
+        self._model = model
+        self._http = httpx.AsyncClient(timeout=120.0)
+
+    async def complete(self, system: str, messages: list[dict[str, Any]]) -> str:
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": 8192,
+            "messages": [{"role": "system", "content": system}, *messages],
+        }
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        response = await self._http.post(self._BASE_URL, json=payload, headers=headers)
+        response.raise_for_status()
+        data: dict[str, Any] = response.json()
+        content: str = data["choices"][0]["message"]["content"]
+        usage = data.get("usage", {})
+        log.info(
+            "llm call provider=openrouter model=%s input_tokens=%s output_tokens=%s",
+            self._model,
+            usage.get("prompt_tokens", "?"),
+            usage.get("completion_tokens", "?"),
+        )
+        return content
+
+
+_provider: LLMProvider | None = None
+
+
+def _get_provider() -> LLMProvider:
+    global _provider
+    if _provider is None:
+        if settings.llm_provider == "openrouter":
+            _provider = OpenRouterProvider(
+                api_key=settings.openrouter_api_key,
+                model=settings.llm_model,
+            )
+        else:
+            _provider = AnthropicProvider(
+                api_key=settings.anthropic_api_key,
+                model=settings.llm_model,
+            )
+    return _provider
 
 
 def _extract_json(raw: str) -> str:
@@ -40,38 +117,20 @@ def _extract_json(raw: str) -> str:
     return raw
 
 
-async def _call_with_retry(
-    messages: list[dict[str, Any]],
-    system: str,
-) -> str:
-    """Make an Anthropic API call with retries on transient failures."""
-    client = _get_client()
+async def _call_with_retry(system: str, messages: list[dict[str, Any]]) -> str:
+    """Call the configured LLM provider with retries on transient failures."""
+    provider = _get_provider()
     last_exc: Exception | None = None
 
     for attempt in range(MAX_RETRIES):
         try:
-            response = await client.messages.create(
-                model=settings.llm_model,
-                max_tokens=8192,
-                system=system,
-                messages=messages,  # type: ignore[arg-type]
-            )
-            log.info(
-                "llm call input_tokens=%d output_tokens=%d",
-                response.usage.input_tokens,
-                response.usage.output_tokens,
-            )
-            parts: list[str] = []
-            for block in response.content:
-                if hasattr(block, "text"):
-                    parts.append(block.text)  # type: ignore[union-attr]
-            return "".join(parts)
+            return await provider.complete(system, messages)
         except Exception as exc:
             last_exc = exc
             if attempt < MAX_RETRIES - 1:
                 delay = RETRY_BASE_DELAY * (2**attempt)
                 log.warning(
-                    "API call failed (attempt %d/%d), retrying in %ds: %s",
+                    "LLM call failed (attempt %d/%d), retrying in %ds: %s",
                     attempt + 1,
                     MAX_RETRIES,
                     delay,
@@ -79,7 +138,7 @@ async def _call_with_retry(
                 )
                 await asyncio.sleep(delay)
             else:
-                log.error("API call failed after %d attempts", MAX_RETRIES)
+                log.error("LLM call failed after %d attempts", MAX_RETRIES)
 
     if last_exc is None:
         raise RuntimeError("retry loop exited without raising an exception")
@@ -91,18 +150,18 @@ async def generate_structured(
     user: str,
     response_model: Type[T],
 ) -> T:
-    """Call Claude and parse the response into a Pydantic model."""
+    """Call the LLM and parse the response into a Pydantic model."""
     json_instruction = (
         "\n\nIMPORTANT: You MUST respond with ONLY a valid JSON object. "
         "No preamble, no explanation, no markdown fences. Just raw JSON."
     )
-    messages = [{"role": "user", "content": user}]
-    raw = await _call_with_retry(messages, system + json_instruction)
-    json_str = _extract_json(raw)
-    return response_model.model_validate_json(json_str)
+    raw = await _call_with_retry(
+        system + json_instruction,
+        [{"role": "user", "content": user}],
+    )
+    return response_model.model_validate_json(_extract_json(raw))
 
 
 async def generate_text(system: str, user: str) -> str:
-    """Call Claude and return raw prose text."""
-    messages = [{"role": "user", "content": user}]
-    return await _call_with_retry(messages, system)
+    """Call the LLM and return raw prose text."""
+    return await _call_with_retry(system, [{"role": "user", "content": user}])

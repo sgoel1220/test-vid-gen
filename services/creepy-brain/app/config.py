@@ -1,5 +1,7 @@
 """Configuration settings for Creepy Brain service"""
 
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,7 +39,9 @@ class Settings(BaseSettings):
     runpod_api_key: str = ""
 
     # LLM settings
+    llm_provider: Literal["anthropic", "openrouter"] = "anthropic"
     anthropic_api_key: str = ""
+    openrouter_api_key: str = ""
     llm_model: str = "claude-opus-4-6"
     max_concurrent_generations: int = 2
 
