@@ -11,19 +11,33 @@ This is the canonical repo instruction file. `CLAUDE.md` is a symlink to this fi
 
 When implementing beads (work items tracked in the `.beads/` system), **ALWAYS** follow this workflow:
 
-1. **Pick a bead** - Choose a ready bead (no blockers)
-2. **Implement** - Complete all required changes
-3. **Test** - Thoroughly verify everything works
-4. **Commit** - Create a proper git commit with descriptive message
-5. **Merge** - Exit worktree and merge branch back to main
-6. **Mark done** - Close the bead with `mcp__beads__close`
-7. **Push** - Push changes to remote with `git push`
+1. **Create worktree** - BEFORE any code changes, create an isolated worktree:
+   ```bash
+   # Use EnterWorktree tool to create isolated branch
+   EnterWorktree(description="Implement bead XYZ")
+   ```
+2. **Pick a bead** - Choose a ready bead (no blockers) using `mcp__beads__ready`
+3. **Implement** - Complete all required changes in the worktree
+4. **Test** - Thoroughly verify everything works
+5. **Commit** - Create a proper git commit with descriptive message
+6. **Merge** - Exit worktree and merge branch back to main:
+   ```bash
+   ExitWorktree(action="keep")
+   git merge worktree-<name> --no-edit
+   ```
+   - If merge conflicts occur, resolve them carefully
+   - Test again after resolving conflicts
+   - Complete the merge before proceeding
+7. **Mark done** - Close the bead with `mcp__beads__close` ONLY after successful merge
+8. **Push** - Push changes to remote with `git push origin main`
 
 **CRITICAL RULES:**
+- NEVER make code changes directly on main - ALWAYS use a worktree
 - NEVER mark a bead as done before committing, merging, and pushing
 - Work is NOT complete until `git push` succeeds
 - Test thoroughly before committing
-- Only close the bead after all changes are pushed to remote
+- If merge conflicts occur, resolve them before closing the bead
+- Only close the bead after all changes are successfully pushed to remote
 
 ## Current Product Shape
 
