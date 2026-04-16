@@ -62,6 +62,9 @@ def create_app() -> FastAPI:
     app.include_router(voices.router)
     app.include_router(blobs.router)
 
+    from app.routes.stories import router as stories_router
+    app.include_router(stories_router)
+
     @app.get("/health")
     async def health_check() -> HealthResponse:
         """Health check endpoint"""
