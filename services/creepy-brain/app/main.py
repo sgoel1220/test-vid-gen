@@ -7,6 +7,7 @@ from fastapi import FastAPI
 import structlog
 
 from app.config import settings
+from app.db import close_db, init_db
 from app.logging import configure_logging
 from app.middleware import RequestContextMiddleware
 from app.schemas import HealthResponse, ServiceInfo
@@ -19,12 +20,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager"""
     logger.info("startup", service="creepy-brain", port=settings.port)
 
-    # TODO: Initialize database connection pool
+    # Initialize database connection pool
+    await init_db()
+    logger.info("database_initialized", database_url=settings.database_url.split('@')[1])
+
     # TODO: Initialize Hatchet client
 
     yield
 
     # Cleanup on shutdown
+    await close_db()
     logger.info("shutdown", service="creepy-brain")
 
 

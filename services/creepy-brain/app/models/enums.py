@@ -1,0 +1,93 @@
+"""Enums for model fields."""
+
+from enum import Enum
+
+
+class WorkflowType(str, Enum):
+    """Workflow types."""
+
+    CONTENT_PIPELINE = "content_pipeline"
+
+
+class WorkflowStatus(str, Enum):
+    """Workflow execution status."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class StepName(str, Enum):
+    """Workflow step names."""
+
+    GENERATE_STORY = "generate_story"
+    TTS_SYNTHESIS = "tts_synthesis"
+    IMAGE_GENERATION = "image_generation"
+    STITCH_FINAL = "stitch_final"
+
+
+class StepStatus(str, Enum):
+    """Step execution status."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class ChunkStatus(str, Enum):
+    """Chunk processing status."""
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class GpuProvider(str, Enum):
+    """GPU provider types."""
+
+    RUNPOD = "runpod"
+    LOCAL = "local"
+    MODAL = "modal"
+
+
+class GpuPodStatus(str, Enum):
+    """GPU pod status."""
+
+    CREATING = "creating"
+    RUNNING = "running"
+    READY = "ready"
+    TERMINATED = "terminated"
+    ERROR = "error"
+
+
+class BlobType(str, Enum):
+    """Blob content types."""
+
+    CHUNK_AUDIO = "chunk_audio"
+    FINAL_AUDIO = "final_audio"
+    IMAGE = "image"
+    FINAL_VIDEO = "final_video"
+
+
+class StoryStatus(str, Enum):
+    """Story generation status."""
+
+    PENDING = "pending"
+    GENERATING = "generating"
+    REVIEWING = "reviewing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class RunStatus(str, Enum):
+    """TTS run status."""
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"

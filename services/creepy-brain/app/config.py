@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     postgres_user: str = "creepy_brain"
     postgres_password: str = "dev_password"
     postgres_db: str = "creepy_brain"
+    db_echo: bool = False
 
     @property
     def database_url(self) -> str:
