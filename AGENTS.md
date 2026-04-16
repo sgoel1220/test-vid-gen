@@ -7,6 +7,136 @@ This is the canonical repo instruction file. `CLAUDE.md` is a symlink to this fi
 - Keep responses short by default.
 - Expand only when explicitly asked.
 
+## Python Typing Standards
+
+**All Python code in this repo MUST be statically typed.** This is a non-negotiable requirement.
+
+### Type Annotation Requirements
+
+1. **All functions MUST have type hints:**
+   ```python
+   def process_audio(data: bytes, sample_rate: int) -> AudioChunk:
+       ...
+   ```
+
+2. **All function parameters MUST be typed:**
+   - No bare `def foo(x):` — always `def foo(x: str):`
+   - Use specific types, not `Any` unless absolutely necessary
+
+3. **All return types MUST be annotated:**
+   - Include `-> None` for functions that don't return a value
+   - Use `-> ReturnType` for all other functions
+
+4. **All variables with non-obvious types MUST be annotated:**
+   ```python
+   chunks: list[AudioChunk] = []
+   metadata: dict[str, Any] = {}
+   ```
+
+### Pydantic Models
+
+**CRITICAL RULE: NEVER use `dict` as a return type. ALWAYS create a Pydantic model.**
+
+1. **Use Pydantic for ALL data structures:**
+   - API request/response models
+   - Configuration objects
+   - Domain models
+   - Internal data transfer objects
+   - **Function return values with structured data**
+
+2. **Never use raw dicts or tuples for structured data:**
+   ```python
+   # ❌ BAD - dict return type
+   def create_job(data: dict) -> dict:
+       return {"id": 123, "status": "pending"}
+
+   # ❌ BAD - dict[str, str] is also prohibited
+   async def get_status() -> dict[str, str]:
+       return {"status": "ok"}
+
+   # ✅ GOOD - Pydantic model
+   class StatusResponse(BaseModel):
+       status: str
+
+   async def get_status() -> StatusResponse:
+       return StatusResponse(status="ok")
+
+   # ✅ GOOD - JobResponse model
+   def create_job(data: JobRequest) -> JobResponse:
+       return JobResponse(id=123, status=JobStatus.PENDING)
+   ```
+
+3. **Pydantic model requirements:**
+   - Use `BaseModel` for all structured data
+   - Use `Field()` for validation and documentation
+   - Use enums for constrained string values
+   - Use `ConfigDict` for model configuration
+   - Create response models even for simple endpoints
+
+### Type-Checking Enforcement
+
+1. **Run mypy on all new/modified code:**
+   ```bash
+   python3 -m mypy path/to/module.py --strict
+   ```
+
+2. **mypy must pass with no errors before commit**
+
+3. **Prefer `--strict` mode settings:**
+   - `disallow_untyped_defs = True`
+   - `disallow_any_unimported = True`
+   - `warn_return_any = True`
+   - `strict_optional = True`
+
+### Import Standards
+
+1. **Use modern type hint syntax:**
+   ```python
+   from typing import Protocol, TypeVar, Generic
+   from collections.abc import Sequence, Mapping
+   ```
+
+2. **For Python 3.9+, prefer built-in generics:**
+   ```python
+   # ✅ GOOD (Python 3.9+)
+   def process(items: list[str]) -> dict[str, int]:
+       ...
+
+   # ❌ BAD (old style)
+   from typing import List, Dict
+   def process(items: List[str]) -> Dict[str, int]:
+       ...
+   ```
+
+### Validation Rules
+
+1. **Never trust external input:**
+   - Use Pydantic validation for all API inputs
+   - Use type guards for runtime type checking when needed
+
+2. **Make impossible states unrepresentable:**
+   ```python
+   # Use unions and enums instead of optional fields
+   class JobComplete(BaseModel):
+       status: Literal[JobStatus.COMPLETE]
+       result: AudioResult
+
+   class JobFailed(BaseModel):
+       status: Literal[JobStatus.FAILED]
+       error: str
+
+   JobResult = JobComplete | JobFailed
+   ```
+
+### Critical Rules
+
+- **NEVER merge code without type hints**
+- **NEVER use `Any` without a comment explaining why**
+- **NEVER use `# type: ignore` without a specific reason**
+- **ALWAYS validate external input with Pydantic**
+- **ALWAYS prefer Pydantic models over dicts/tuples**
+- **ALWAYS run mypy before committing**
+
 ## Bead Workflow
 
 When implementing beads (work items tracked in the `.beads/` system), **ALWAYS** follow this workflow:
@@ -16,7 +146,9 @@ When implementing beads (work items tracked in the `.beads/` system), **ALWAYS**
    # Use EnterWorktree tool to create isolated branch
    EnterWorktree(description="Implement bead XYZ")
    ```
-2. **Pick a bead** - Choose a ready bead (no blockers) using `mcp__beads__ready`
+2. **Pick a bead** - Choose a ready bead with "open" status (no blockers) using `mcp__beads__ready`
+   - **ONLY pick beads with status "open"**
+   - **NEVER pick beads with status "in_progress"** - another agent is working on them
 3. **Review documentation** - Get high-level understanding BEFORE implementing:
    - Read `docs/CONTENT_PIPELINE_ORCHESTRATION.md` for architecture context
    - Review related documentation for the feature area
@@ -40,6 +172,8 @@ When implementing beads (work items tracked in the `.beads/` system), **ALWAYS**
 9. **Push** - Push changes to remote with `git push origin main`
 
 **CRITICAL RULES:**
+- NEVER pick a bead with status "in_progress" - another agent is working on it
+- ONLY pick beads with status "open"
 - NEVER make code changes directly on main - ALWAYS use a worktree
 - NEVER start implementing without understanding the context - review docs first
 - NEVER assume - ASK QUESTIONS if anything is unclear or ambiguous
