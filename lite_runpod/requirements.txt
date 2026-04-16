@@ -11,6 +11,7 @@ torchvision==0.20.1+cu121
 
 conformer==0.3.2
 # diffusers installed from source in Dockerfile for ZImagePipeline support
+# (pinned to 29b9109 — last commit before autoencoder_rae.py required transformers>=4.48)
 transformers==4.46.3
 einops>=0.7.0,<1.0
 omegaconf==2.3.0
