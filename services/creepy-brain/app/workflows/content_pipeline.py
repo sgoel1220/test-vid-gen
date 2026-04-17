@@ -7,8 +7,7 @@ Step order and timeouts:
     tts_synthesis      (GPU pod, 30 min)
     image_generation   (GPU pod, 10 min)
     stitch_final       (local, 5 min)
-
-on_failure cleanup hook is added in bead z9p.
+    cleanup_gpu_pod    (on_failure hook, 2 min)
 """
 
 from datetime import timedelta
@@ -18,7 +17,7 @@ from hatchet_sdk import Context
 from app.models.schemas import WorkflowInputSchema
 
 from . import WORKFLOWS, hatchet
-from .steps import image, stitch, story, tts
+from .steps import cleanup, image, stitch, story, tts
 
 content_pipeline = hatchet.workflow(
     name="ContentPipeline",
@@ -60,6 +59,14 @@ async def image_generation(input: WorkflowInputSchema, ctx: Context) -> dict[str
 async def stitch_final(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]:
     """Stitch audio and images into the final video."""
     return await stitch.execute(input, ctx)
+
+
+@content_pipeline.on_failure_task(  # type: ignore[untyped-decorator]  # hatchet_sdk has no type stubs
+    execution_timeout=timedelta(minutes=2),
+)
+async def cleanup_gpu_pod(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]:
+    """Terminate any active GPU pods when the workflow fails (cost-control)."""
+    return await cleanup.execute(input, ctx)
 
 
 # NOTE: registration is intentionally deferred until the step executors are
