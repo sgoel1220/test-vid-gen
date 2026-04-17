@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     # GPU provider settings
     runpod_api_key: str = ""
 
+    # GPU pod configuration
+    gpu_type: str = "NVIDIA GeForce RTX 3070"
+    gpu_cloud_type: str = "COMMUNITY"  # COMMUNITY or SECURE
+    gpu_image: str = "ghcr.io/sgoel1220/tts-server:main"
+    gpu_container_disk_gb: int = 25
+    gpu_volume_gb: int = 0  # No persistent volume
+    gpu_port: int = 8005
+
     # LLM settings
     llm_provider: Literal["anthropic", "openrouter"] = "anthropic"
     anthropic_api_key: str = ""

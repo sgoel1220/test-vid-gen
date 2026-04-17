@@ -25,11 +25,29 @@ class PodStatus(str, Enum):
 
 @dataclass
 class GpuPodSpec:
-    gpu_type: str = "RTX 4090"
-    image: str = "ghcr.io/sgoel1220/tts-server:main"
-    disk_size_gb: int = 25
-    ports: list[int] = field(default_factory=lambda: [8005])
+    """Spec for creating a GPU pod. Defaults loaded from config."""
+
+    gpu_type: str
+    image: str
+    disk_size_gb: int
+    volume_gb: int
+    ports: list[int]
+    cloud_type: str = "COMMUNITY"  # COMMUNITY or SECURE
     env: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_config(cls) -> "GpuPodSpec":
+        """Create spec with defaults from app config."""
+        from app.config import settings
+
+        return cls(
+            gpu_type=settings.gpu_type,
+            image=settings.gpu_image,
+            disk_size_gb=settings.gpu_container_disk_gb,
+            volume_gb=settings.gpu_volume_gb,
+            ports=[settings.gpu_port],
+            cloud_type=settings.gpu_cloud_type,
+        )
 
 
 @dataclass
