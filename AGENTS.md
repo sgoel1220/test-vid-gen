@@ -375,7 +375,10 @@ GitHub Container Registry images (built by CI):
 - `ghcr.io/sgoel1220/creepy-brain:main` — Creepy brain orchestrator
 
 ### RunPod Settings
-RunPod template: `chatterbox-lite` · port 8005 · Nvidia GPU · 25 GB container disk · ≥20 GB volume disk (to persist model cache across restarts).
+- Use **community cloud** with spot instances for cost savings
+- **No volume** — models download fresh each start (faster pod spin-up, no storage cost)
+- Container disk: 20-25 GB
+- Ports: 8005 (TTS), 8006 (image-server)
 
 ## Landing the Plane (Session Completion)
 
