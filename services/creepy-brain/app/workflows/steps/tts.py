@@ -20,9 +20,9 @@ GPU pod contract (stateless /synthesize endpoint):
   Body: { text: str, voice: str, seed: int }
   Response: WAV bytes (Content-Type: audio/wav), HTTP 200 always
 
-  NOTE: This contract requires a dedicated slim TTS image that exposes only
-  /synthesize.  The current chatterbox-tts-server image exposes /tts instead.
-  Tracked as a follow-up: add POST /synthesize to the TTS server Dockerfile.
+  The minimal TTS server (ghcr.io/sgoel1220/tts-server:main) exposes only
+  /synthesize and /health endpoints. All text normalization, chunking, and
+  audio validation is handled by creepy-brain.
 """
 
 from __future__ import annotations
