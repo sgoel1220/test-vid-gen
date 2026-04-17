@@ -91,7 +91,7 @@ async def main() -> None:
 
     # Step 2: Chunk
     print("\n[2/5] Chunking text...")
-    chunks = chunk_text_by_sentences(normalized, chunk_size=120)
+    chunks = chunk_text_by_sentences(normalized, chunk_size=settings.tts_chunk_size)
     print(f"  Created {len(chunks)} chunks")
     for i, chunk in enumerate(chunks):
         print(f"    Chunk {i+1}: {len(chunk)} chars")
@@ -119,8 +119,11 @@ async def main() -> None:
 
     # Step 5: Synthesize all chunks
     print("\n[5/5] Synthesizing audio...")
-    voice = settings.tts_default_voice
-    print(f"  Voice: {voice}")
+    print(f"  Voice: {settings.tts_default_voice}")
+    print(f"  Seed: {settings.tts_seed}")
+    print(f"  Exaggeration: {settings.tts_exaggeration}")
+    print(f"  CFG Weight: {settings.tts_cfg_weight}")
+    print(f"  Temperature: {settings.tts_temperature}")
 
     output_dir = "/tmp/tts_test_output"
     os.makedirs(output_dir, exist_ok=True)
@@ -134,7 +137,17 @@ async def main() -> None:
             try:
                 resp = await client.post(
                     "/synthesize",
-                    json={"text": chunk, "voice": voice, "seed": 1234}
+                    json={
+                        "text": chunk,
+                        "voice": settings.tts_default_voice,
+                        "seed": settings.tts_seed,
+                        "exaggeration": settings.tts_exaggeration,
+                        "cfg_weight": settings.tts_cfg_weight,
+                        "temperature": settings.tts_temperature,
+                        "repetition_penalty": settings.tts_repetition_penalty,
+                        "min_p": settings.tts_min_p,
+                        "top_p": settings.tts_top_p,
+                    }
                 )
                 resp.raise_for_status()
 
