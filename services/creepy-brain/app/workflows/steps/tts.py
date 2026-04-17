@@ -49,7 +49,7 @@ from app.text.normalization import normalize_text
 log = logging.getLogger(__name__)
 
 # TTS GPU pod configuration
-_TTS_IMAGE = "shubh67678/chatterbox-tts-server:latest"
+_TTS_IMAGE = "ghcr.io/sgoel1220/tts-server:main"
 _TTS_GPU_TYPE = "NVIDIA RTX 4090"
 _TTS_POD_PORTS = [8005]
 _SYNTHESIZE_PATH = "/synthesize"

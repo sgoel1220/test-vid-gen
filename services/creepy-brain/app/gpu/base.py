@@ -26,7 +26,7 @@ class PodStatus(str, Enum):
 @dataclass
 class GpuPodSpec:
     gpu_type: str = "RTX 4090"
-    image: str = "shubh67678/chatterbox-tts-server:latest"
+    image: str = "ghcr.io/sgoel1220/tts-server:main"
     disk_size_gb: int = 25
     ports: list[int] = field(default_factory=lambda: [8005])
     env: dict[str, str] = field(default_factory=dict)
