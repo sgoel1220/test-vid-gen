@@ -1,17 +1,104 @@
-"""generate_story step executor.
+"""generate_story step executor."""
 
-Full implementation tracked in bead bjx.
-"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import uuid
 
 from hatchet_sdk import Context
 
-from app.models.schemas import WorkflowInputSchema
+import app.db as _db  # module ref — always reads the live async_session_maker value
+from app.models.enums import StoryStatus
+from app.models.schemas import GenerateStoryStepOutput, WorkflowInputSchema
+from app.pipeline import orchestrator
+from app.services.story_service import StoryService
+
+log = logging.getLogger(__name__)
+
+# Serializes lazy DB initialization so concurrent step starts don't race.
+_db_init_lock: asyncio.Lock = asyncio.Lock()
+
+
+async def _ensure_db() -> None:
+    """Initialize the DB engine if not already done.
+
+    The Hatchet worker process runs independently from the FastAPI server that
+    normally calls ``init_db()`` during lifespan startup.  This helper ensures
+    the session maker is ready regardless of which process is executing the
+    step, and it is idempotent after the first call.
+    """
+    async with _db_init_lock:
+        if _db.async_session_maker is None:
+            await _db.init_db()
 
 
 async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]:
     """Generate a story from the workflow premise using the LLM pipeline.
 
+    1. Ensures the database is initialised (safe to call from the worker process).
+    2. Creates a story record in PENDING state.
+    3. Runs the full architect -> writer -> reviewer pipeline.
+    4. Verifies the story reached COMPLETED status.
+    5. Returns a ``GenerateStoryStepOutput`` dict for Hatchet to serialise.
+
     Raises:
-        NotImplementedError: Until bead bjx is implemented.
+        RuntimeError: If the pipeline did not complete successfully.
     """
-    raise NotImplementedError("generate_story step not yet implemented (see bead bjx)")
+    await _ensure_db()
+
+    # _ensure_db() guarantees async_session_maker is initialised.
+    session_maker = _db.async_session_maker
+    assert session_maker is not None
+
+    premise: str = input.premise
+
+    # Create the story row.
+    # story.workflow_id is intentionally left null: assigning ctx.workflow_run_id
+    # would violate the FK until a Workflow row for that Hatchet run ID exists.
+    # Cross-reference can be added once Workflow creation is in place.
+    async with session_maker() as session:
+        svc = StoryService(session)
+        story = await svc.create(premise=premise)
+        await session.commit()
+        story_id: uuid.UUID = story.id
+
+    log.info("story %s created, starting pipeline", story_id)
+
+    # Run the full LLM pipeline.  run_pipeline manages its own commits and
+    # swallows all exceptions (marks story as FAILED).  We check status below.
+    async with session_maker() as session:
+        await orchestrator.run_pipeline(
+            story_id=story_id,
+            premise=premise,
+            session=session,
+        )
+
+    # Require COMPLETED -- any other terminal state (FAILED, PENDING, etc.)
+    # means the pipeline did not finish successfully.
+    async with session_maker() as session:
+        svc = StoryService(session)
+        completed_story = await svc.get(story_id)
+
+    if completed_story is None:
+        raise RuntimeError(f"Story {story_id} not found after pipeline run")
+
+    if completed_story.status != StoryStatus.COMPLETED:
+        raise RuntimeError(
+            f"Story generation did not complete: story_id={story_id} "
+            f"status={completed_story.status}"
+        )
+
+    log.info(
+        "story %s complete: %d words, %d acts",
+        story_id,
+        completed_story.word_count or 0,
+        len(completed_story.acts),
+    )
+
+    return GenerateStoryStepOutput(
+        story_id=story_id,
+        title=completed_story.title or "",
+        word_count=completed_story.word_count or 0,
+        act_count=len(completed_story.acts),
+    ).model_dump()
