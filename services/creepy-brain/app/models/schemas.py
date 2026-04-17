@@ -3,8 +3,7 @@
 import uuid
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
-from typing_extensions import Self
+from pydantic import BaseModel, Field
 
 
 # Workflow Input/Output Schemas
@@ -18,15 +17,6 @@ class WorkflowInputSchema(BaseModel):
     max_revisions: int = Field(default=3, description="Max story revision attempts")
     target_word_count: int = Field(default=5000, description="Target word count for story")
 
-    @model_validator(mode="after")
-    def reject_unimplemented_features(self) -> Self:
-        """Fail fast before expensive story/TTS work if unimplemented features are requested."""
-        if self.stitch_video:
-            raise ValueError(
-                "stitch_video=True is not yet implemented (tracked in bead ea6). "
-                "Set stitch_video=False to run story+TTS only."
-            )
-        return self
 
 
 class WorkflowResultSchema(BaseModel):
