@@ -1,7 +1,7 @@
 """tts_synthesis step executor.
 
 Pipeline:
-  1. Get story full_text from generate_story step output
+  1. Fetch story full_text from Postgres using story_id from generate_story output
   2. Normalize full text via LLM API (result cached in-process by text hash)
   3. Chunk normalized text into TTS-ready pieces
   4. Spin up TTS GPU pod (idempotent by workflow_id)
@@ -41,6 +41,7 @@ from app.gpu import GpuPodSpec, get_provider
 from app.models.enums import BlobType, ChunkStatus
 from app.models.schemas import WorkflowInputSchema
 from app.services import blob_service
+from app.services.story_service import StoryService
 from app.services.workflow_service import WorkflowService
 from app.text.chunking import chunk_text_by_sentences
 from app.text.normalization import normalize_text
@@ -71,16 +72,42 @@ async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]
     Returns:
         dict with keys: pod_id, chunk_count, total_duration_sec, chunks
     """
-    # --- 1. Get story text from parent step output ---
+    # --- 1. Get story_id from parent step output, then fetch full_text from DB ---
     # ctx._data.parents is a dict[str, Any] keyed by task name; accessing it
     # directly avoids a circular import with content_pipeline.py.
+    # full_text is intentionally NOT serialized into the step output to avoid
+    # passing large text through Hatchet; we read it directly from Postgres.
     parents: dict[str, Any] = ctx._data.parents
     story_output: dict[str, Any] = parents.get("generate_story", {})
-    full_text: str = story_output.get("full_text", "")
-    story_id_str: str = story_output.get("story_id", "")
+    story_id_raw: uuid.UUID | str | None = story_output.get("story_id")
 
-    if not full_text:
-        raise ValueError("generate_story step did not produce full_text")
+    if not story_id_raw:
+        raise ValueError("generate_story step did not produce story_id")
+
+    # Hatchet may deserialize parent output as a plain dict (JSON path, story_id
+    # is a str) or preserve the native Python type (story_id is uuid.UUID).
+    # Accept both to guard against the internal _data.parents shape changing.
+    story_id_for_text: uuid.UUID = (
+        story_id_raw
+        if isinstance(story_id_raw, uuid.UUID)
+        else uuid.UUID(str(story_id_raw))
+    )
+    story_id_str: str = str(story_id_for_text)
+
+    _session_maker = _db.async_session_maker
+    assert _session_maker is not None, (
+        "DB not initialized — call init_db() before starting the Hatchet worker"
+    )
+    async with _session_maker() as _session:
+        _story = await StoryService(_session).get(story_id_for_text)
+
+    if _story is None:
+        raise ValueError(f"Story {story_id_for_text} not found in database")
+    if not _story.full_text:
+        raise ValueError(
+            f"Story {story_id_for_text} has no full_text — pipeline may not have completed"
+        )
+    full_text: str = _story.full_text
 
     workflow_run_id: str = ctx.workflow_run_id
     voice_name: str = input.voice_name
