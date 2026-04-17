@@ -23,7 +23,4 @@ WORKFLOWS: list[BaseWorkflow[Any]] = []
 # Each module appends its workflow instance to WORKFLOWS on import.
 from . import test_workflow as _test_workflow  # noqa: F401
 
-# NOTE: import content_pipeline once all step executors are implemented
-# (beads bjx, duy, 83y, ea6).  Uncomment at that point:
-#
-#   from . import content_pipeline as _content_pipeline  # noqa: F401
+from . import content_pipeline as _content_pipeline  # noqa: F401

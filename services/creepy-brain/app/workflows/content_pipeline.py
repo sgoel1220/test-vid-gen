@@ -69,7 +69,4 @@ async def cleanup_gpu_pod(input: WorkflowInputSchema, ctx: Context) -> dict[str,
     return await cleanup.execute(input, ctx)
 
 
-# NOTE: registration is intentionally deferred until the step executors are
-# implemented (beads bjx, duy, 83y, ea6).  Uncomment once all steps are done:
-#
-#   WORKFLOWS.append(content_pipeline)
+WORKFLOWS.append(content_pipeline)

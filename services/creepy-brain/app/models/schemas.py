@@ -3,7 +3,8 @@
 import uuid
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from typing_extensions import Self
 
 
 # Workflow Input/Output Schemas
@@ -12,10 +13,25 @@ class WorkflowInputSchema(BaseModel):
 
     premise: str = Field(..., description="Story premise or prompt")
     voice_name: str = Field(..., description="Voice to use for TTS")
-    generate_images: bool = Field(default=True, description="Whether to generate images")
-    stitch_video: bool = Field(default=True, description="Whether to stitch final video")
+    generate_images: bool = Field(default=False, description="Whether to generate images (not yet implemented, bead 83y)")
+    stitch_video: bool = Field(default=False, description="Whether to stitch final video (not yet implemented, bead ea6)")
     max_revisions: int = Field(default=3, description="Max story revision attempts")
     target_word_count: int = Field(default=5000, description="Target word count for story")
+
+    @model_validator(mode="after")
+    def reject_unimplemented_features(self) -> Self:
+        """Fail fast before expensive story/TTS work if unimplemented features are requested."""
+        if self.generate_images:
+            raise ValueError(
+                "generate_images=True is not yet implemented (tracked in bead 83y). "
+                "Set generate_images=False to run story+TTS only."
+            )
+        if self.stitch_video:
+            raise ValueError(
+                "stitch_video=True is not yet implemented (tracked in bead ea6). "
+                "Set stitch_video=False to run story+TTS only."
+            )
+        return self
 
 
 class WorkflowResultSchema(BaseModel):
