@@ -27,6 +27,9 @@ jobs:
           - name: creepy-brain
             dockerfile: services/creepy-brain/Dockerfile
             image: creepy-brain
+          - name: image-server
+            dockerfile: services/image-server/Dockerfile
+            image: image-server
 
     steps:
       - name: Checkout repository
