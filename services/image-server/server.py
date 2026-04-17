@@ -7,7 +7,7 @@ import logging
 from typing import Optional
 
 import torch
-from diffusers import ZImagePipeline
+from diffusers import DiffusionPipeline
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -20,14 +20,16 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _MODEL_ID = "Tongyi-MAI/Z-Image"
-_pipe: Optional[ZImagePipeline] = None
+_pipe: Optional[DiffusionPipeline] = None
 
 
-def _load() -> ZImagePipeline:
+def _load() -> DiffusionPipeline:
     global _pipe
     if _pipe is None:
         logger.info("Loading Z-Image pipeline: %s …", _MODEL_ID)
-        _pipe = ZImagePipeline.from_pretrained(_MODEL_ID, torch_dtype=torch.bfloat16)
+        _pipe = DiffusionPipeline.from_pretrained(
+            _MODEL_ID, torch_dtype=torch.bfloat16, trust_remote_code=True
+        )
         _pipe = _pipe.to("cuda")
         logger.info("Z-Image pipeline ready.")
     return _pipe
