@@ -101,7 +101,9 @@ class RunPodProvider(GpuProvider):
                 return recovered
             raise
 
-    async def get_pod(self, pod_id: str) -> GpuPod | None:
+    async def get_pod(
+        self, pod_id: str, service_port: int | None = None
+    ) -> GpuPod | None:
         """Get pod status by ID."""
         def _get() -> dict[str, object]:
             return runpod.get_pod(pod_id)
@@ -110,7 +112,7 @@ class RunPodProvider(GpuProvider):
             raw = await asyncio.to_thread(_get)
             if not raw:
                 return None
-            return self._parse_pod(raw)
+            return self._parse_pod(raw, service_port)
         except Exception:
             return None
 
@@ -125,12 +127,21 @@ class RunPodProvider(GpuProvider):
         except Exception:
             return False
 
-    async def wait_for_ready(self, pod_id: str, timeout_sec: int = 300) -> GpuPod:
-        """Wait for pod to be ready (health check passes)."""
+    async def wait_for_ready(
+        self, pod_id: str, timeout_sec: int = 300, service_port: int | None = None
+    ) -> GpuPod:
+        """Wait for pod to be ready (health check passes).
+
+        Args:
+            pod_id: The pod ID to wait for.
+            timeout_sec: Maximum time to wait for the pod to become ready.
+            service_port: The service port to use for endpoint URL construction.
+                If not specified, defaults to 8005 (TTS server). Use 8006 for image server.
+        """
         deadline = asyncio.get_event_loop().time() + timeout_sec
 
         while asyncio.get_event_loop().time() < deadline:
-            pod = await self.get_pod(pod_id)
+            pod = await self.get_pod(pod_id, service_port)
             if pod and pod.endpoint_url:
                 try:
                     async with httpx.AsyncClient(timeout=5.0) as client:
