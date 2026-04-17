@@ -366,15 +366,15 @@ cd services/creepy-brain && pip install -e .
 
 ## Deploy on RunPod
 
-Build and push from the **repo root** (`Chatterbox-TTS-Server/`). **Always specify `--platform linux/amd64`** — RunPod runs on amd64 and a Mac arm64 build will fail with "no matching manifest" at pod start.
+**NEVER build Docker images locally.** Just push code to GitHub — GitHub Actions builds and pushes images automatically on push to `main` or tags. This saves time and avoids platform issues.
 
-### TTS Server
-Images are built automatically via GitHub Actions on push to `main` or tags.
-
-GitHub Container Registry images:
+### Images
+GitHub Container Registry images (built by CI):
 - `ghcr.io/sgoel1220/tts-server:main` — TTS server
+- `ghcr.io/sgoel1220/image-server:main` — Image generation server
 - `ghcr.io/sgoel1220/creepy-brain:main` — Creepy brain orchestrator
 
+### RunPod Settings
 RunPod template: `chatterbox-lite` · port 8005 · Nvidia GPU · 25 GB container disk · ≥20 GB volume disk (to persist model cache across restarts).
 
 ## Landing the Plane (Session Completion)
