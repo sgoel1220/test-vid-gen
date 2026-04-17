@@ -7,6 +7,47 @@ This is the canonical repo instruction file. `CLAUDE.md` is a symlink to this fi
 - Keep responses short by default.
 - Expand only when explicitly asked.
 
+## Serana LSP Tools
+
+**Use Serana MCP tools for all code navigation and refactoring tasks.** These provide IDE-level precision.
+
+### When to use Serana
+
+- **Finding definitions**: `mcp__serana__go_to_definition` — jump to where a symbol is defined
+- **Finding references**: `mcp__serana__find_references` — find all usages of a symbol
+- **Renaming symbols**: `mcp__serana__rename_symbol` — safely rename across the codebase
+- **Code actions**: `mcp__serana__code_actions` — get available refactoring options
+- **Hover info**: `mcp__serana__hover` — get type info and documentation
+- **Diagnostics**: `mcp__serana__get_diagnostics` — get errors/warnings for a file
+
+### Prefer Serana over grep/glob
+
+```python
+# ❌ BAD - manual grep for finding usages
+Grep(pattern="validate_chunk_audio")
+
+# ✅ GOOD - precise LSP references
+mcp__serana__find_references(file_path="app/audio/validation.py", line=36, character=4)
+
+# ❌ BAD - guessing where a function is defined
+Grep(pattern="def generate_text")
+
+# ✅ GOOD - jump to definition
+mcp__serana__go_to_definition(file_path="app/text/normalization.py", line=62, character=20)
+
+# ❌ BAD - manual find-and-replace for renaming
+Edit(old_string="old_name", new_string="new_name", replace_all=True)
+
+# ✅ GOOD - LSP-aware rename that handles imports, references, etc.
+mcp__serana__rename_symbol(file_path="...", line=..., character=..., new_name="new_name")
+```
+
+### Critical rules
+
+- **ALWAYS use Serana for refactoring** — it understands scope, imports, and type relationships
+- **ALWAYS use Serana for finding references** — grep misses dynamic references and aliases
+- **Use go_to_definition before editing** — understand the code before changing it
+
 ## Python Typing Standards
 
 **All Python code in this repo MUST be statically typed.** This is a non-negotiable requirement.
@@ -245,85 +286,77 @@ When implementing beads (work items tracked in the `.beads/` system), **ALWAYS**
 
 This repo is a **monorepo** containing multiple services for the Creepy Pasta audio production pipeline:
 
-- **tts-server** — FastAPI TTS backend with OpenAI-compatible API and web UI
+- **tts-server** — Minimal stateless TTS synthesis (GPU pod)
 - **creepy-brain** — Story generation, TTS orchestration, and workflow engine
 
 ## Project Structure
 
 ```
-Chatterbox-TTS-Server/
+chatterbox-tts-lite/
 ├── services/
-│   ├── tts-server/           # Main TTS service
-│   │   ├── app.py            # FastAPI app factory
-│   │   ├── lite_clone_server.py  # Entrypoint
-│   │   ├── routes.py         # Core API handlers
-│   │   ├── engine.py         # Model loading & synthesis
-│   │   ├── audio/            # Audio encoding, processing
-│   │   ├── text/             # Text chunking, normalization
-│   │   ├── image/            # Image generation
-│   │   ├── lite_ui/          # Web frontend
-│   │   ├── Dockerfile
-│   │   └── requirements.txt
+│   ├── tts-server/              # Minimal TTS GPU pod
+│   │   ├── minimal_server.py    # FastAPI app with /synthesize only
+│   │   ├── requirements-minimal.txt
+│   │   └── Dockerfile
 │   │
-│   └── creepy-brain/         # Story + workflow orchestration
+│   └── creepy-brain/            # Orchestration service
 │       ├── app/
-│       │   ├── pipeline/     # Story generation pipeline
-│       │   ├── workflows/    # Hatchet workflow steps
-│       │   ├── gpu/          # RunPod GPU provider
-│       │   └── services/     # Business logic
+│       │   ├── text/            # Chunking, normalization (Claude API)
+│       │   ├── audio/           # Validation
+│       │   ├── workflows/       # Hatchet workflow steps
+│       │   ├── gpu/             # RunPod GPU provider
+│       │   └── services/        # Business logic
 │       ├── alembic/
 │       ├── Dockerfile
 │       └── pyproject.toml
 │
-├── AGENTS.md                 # This file
+├── AGENTS.md                    # This file
 ├── CLAUDE.md -> AGENTS.md
 └── README.md
 ```
 
 ## TTS Server Architecture
 
-| File / Dir | Role |
-|------------|------|
-| `app.py` | FastAPI app factory, middleware, static file mounts, lifespan |
-| `lite_clone_server.py` | Entrypoint — re-exports `app` from `app.py` for backward compat |
-| `routes.py` | Core API route handlers |
-| `engine.py` | Model loading (original/turbo/multilingual) and synthesis orchestration |
-| `run_orchestrator.py` | TTS job execution: settings resolution, chunk synthesis, artifact saving |
-| `config.py` | `config.yaml` defaults and access helpers |
-| `cpu_runtime.py` | CPU/MPS fallback runtime thread configuration |
-| `enums.py` | Shared enumerations (AudioFormat, ModelType, DeviceType, JobStatus) |
-| `files.py` | Reference audio validation, predefined voice listing, PerformanceMonitor |
-| `job_store.py` | Thread-safe in-memory async job state (Repository pattern) |
-| `models.py` | Pydantic request/response models |
-| `utils.py` | Backward-compat shim — re-exports from `audio/`, `text/`, `files.py`, `models.py` |
-| `audio/` | Audio encoding (`encoding.py`), processing (`processing.py`), stitching (`stitching.py`) |
-| `text/` | Text chunking (`chunking.py`) and LLM-based normalization (`normalization.py`) |
+The TTS server is a **minimal stateless synthesis pod**. All orchestration logic (chunking, normalization, validation, retry) lives in creepy-brain.
+
+| File | Role |
+|------|------|
+| `minimal_server.py` | FastAPI app with `/synthesize`, `/health`, `/ready` |
+| `requirements-minimal.txt` | Minimal deps: torch, chatterbox, fastapi, soundfile |
+| `Dockerfile` | Slim GPU image (~5 min build vs 15+ min) |
 
 ## API Endpoints (TTS Server)
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/` | Serve lite UI |
-| GET | `/api/model-info` | Model status, capabilities, supported languages |
-| GET | `/api/reference-audio` | List valid reference audio files |
-| POST | `/api/reference-audio/upload` | Upload a .wav/.mp3 reference file |
-| POST | `/api/chunks/preview` | Preview text chunking without synthesis |
-| POST | `/tts` | Synchronous TTS generation (returns full run response) |
-| POST | `/api/jobs` | Create async TTS job (returns job_id + status_url) |
-| GET | `/api/jobs/{job_id}` | Poll async job progress and result |
-| POST | `/synthesize` | Stateless single-shot TTS (returns WAV bytes) |
+| GET | `/health` | Health check |
+| GET | `/ready` | Readiness check (model loaded?) |
+| POST | `/synthesize` | Stateless TTS: `{text, voice, seed}` → WAV bytes |
+
+## creepy-brain Handles
+
+| Task | Location |
+|------|----------|
+| Text normalization | `app/text/normalization.py` (Claude API) |
+| Text chunking | `app/text/chunking.py` |
+| Audio validation | `app/audio/validation.py` |
+| Retry with seed increment | `app/workflows/steps/tts.py` |
+| GPU pod lifecycle | `app/gpu/runpod.py` |
 
 ## Commands
 
 ```bash
-# Install dependencies (from repo root)
-cd services/tts-server && python3 -m pip install -r requirements.txt
+# Install minimal TTS dependencies
+cd services/tts-server && python3 -m pip install -r requirements-minimal.txt
 
-# Start the TTS server
-cd services/tts-server && python3 lite_clone_server.py
+# Start the minimal TTS server
+cd services/tts-server && python3 minimal_server.py
 
-# Syntax-check TTS server modules
-cd services/tts-server && python3 -m py_compile app.py config.py cpu_runtime.py engine.py enums.py files.py job_store.py lite_clone_server.py models.py routes.py run_orchestrator.py utils.py && echo OK
+# Syntax-check minimal server
+cd services/tts-server && python3 -m py_compile minimal_server.py && echo OK
+
+# creepy-brain
+cd services/creepy-brain && pip install -e .
 ```
 
 ## GPU Rules
