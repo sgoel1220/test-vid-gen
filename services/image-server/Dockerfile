@@ -25,8 +25,9 @@ WORKDIR /app
 
 # Pin versions — stable layer, cached across rebuilds unless deps change
 RUN uv pip install --system --no-cache \
-    diffusers==0.31.0 \
+    diffusers==0.33.1 \
     transformers==4.46.3 \
+    accelerate==1.6.0 \
     safetensors==0.5.3 \
     Pillow==11.1.0 \
     huggingface_hub==0.28.1 \
