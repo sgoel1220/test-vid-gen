@@ -50,10 +50,8 @@ log = logging.getLogger(__name__)
 
 _SYNTHESIZE_PATH = "/synthesize"
 
-# Synthesis parameters
-_BASE_SEED = 42
+# Synthesis parameters (timeouts and retries only - TTS params come from config)
 _MAX_CHUNK_RETRIES = 2       # up to 3 total attempts per chunk
-_CHUNK_SIZE = 800            # max characters per chunk
 _POD_TIMEOUT_SEC = 300       # 5 minutes to wait for pod ready
 _SYNTHESIZE_TIMEOUT_SEC = 120
 
@@ -117,7 +115,7 @@ async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]
     normalized_text = await normalize_text(full_text)
 
     # --- 3. Chunk normalized text ---
-    chunks: list[str] = chunk_text_by_sentences(normalized_text, chunk_size=_CHUNK_SIZE)
+    chunks: list[str] = chunk_text_by_sentences(normalized_text, chunk_size=settings.tts_chunk_size)
     if not chunks:
         raise ValueError("text chunking produced zero chunks")
 
@@ -290,11 +288,22 @@ async def _synthesize_with_retry(
     best_duration: float = 0.0
 
     for attempt in range(max_retries + 1):
-        seed = _BASE_SEED + attempt
+        # Use config seed, increment on retry
+        seed = settings.tts_seed + attempt
         try:
             resp = await client.post(
                 _SYNTHESIZE_PATH,
-                json={"text": chunk_text, "voice": voice_name, "seed": seed},
+                json={
+                    "text": chunk_text,
+                    "voice": voice_name,
+                    "seed": seed,
+                    "exaggeration": settings.tts_exaggeration,
+                    "cfg_weight": settings.tts_cfg_weight,
+                    "temperature": settings.tts_temperature,
+                    "repetition_penalty": settings.tts_repetition_penalty,
+                    "min_p": settings.tts_min_p,
+                    "top_p": settings.tts_top_p,
+                },
             )
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
