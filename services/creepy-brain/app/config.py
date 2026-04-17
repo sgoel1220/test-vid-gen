@@ -1,7 +1,8 @@
 """Configuration settings for Creepy Brain service"""
 
-from typing import Literal
+from typing import Annotated, Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,6 +57,9 @@ class Settings(BaseSettings):
     tts_min_p: float = 0.05
     tts_top_p: float = 1.0
     tts_chunk_size: int = 120
+
+    # Scene grouping settings (for image generation)
+    chunks_per_scene: Annotated[int, Field(ge=1)] = 7  # Number of TTS chunks per image scene
 
     # LLM settings
     llm_provider: Literal["anthropic", "openrouter"] = "openrouter"
