@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
@@ -44,13 +42,6 @@ from models import (
 )
 from text import chunk_text_by_sentences, normalize_text_with_llm, sanitize_filename
 
-from creepy_pasta_protocol.chunks import ChunkSpec
-from creepy_pasta_protocol.common import AudioFormat as _ProtoAF, RunStatus
-from creepy_pasta_protocol.runs import CreateRunRequest, PatchRunRequest
-from creepy_pasta_protocol.settings import ResolvedSettingsSnapshot
-from creepy_pasta_protocol.validation import ChunkValidationSnapshot
-
-import persistence as _persist
 
 logger = logging.getLogger(__name__)
 
@@ -64,20 +55,6 @@ _MIME_TYPE: dict[AudioFormat, str] = {
     AudioFormat.MP3: "audio/mpeg",
     AudioFormat.OPUS: "audio/ogg; codecs=opus",
 }
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _to_settings_snapshot(settings: ResolvedSettings) -> ResolvedSettingsSnapshot:
-    data = settings.model_dump()
-    data["output_format"] = _ProtoAF(settings.output_format.value)
-    return ResolvedSettingsSnapshot(**data)
-
-
-def _to_validation_snapshot(v: ChunkValidationResult) -> ChunkValidationSnapshot:
-    return ChunkValidationSnapshot(**v.model_dump())
 
 
 # ---------------------------------------------------------------------------
@@ -283,13 +260,6 @@ async def execute_lite_clone_run(
             normalized_text = normalized
             synthesis_text = normalized
 
-    # --- Persistence: enqueue create_script (outbox causal ordering handles sequencing) ---
-    _outbox = _persist.get_outbox() if _persist.is_enabled() else None
-    script_sha256: Optional[str] = None
-    if _outbox is not None:
-        script_sha256 = hashlib.sha256(synthesis_text.encode()).hexdigest()
-        await _outbox.enqueue_create_script(synthesis_text)
-
     preview = build_chunk_preview(synthesis_text, settings.split_text, settings.chunk_size)
     if not preview:
         raise HTTPException(status_code=400, detail="No text chunks were produced.")
@@ -311,29 +281,6 @@ async def execute_lite_clone_run(
     run_id = _build_run_dir_name(request.reference_audio_filename, request.run_label)
     run_root = outputs_root / "lite_clone_runs" / run_id
     run_root.mkdir(parents=True, exist_ok=True)
-
-    # --- Persistence: enqueue create_run + create_chunks + patch_run(RUNNING) ---
-    # Causal ordering in the outbox ensures create_script drains first.
-    _run_registered = False
-    if _outbox is not None and script_sha256 is not None:
-        settings_snap = _to_settings_snapshot(settings)
-        chunk_specs = [ChunkSpec(chunk_index=i, text=t) for i, t in selected_entries]
-        await _outbox.enqueue_create_run(CreateRunRequest(
-            script_sha256=script_sha256,
-            run_label=settings.run_label,
-            settings=settings_snap,
-            output_format=_ProtoAF(settings.output_format.value),
-            source_chunk_count=len(preview),
-            selected_chunk_indices=selected_indices,
-            normalized_text=normalized_text,
-            pod_run_id=run_id,
-        ))
-        await _outbox.enqueue_create_chunks(run_id, chunk_specs)
-        await _outbox.enqueue_patch_run(run_id, PatchRunRequest(
-            status=RunStatus.RUNNING,
-            started_at=_utcnow(),
-        ))
-        _run_registered = True
 
     run_warnings: List[str] = []
     chunk_records: List[SavedChunkInfo] = []
@@ -428,31 +375,6 @@ async def execute_lite_clone_run(
                     settings.output_format, settings.target_sample_rate,
                 )
 
-            # --- Persistence: enqueue chunk audio upload ---
-            if _outbox is not None:
-                mime = _MIME_TYPE.get(settings.output_format, "audio/wav")
-                chunk_dur = _duration_sec(best_audio, best_sr)
-                chunk_bytes = await asyncio.to_thread(
-                    encode_audio, best_audio, best_sr,
-                    settings.output_format, settings.target_sample_rate,
-                )
-                proto_vld = (
-                    _to_validation_snapshot(validation_result)
-                    if validation_result is not None
-                    else None
-                )
-                await _outbox.enqueue_upload_chunk_audio(
-                    run_id=run_id,
-                    chunk_index=chunk_idx,
-                    data=chunk_bytes,
-                    format=_ProtoAF(settings.output_format.value),
-                    sample_rate=best_sr,
-                    duration_sec=chunk_dur,
-                    mime_type=mime,
-                    attempts_used=attempts_used,
-                    validation=proto_vld,
-                )
-
             chunk_records.append(SavedChunkInfo(
                 index=chunk_idx, text=chunk_text, artifact=artifact,
                 validation=validation_result, attempts_used=attempts_used,
@@ -501,28 +423,6 @@ async def execute_lite_clone_run(
                 final_audio, engine_sr, settings.output_format, settings.target_sample_rate,
             )
 
-        # --- Persistence: enqueue final audio upload + patch_run(COMPLETED) ---
-        if _outbox is not None:
-            mime = _MIME_TYPE.get(settings.output_format, "audio/wav")
-            final_dur = _duration_sec(final_audio, engine_sr)
-            final_bytes = await asyncio.to_thread(
-                encode_audio, final_audio, engine_sr,
-                settings.output_format, settings.target_sample_rate,
-            )
-            await _outbox.enqueue_upload_final_audio(
-                run_id=run_id,
-                data=final_bytes,
-                format=_ProtoAF(settings.output_format.value),
-                sample_rate=engine_sr,
-                duration_sec=final_dur,
-                mime_type=mime,
-            )
-            await _outbox.enqueue_patch_run(run_id, PatchRunRequest(
-                status=RunStatus.COMPLETED,
-                completed_at=_utcnow(),
-                warnings=run_warnings or None,
-            ))
-
         manifest_rel = (Path("lite_clone_runs") / run_id / "manifest.json")
         response = LiteCloneRunResponse(
             run_id=run_id,
@@ -554,14 +454,6 @@ async def execute_lite_clone_run(
         return response
 
     except BaseException:
-        if _run_registered and _outbox is not None:
-            try:
-                await _outbox.enqueue_patch_run(run_id, PatchRunRequest(
-                    status=RunStatus.FAILED,
-                    completed_at=_utcnow(),
-                ))
-            except Exception:
-                logger.warning("Failed to enqueue patch_run(FAILED) for run %s", run_id)
         raise
 
 

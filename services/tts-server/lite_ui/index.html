@@ -22,7 +22,6 @@
 
         <nav class="tabs">
             <button id="tab-generate" class="tab-btn active" data-tab="generate">Generate</button>
-            <button id="tab-history" class="tab-btn" data-tab="history">History</button>
         </nav>
 
         <div id="generate-tab" class="tab-content active">
@@ -368,53 +367,6 @@
                 <div id="img-gallery-grid" class="image-gallery"></div>
             </div>
         </section>
-        </div>
-
-        <div id="history-tab" class="tab-content hidden">
-            <section class="panel">
-                <div class="section-header">
-                    <h2>Run History</h2>
-                    <span id="history-count" class="muted">Recent TTS runs from the metadata server</span>
-                </div>
-                <div id="history-empty" class="empty-state">No runs yet — generate something to populate history</div>
-                <div id="history-unavailable" class="empty-state hidden">Persistence not configured — check METADATA_API_URL on the pod</div>
-                <div id="history-content" class="hidden">
-                    <div id="history-runs-list" class="history-runs-list"></div>
-                    <div class="pagination-controls">
-                        <button id="history-prev-btn" type="button" class="secondary">Newer</button>
-                        <span id="history-page-info" class="muted">Page 1</span>
-                        <button id="history-next-btn" type="button" class="secondary">Older</button>
-                    </div>
-                </div>
-            </section>
-
-            <section class="panel hidden" id="history-detail-panel">
-                <div class="section-header">
-                    <h2>Run Detail</h2>
-                    <button id="history-detail-close-btn" type="button" class="secondary">Back to list</button>
-                </div>
-                <div id="history-detail-content">
-                    <div class="result-meta">
-                        <div><strong>Run ID:</strong> <span id="history-detail-run-id"></span></div>
-                        <div><strong>Label:</strong> <span id="history-detail-label"></span></div>
-                        <div><strong>Status:</strong> <span id="history-detail-status" class="pill"></span></div>
-                        <div><strong>Created:</strong> <span id="history-detail-created"></span></div>
-                        <div><strong>Voice:</strong> <span id="history-detail-voice"></span></div>
-                        <div><strong>Chunks:</strong> <span id="history-detail-chunk-count"></span></div>
-                    </div>
-                    <div class="actions">
-                        <button id="history-reload-btn" type="button">Reload from this run</button>
-                    </div>
-                    <div id="history-detail-final-audio-block" class="hidden">
-                        <h3>Final audio</h3>
-                        <audio id="history-detail-final-audio" controls></audio>
-                    </div>
-                    <div id="history-detail-chunks-block" class="hidden">
-                        <h3>Chunks</h3>
-                        <div id="history-detail-chunks-list" class="chunk-list"></div>
-                    </div>
-                </div>
-            </section>
         </div>
     </main>
 

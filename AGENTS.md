@@ -246,8 +246,7 @@ When implementing beads (work items tracked in the `.beads/` system), **ALWAYS**
 This repo is a **monorepo** containing multiple services for the Creepy Pasta audio production pipeline:
 
 - **tts-server** — FastAPI TTS backend with OpenAI-compatible API and web UI
-- **metadata-server** — Run metadata storage and audio blob service
-- **story-engine** — LLM-powered story generation pipeline
+- **creepy-brain** — Story generation, TTS orchestration, and workflow engine
 
 ## Project Structure
 
@@ -262,23 +261,20 @@ Chatterbox-TTS-Server/
 │   │   ├── audio/            # Audio encoding, processing
 │   │   ├── text/             # Text chunking, normalization
 │   │   ├── image/            # Image generation
-│   │   ├── persistence/      # SQLite outbox + httpx client
 │   │   ├── lite_ui/          # Web frontend
 │   │   ├── Dockerfile
 │   │   └── requirements.txt
 │   │
-│   ├── metadata-server/      # Run metadata storage
-│   │   ├── app/
-│   │   ├── alembic/
-│   │   ├── Dockerfile
-│   │   └── pyproject.toml
-│   │
-│   └── story-engine/         # LLM story generation
+│   └── creepy-brain/         # Story + workflow orchestration
 │       ├── app/
+│       │   ├── pipeline/     # Story generation pipeline
+│       │   ├── workflows/    # Hatchet workflow steps
+│       │   ├── gpu/          # RunPod GPU provider
+│       │   └── services/     # Business logic
+│       ├── alembic/
 │       ├── Dockerfile
 │       └── pyproject.toml
 │
-├── creepy_pasta_protocol/    # Shared Pydantic models
 ├── AGENTS.md                 # This file
 ├── CLAUDE.md -> AGENTS.md
 └── README.md
@@ -291,7 +287,6 @@ Chatterbox-TTS-Server/
 | `app.py` | FastAPI app factory, middleware, static file mounts, lifespan |
 | `lite_clone_server.py` | Entrypoint — re-exports `app` from `app.py` for backward compat |
 | `routes.py` | Core API route handlers |
-| `routes_history.py` | History proxy routes — forward `/api/history/*` to metadata-svc |
 | `engine.py` | Model loading (original/turbo/multilingual) and synthesis orchestration |
 | `run_orchestrator.py` | TTS job execution: settings resolution, chunk synthesis, artifact saving |
 | `config.py` | `config.yaml` defaults and access helpers |
@@ -303,7 +298,6 @@ Chatterbox-TTS-Server/
 | `utils.py` | Backward-compat shim — re-exports from `audio/`, `text/`, `files.py`, `models.py` |
 | `audio/` | Audio encoding (`encoding.py`), processing (`processing.py`), stitching (`stitching.py`) |
 | `text/` | Text chunking (`chunking.py`) and LLM-based normalization (`normalization.py`) |
-| `persistence/` | SQLite outbox + typed httpx client for the metadata server |
 
 ## API Endpoints (TTS Server)
 
@@ -317,25 +311,19 @@ Chatterbox-TTS-Server/
 | POST | `/tts` | Synchronous TTS generation (returns full run response) |
 | POST | `/api/jobs` | Create async TTS job (returns job_id + status_url) |
 | GET | `/api/jobs/{job_id}` | Poll async job progress and result |
-| GET | `/api/history` | List TTS runs (proxied from metadata-svc) |
-| GET | `/api/history/{run_id}` | Get a single run detail (proxied) |
-| GET | `/api/history/audio/{blob_id}` | Stream audio from metadata-svc |
+| POST | `/synthesize` | Stateless single-shot TTS (returns WAV bytes) |
 
 ## Commands
 
 ```bash
 # Install dependencies (from repo root)
 cd services/tts-server && python3 -m pip install -r requirements.txt
-python3 -m pip install -e ./creepy_pasta_protocol
 
 # Start the TTS server
 cd services/tts-server && python3 lite_clone_server.py
 
 # Syntax-check TTS server modules
-cd services/tts-server && python3 -m py_compile app.py config.py cpu_runtime.py engine.py enums.py files.py job_store.py lite_clone_server.py models.py routes.py routes_history.py run_orchestrator.py utils.py && echo OK
-
-# Type-check persistence layer and protocol (from repo root)
-python3 -m mypy services/tts-server/persistence creepy_pasta_protocol/src
+cd services/tts-server && python3 -m py_compile app.py config.py cpu_runtime.py engine.py enums.py files.py job_store.py lite_clone_server.py models.py routes.py run_orchestrator.py utils.py && echo OK
 ```
 
 ## GPU Rules
@@ -348,33 +336,11 @@ python3 -m mypy services/tts-server/persistence creepy_pasta_protocol/src
 Build and push from the **repo root** (`Chatterbox-TTS-Server/`). **Always specify `--platform linux/amd64`** — RunPod runs on amd64 and a Mac arm64 build will fail with "no matching manifest" at pod start.
 
 ### TTS Server
-```bash
-docker buildx build --platform linux/amd64 \
-  -f services/tts-server/Dockerfile \
-  -t shubh67678/chatterbox-tts-server:latest \
-  --push .
-```
+Images are built automatically via GitHub Actions on push to `main` or tags.
 
-### Metadata Server
-```bash
-docker buildx build --platform linux/amd64 \
-  -f services/metadata-server/Dockerfile \
-  -t shubh67678/metadata-server:latest \
-  --push .
-```
-
-### Story Engine
-```bash
-docker buildx build --platform linux/amd64 \
-  -f services/story-engine/Dockerfile \
-  -t shubh67678/story-engine:latest \
-  --push .
-```
-
-Docker Hub images:
-- `shubh67678/chatterbox-tts-server:latest` — TTS server
-- `shubh67678/metadata-server:latest` — Metadata server
-- `shubh67678/story-engine:latest` — Story engine
+GitHub Container Registry images:
+- `ghcr.io/sgoel1220/tts-server:main` — TTS server
+- `ghcr.io/sgoel1220/creepy-brain:main` — Creepy brain orchestrator
 
 RunPod template: `chatterbox-lite` · port 8005 · Nvidia GPU · 25 GB container disk · ≥20 GB volume disk (to persist model cache across restarts).
 
