@@ -143,11 +143,12 @@ This is the canonical repo instruction file. `CLAUDE.md` is a symlink to this fi
 
 ### What to file
 
-File a bead for any issue you discover that:
-- Is out of scope for the current bead (different file area, different concern)
-- Represents a genuine bug, gap, or missing piece in the system
-- Was flagged by the adversarial review but conflicts with the current bead's intent
-- Is a follow-up that blocks future beads (e.g., an API contract that doesn't exist yet)
+File a bead for **any** issue you discover, including:
+- Out-of-scope bugs or gaps (different file area, different concern)
+- Pre-existing errors surfaced by mypy, linters, or adversarial review
+- Missing API contracts or integrations that future beads depend on
+- Adversarial review findings that conflict with the current bead's intent
+- Anything you noticed but cannot fix right now — no matter how small
 
 ### How to file
 
