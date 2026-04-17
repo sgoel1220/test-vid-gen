@@ -137,6 +137,43 @@ This is the canonical repo instruction file. `CLAUDE.md` is a symlink to this fi
 - **ALWAYS prefer Pydantic models over dicts/tuples**
 - **ALWAYS run mypy before committing**
 
+## Filing Beads During Implementation
+
+**When working on a bead, you WILL discover issues that are out of scope for the current bead.** Do NOT ignore them or fix them inline — file them as beads immediately so they are tracked and can be prioritized.
+
+### What to file
+
+File a bead for any issue you discover that:
+- Is out of scope for the current bead (different file area, different concern)
+- Represents a genuine bug, gap, or missing piece in the system
+- Was flagged by the adversarial review but conflicts with the current bead's intent
+- Is a follow-up that blocks future beads (e.g., an API contract that doesn't exist yet)
+
+### How to file
+
+```python
+mcp__beads__create(
+    title="Short imperative title",
+    issue_type="bug" | "task" | "chore",
+    priority=1 | 2 | 3,   # 1=critical/blocker, 2=normal, 3=nice-to-have
+    labels=["relevant", "tags"],
+    description="""
+    What the problem is, why it matters, and how to fix it.
+    Include acceptance criteria if you know them.
+    """,
+)
+```
+
+### When to file
+
+- **During implementation**: as soon as you discover the issue, before continuing
+- **After adversarial review**: for any finding you cannot fix in the current bead
+- **At session end**: sweep for anything you noticed but didn't act on
+
+### Critical rule
+
+**NEVER silently leave a known issue unfiled.** If you see a problem and don't fix it, it MUST become a bead. "I'll remember it" is not acceptable — the bead system is the memory.
+
 ## Bead Workflow
 
 When implementing beads (work items tracked in the `.beads/` system), **ALWAYS** follow this workflow:
