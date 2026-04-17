@@ -44,7 +44,10 @@ RUN python -m pip install --no-cache-dir --upgrade pip && \
 COPY services/tts-server/minimal_server.py /app/minimal_server.py
 
 # Create required directories
-RUN mkdir -p /app/model_cache /app/reference_audio /app/hf_cache
+RUN mkdir -p /app/model_cache /app/hf_cache
+
+# Copy predefined voices
+COPY services/tts-server/voices/ /app/reference_audio/
 
 EXPOSE 8005
 
