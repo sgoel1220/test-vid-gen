@@ -52,7 +52,6 @@ COPY services/tts-server/audio /app/audio
 COPY services/tts-server/text /app/text
 COPY services/tts-server/image /app/image
 COPY services/tts-server/lite_ui /app/lite_ui
-COPY services/tts-server/persistence /app/persistence
 
 RUN mkdir -p /app/model_cache /app/reference_audio /app/outputs /app/logs /app/hf_cache /app/voices
 
