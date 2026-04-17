@@ -72,8 +72,15 @@ class GpuProvider(ABC):
         """Create a new GPU pod. Idempotency key ensures same pod returned if called twice."""
 
     @abstractmethod
-    async def get_pod(self, pod_id: str) -> GpuPod | None:
-        """Get pod status by ID."""
+    async def get_pod(
+        self, pod_id: str, service_port: int | None = None
+    ) -> GpuPod | None:
+        """Get pod status by ID.
+
+        Args:
+            pod_id: The pod ID to get.
+            service_port: The service port for endpoint URL construction.
+        """
 
     @abstractmethod
     async def terminate_pod(self, pod_id: str) -> bool:
@@ -84,8 +91,15 @@ class GpuProvider(ABC):
         self,
         pod_id: str,
         timeout_sec: int = 300,
+        service_port: int | None = None,
     ) -> GpuPod:
-        """Wait for pod to be ready (health check passes)."""
+        """Wait for pod to be ready (health check passes).
+
+        Args:
+            pod_id: The pod ID to wait for.
+            timeout_sec: Maximum time to wait for the pod to become ready.
+            service_port: The service port for endpoint URL construction.
+        """
 
     @abstractmethod
     async def list_active_pods(self) -> list[GpuPod]:

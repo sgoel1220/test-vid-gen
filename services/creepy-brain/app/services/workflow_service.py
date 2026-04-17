@@ -110,6 +110,28 @@ class WorkflowService:
         chunk.tts_completed_at = datetime.now(timezone.utc)
         await self._session.flush()
 
+    async def complete_chunk_image(
+        self,
+        workflow_id: uuid.UUID,
+        chunk_index: int,
+        blob_id: uuid.UUID,
+        image_prompt: str,
+    ) -> None:
+        """Record successful image generation for a chunk (flush only).
+
+        Args:
+            workflow_id: The owning workflow UUID.
+            chunk_index: Zero-based chunk position.
+            blob_id: UUID of the saved PNG blob in ``workflow_blobs``.
+            image_prompt: The SDXL prompt used to generate the image.
+        """
+        chunk = await self._get_or_raise(workflow_id, chunk_index)
+        chunk.image_status = ChunkStatus.COMPLETED
+        chunk.image_blob_id = blob_id
+        chunk.image_prompt = image_prompt
+        chunk.image_completed_at = datetime.now(timezone.utc)
+        await self._session.flush()
+
     async def _get_or_raise(
         self, workflow_id: uuid.UUID, chunk_index: int
     ) -> WorkflowChunk:
