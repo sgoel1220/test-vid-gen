@@ -1,6 +1,7 @@
 services:
   brain:
     build: .
+    image: creepy-brain:latest
     container_name: creepy-brain
     ports:
       - "8006:8006"
@@ -20,6 +21,30 @@ services:
       postgres:
         condition: service_healthy
       hatchet-engine:
+        condition: service_started
+    restart: unless-stopped
+
+  brain-worker:
+    build: .
+    image: creepy-brain:latest
+    container_name: creepy-brain-worker
+    entrypoint: ["python", "-m", "app.workflows.worker"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=creepy_brain
+      - POSTGRES_PASSWORD=dev_password
+      - POSTGRES_DB=creepy_brain
+      # HATCHET_CLIENT_TOKEN is loaded from .env (create token in Hatchet dashboard)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hatchet-engine:
+        condition: service_healthy
+      brain:
         condition: service_started
     restart: unless-stopped
 

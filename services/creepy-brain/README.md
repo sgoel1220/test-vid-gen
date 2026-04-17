@@ -28,19 +28,42 @@ This service uses Hatchet for workflow orchestration and provides a unified API 
 
 ### Running with Docker
 
+The stack runs two application processes from the same image:
+
+| Container | Role |
+|-----------|------|
+| `creepy-brain` | FastAPI API server (port 8006) — also runs Alembic migrations on startup |
+| `creepy-brain-worker` | Hatchet workflow worker — connects to Hatchet engine and processes workflow steps |
+
 ```bash
-# 1. Create .env from example and fill in ANTHROPIC_API_KEY
+# 1. Create .env from example and fill in required keys
 cp .env.example .env
-# Edit .env: set ANTHROPIC_API_KEY=sk-ant-...
+# Edit .env:
+#   ANTHROPIC_API_KEY=sk-ant-...
+#   HATCHET_CLIENT_TOKEN=<token from Hatchet dashboard → Settings → API Tokens>
 
-# 2. Start the service and postgres
-docker-compose up
+# 2. Start all services (API server + worker + Hatchet engine + postgres)
+docker compose up
 
-# The service will be available at http://localhost:8006
+# API server:      http://localhost:8006
+# Hatchet UI:      http://localhost:8888  (check Workers tab to confirm brain-worker connected)
+```
+
+To view worker logs:
+```bash
+docker compose logs brain-worker -f
+```
+
+To manually trigger the test workflow:
+```bash
+curl -X POST http://localhost:8006/api/workflows/test
 ```
 
 > Story generation requires `ANTHROPIC_API_KEY` in `.env`. Without it the generate
 > endpoint returns 202 but background generation will fail with status `failed`.
+>
+> Hatchet workflows require `HATCHET_CLIENT_TOKEN` in `.env`. Without it `brain-worker`
+> will fail to connect to the Hatchet engine.
 
 ### Local Development
 
@@ -97,6 +120,7 @@ Key settings:
 - `POSTGRES_USER` - Database user
 - `POSTGRES_PASSWORD` - Database password
 - `ANTHROPIC_API_KEY` - API key for story generation
+- `HATCHET_CLIENT_TOKEN` - API token for the Hatchet workflow engine (required by `brain-worker`)
 - `JSON_LOGS` - `true` for JSON logs (production), `false` for pretty logs (dev)
 
 ## Development Roadmap
