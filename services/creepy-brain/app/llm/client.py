@@ -7,7 +7,6 @@ import logging
 import re
 from typing import Any, Protocol, Type, TypeVar
 
-import anthropic
 import httpx
 from pydantic import BaseModel
 
@@ -31,6 +30,7 @@ class AnthropicProvider:
     """Calls the Anthropic API using the official SDK."""
 
     def __init__(self, api_key: str, model: str) -> None:
+        import anthropic  # Lazy import - only needed when using Anthropic provider
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
 

@@ -39,18 +39,21 @@ class Settings(BaseSettings):
     runpod_api_key: str = ""
 
     # GPU pod configuration
-    gpu_type: str = "NVIDIA GeForce RTX 3070"
+    gpu_type: str = "NVIDIA RTX A4000"
     gpu_cloud_type: str = "COMMUNITY"  # COMMUNITY or SECURE
     gpu_image: str = "ghcr.io/sgoel1220/tts-server:main"
     gpu_container_disk_gb: int = 25
     gpu_volume_gb: int = 0  # No persistent volume
     gpu_port: int = 8005
 
+    # TTS settings
+    tts_default_voice: str = "old_man_low.wav"
+
     # LLM settings
-    llm_provider: Literal["anthropic", "openrouter"] = "anthropic"
+    llm_provider: Literal["anthropic", "openrouter"] = "openrouter"
     anthropic_api_key: str = ""
     openrouter_api_key: str = ""
-    llm_model: str = "claude-opus-4-6"
+    llm_model: str = "meta-llama/llama-3.1-8b-instruct"  # ~$0.05/1M tokens
     max_concurrent_generations: int = 2
 
     @property

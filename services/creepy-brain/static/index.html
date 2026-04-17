@@ -90,6 +90,15 @@
       display: none;
     }
     .empty { color: #888; font-style: italic; }
+    .audio-section {
+      background: #16213e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .audio-info { color: #888; font-size: 14px; }
+    audio { border-radius: 4px; }
   </style>
 </head>
 <body>
@@ -103,6 +112,17 @@
   <div class="controls">
     <button id="copy-btn" disabled>Copy Full Script</button>
     <button id="refresh-btn">Refresh Stories</button>
+  </div>
+
+  <h2>Audio Player</h2>
+  <div class="audio-section">
+    <audio id="audio-player" controls style="width: 100%; margin-bottom: 10px;">
+      <source src="/static/full_story.wav" type="audio/wav">
+      Your browser does not support the audio element.
+    </audio>
+    <div class="audio-info" id="audio-info">
+      <span class="empty">Loading audio info...</span>
+    </div>
   </div>
 
   <div class="script-box" id="script-box">
@@ -192,6 +212,20 @@
     });
 
     document.getElementById('refresh-btn').addEventListener('click', loadStories);
+
+    // Audio player info
+    const audioPlayer = document.getElementById('audio-player');
+    const audioInfo = document.getElementById('audio-info');
+
+    audioPlayer.addEventListener('loadedmetadata', () => {
+      const mins = Math.floor(audioPlayer.duration / 60);
+      const secs = Math.floor(audioPlayer.duration % 60);
+      audioInfo.innerHTML = `Duration: ${mins}:${secs.toString().padStart(2, '0')}`;
+    });
+
+    audioPlayer.addEventListener('error', () => {
+      audioInfo.innerHTML = '<span class="empty">No audio file available yet.</span>';
+    });
 
     loadStories();
   </script>

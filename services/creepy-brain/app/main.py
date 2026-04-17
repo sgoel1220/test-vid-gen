@@ -4,7 +4,10 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 import structlog
 
@@ -71,6 +74,11 @@ def create_app() -> FastAPI:
 
     from app.routes.stories import router as stories_router
     app.include_router(stories_router)
+
+    # Mount static files for serving audio and UI
+    static_dir = Path(__file__).parent.parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     return app
 

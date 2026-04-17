@@ -43,6 +43,14 @@ class SynthesizeRequest(BaseModel):
     voice: str = Field(..., description="Reference audio filename for voice cloning.")
     seed: int = Field(0, ge=0, description="Random seed for reproducibility. 0 means random.")
 
+    # Chatterbox generation parameters (all optional with defaults)
+    exaggeration: float = Field(0.5, ge=0.0, le=2.0, description="Emotion: 0=flat, 1=normal, 2=exaggerated.")
+    cfg_weight: float = Field(0.5, ge=0.0, le=1.0, description="Pacing: high=monotone, low=expressive.")
+    temperature: float = Field(0.8, ge=0.0, le=2.0, description="Randomness/variety in generation.")
+    repetition_penalty: float = Field(1.2, ge=1.0, le=5.0, description="Penalize repeated tokens.")
+    min_p: float = Field(0.05, ge=0.0, le=1.0, description="Min probability threshold.")
+    top_p: float = Field(1.0, ge=0.0, le=1.0, description="Nucleus sampling threshold.")
+
 
 # ---------------------------------------------------------------------------
 # TTS Engine (lazy-loaded singleton)
@@ -86,6 +94,12 @@ def _synthesize_sync(
     text: str,
     audio_prompt_path: str,
     seed: int,
+    exaggeration: float,
+    cfg_weight: float,
+    temperature: float,
+    repetition_penalty: float,
+    min_p: float,
+    top_p: float,
 ) -> tuple[torch.Tensor, int]:
     """Synchronous synthesis using Chatterbox."""
     from chatterbox.tts import ChatterboxTTS
@@ -98,7 +112,16 @@ def _synthesize_sync(
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
 
-    wav = model.generate(text, audio_prompt_path=audio_prompt_path)
+    wav = model.generate(
+        text,
+        audio_prompt_path=audio_prompt_path,
+        exaggeration=exaggeration,
+        cfg_weight=cfg_weight,
+        temperature=temperature,
+        repetition_penalty=repetition_penalty,
+        min_p=min_p,
+        top_p=top_p,
+    )
     return wav, model.sr
 
 
@@ -146,6 +169,12 @@ async def synthesize(request: SynthesizeRequest) -> Response:
             text=request.text,
             audio_prompt_path=str(ref_path),
             seed=request.seed,
+            exaggeration=request.exaggeration,
+            cfg_weight=request.cfg_weight,
+            temperature=request.temperature,
+            repetition_penalty=request.repetition_penalty,
+            min_p=request.min_p,
+            top_p=request.top_p,
         ),
     )
 

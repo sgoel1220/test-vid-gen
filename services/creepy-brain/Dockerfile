@@ -8,16 +8,17 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files
-COPY services/creepy-brain/pyproject.toml ./
+COPY pyproject.toml ./
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -e .
 
 # Copy application code
-COPY services/creepy-brain/app/ ./app/
-COPY services/creepy-brain/alembic/ ./alembic/
-COPY services/creepy-brain/alembic.ini ./
-COPY services/creepy-brain/entrypoint.sh ./
+COPY app/ ./app/
+COPY alembic/ ./alembic/
+COPY alembic.ini ./
+COPY entrypoint.sh ./
+COPY static/ ./static/
 
 RUN chmod +x entrypoint.sh
 

@@ -1,111 +1,26 @@
-"""RunPod GPU provider implementation using the RunPod GraphQL API."""
+"""RunPod GPU provider implementation using the official RunPod SDK."""
 
 import asyncio
 from datetime import datetime, timezone
 
 import httpx
+import runpod
 
 from .base import GpuPod, GpuPodSpec, GpuProvider, PodStatus
 
-RUNPOD_API_BASE = "https://api.runpod.io/graphql"
-
-_CREATE_POD_MUTATION = """
-mutation CreatePod($input: PodRentInterruptableInput!) {
-    podRentInterruptable(input: $input) {
-        id
-        name
-        desiredStatus
-        machine { gpuDisplayName costPerHr }
-    }
-}
-"""
-
-_GET_POD_QUERY = """
-query GetPod($id: String!) {
-    pod(input: {podId: $id}) {
-        id
-        name
-        desiredStatus
-        createdAt
-        runtime {
-            ports { ip privatePort publicPort isIpPublic type }
-        }
-        machine { gpuDisplayName costPerHr }
-    }
-}
-"""
-
-_TERMINATE_POD_MUTATION = """
-mutation TerminatePod($id: String!) {
-    podTerminate(input: {podId: $id})
-}
-"""
-
-_LIST_PODS_QUERY = """
-query ListPods {
-    myself {
-        pods {
-            id
-            name
-            desiredStatus
-            createdAt
-            runtime {
-                ports { ip privatePort publicPort isIpPublic type }
-            }
-            machine { gpuDisplayName costPerHr }
-        }
-    }
-}
-"""
-
 
 class RunPodProvider(GpuProvider):
-    """GPU provider backed by RunPod's GraphQL API."""
+    """GPU provider backed by the RunPod SDK."""
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
-        self._api_url = f"{RUNPOD_API_BASE}?api_key={api_key}"
-        self._client = httpx.AsyncClient(timeout=30.0)
+        runpod.api_key = api_key
 
-    async def _gql(
-        self,
-        query: str,
-        variables: dict[str, object] | None = None,
-    ) -> dict[str, object]:
-        payload: dict[str, object] = {"query": query}
-        if variables:
-            payload["variables"] = variables
-        resp = await self._client.post(self._api_url, json=payload)
-        resp.raise_for_status()
-        body: dict[str, object] = resp.json()
-        if "errors" in body:
-            raise RuntimeError(f"RunPod GraphQL error: {body['errors']}")
-        data = body.get("data")
-        if not isinstance(data, dict):
-            raise RuntimeError(f"Unexpected RunPod response shape: {body}")
-        return data
-
-    def _parse_pod(
-        self,
-        raw: dict[str, object],
-        service_port: int | None = None,
-    ) -> GpuPod:
-        """Parse a raw RunPod API dict into a GpuPod.
-
-        Args:
-            raw: GraphQL pod object.
-            service_port: The private container port that should be used as the
-                service endpoint.  When provided, only the public mapping for
-                that specific private port is considered, avoiding accidental
-                selection of an SSH or metrics port.  When None, the first
-                publicly-exposed port is used (e.g. when the spec is not
-                available in list/get contexts).
-        """
+    def _parse_pod(self, raw: dict[str, object], service_port: int | None = None) -> GpuPod:
+        """Parse a raw RunPod API dict into a GpuPod."""
         pod_id = str(raw["id"])
         desired = str(raw.get("desiredStatus", ""))
 
-        # RUNNING/READY distinction: RUNNING = provider says pod is up;
-        # READY = RUNNING + health probe passed (set only by wait_for_ready).
         if desired == "RUNNING":
             status = PodStatus.RUNNING
         elif desired in ("EXITED", "TERMINATED"):
@@ -113,35 +28,25 @@ class RunPodProvider(GpuProvider):
         else:
             status = PodStatus.CREATING
 
+        # Build endpoint URL using RunPod proxy format
         endpoint_url: str | None = None
         runtime = raw.get("runtime")
-        if isinstance(runtime, dict):
-            for port in runtime.get("ports") or []:
-                if not isinstance(port, dict):
-                    continue
-                if not port.get("isIpPublic"):
-                    continue
-                # When a specific service port is known, only match its mapping.
-                if service_port is not None and port.get("privatePort") != service_port:
-                    continue
-                ip = port.get("ip", "")
-                public_port = port.get("publicPort")
-                if ip and public_port is not None:
-                    endpoint_url = f"http://{ip}:{public_port}"
-                    break
+        if isinstance(runtime, dict) and runtime.get("ports"):
+            # Use the RunPod proxy URL format
+            if service_port:
+                endpoint_url = f"https://{pod_id}-{service_port}.proxy.runpod.net"
+            else:
+                endpoint_url = f"https://{pod_id}-8005.proxy.runpod.net"
 
-        machine_raw = raw.get("machine")
-        if machine_raw is not None and not isinstance(machine_raw, dict):
-            raise TypeError(
-                f"Expected 'machine' to be a dict, got {type(machine_raw).__name__}: {machine_raw!r}"
-            )
-        machine: dict[str, object] = machine_raw if isinstance(machine_raw, dict) else {}
-        gpu_type: str | None = str(machine["gpuDisplayName"]) if "gpuDisplayName" in machine else None
-        cost_raw = machine.get("costPerHr")
-        cost_cents: int | None = int(float(cost_raw) * 100) if cost_raw is not None else None  # type: ignore[arg-type]
+        machine = raw.get("machine") or {}
+        if isinstance(machine, dict):
+            gpu_type = str(machine.get("gpuDisplayName", "")) or None
+            cost_raw = machine.get("costPerHr")
+            cost_cents = int(float(cost_raw) * 100) if cost_raw else None
+        else:
+            gpu_type = None
+            cost_cents = None
 
-        # Parse createdAt from the API when available; fall back to None rather than
-        # silently using "now" which would be wrong for fetched/listed pods.
         created_at: datetime | None = None
         raw_created_at = raw.get("createdAt")
         if isinstance(raw_created_at, str):
@@ -150,7 +55,7 @@ class RunPodProvider(GpuProvider):
                 if created_at.tzinfo is None:
                     created_at = created_at.replace(tzinfo=timezone.utc)
             except ValueError:
-                created_at = None
+                pass
 
         return GpuPod(
             id=pod_id,
@@ -162,102 +67,110 @@ class RunPodProvider(GpuProvider):
             created_at=created_at,
         )
 
-    async def _find_pod_by_name(
-        self,
-        name: str,
-        service_port: int | None = None,
-    ) -> GpuPod | None:
-        data = await self._gql(_LIST_PODS_QUERY)
-        myself = data.get("myself")
-        if not isinstance(myself, dict):
-            return None
-        for raw in myself.get("pods") or []:
-            if isinstance(raw, dict) and raw.get("name") == name:
-                return self._parse_pod(raw, service_port=service_port)
-        return None
-
     async def create_pod(self, spec: GpuPodSpec, idempotency_key: str) -> GpuPod:
-        # Use the first spec port as the canonical service port so endpoint
-        # selection is deterministic even when multiple ports are exposed.
-        service_port: int | None = spec.ports[0] if spec.ports else None
-        existing = await self._find_pod_by_name(idempotency_key, service_port=service_port)
+        """Create a new GPU pod using the RunPod SDK."""
+        service_port = spec.ports[0] if spec.ports else 8005
+
+        # Check for existing pod with same name
+        existing = await self._find_pod_by_name(idempotency_key, service_port)
         if existing and existing.status != PodStatus.TERMINATED:
             return existing
 
-        env_list = [{"key": k, "value": v} for k, v in spec.env.items()]
         ports_str = ",".join(f"{p}/http" for p in spec.ports)
+        env_dict = spec.env or {}
 
-        variables: dict[str, object] = {
-            "input": {
-                "name": idempotency_key,
-                "imageName": spec.image,
-                "gpuTypeId": spec.gpu_type,
-                "cloudType": spec.cloud_type,
-                "containerDiskInGb": spec.disk_size_gb,
-                "volumeInGb": spec.volume_gb,
-                "dockerArgs": "",  # Use Dockerfile CMD
-                "ports": ports_str,
-                "env": env_list,
-            }
-        }
+        def _create() -> dict[str, object]:
+            return runpod.create_pod(
+                name=idempotency_key,
+                image_name=spec.image,
+                gpu_type_id=spec.gpu_type,
+                cloud_type=spec.cloud_type,
+                container_disk_in_gb=spec.disk_size_gb,
+                volume_in_gb=spec.volume_gb,
+                ports=ports_str,
+                env=env_dict,
+            )
+
         try:
-            data = await self._gql(_CREATE_POD_MUTATION, variables)
-            raw = data.get("podRentInterruptable")
-            if not isinstance(raw, dict):
-                raise RuntimeError(f"Unexpected create_pod response: {data}")
-            return self._parse_pod(raw, service_port=service_port)
+            raw = await asyncio.to_thread(_create)
+            return self._parse_pod(raw, service_port)
         except Exception:
-            # On any error (including concurrent creation), re-check by name before
-            # re-raising — a concurrent caller may have already created the pod.
-            recovered = await self._find_pod_by_name(idempotency_key, service_port=service_port)
+            # On error, check if pod was created by concurrent call
+            recovered = await self._find_pod_by_name(idempotency_key, service_port)
             if recovered and recovered.status != PodStatus.TERMINATED:
                 return recovered
             raise
 
     async def get_pod(self, pod_id: str) -> GpuPod | None:
-        data = await self._gql(_GET_POD_QUERY, {"id": pod_id})
-        raw = data.get("pod")
-        if not isinstance(raw, dict):
+        """Get pod status by ID."""
+        def _get() -> dict[str, object]:
+            return runpod.get_pod(pod_id)
+
+        try:
+            raw = await asyncio.to_thread(_get)
+            if not raw:
+                return None
+            return self._parse_pod(raw)
+        except Exception:
             return None
-        return self._parse_pod(raw)
 
     async def terminate_pod(self, pod_id: str) -> bool:
-        data = await self._gql(_TERMINATE_POD_MUTATION, {"id": pod_id})
-        # RunPod returns the pod id string on success or null/false on failure.
-        result = data.get("podTerminate")
-        return bool(result)
+        """Terminate a pod."""
+        def _terminate() -> object:
+            return runpod.terminate_pod(pod_id)
+
+        try:
+            await asyncio.to_thread(_terminate)
+            return True
+        except Exception:
+            return False
 
     async def wait_for_ready(self, pod_id: str, timeout_sec: int = 300) -> GpuPod:
-        loop = asyncio.get_event_loop()
-        deadline = loop.time() + timeout_sec
-        while loop.time() < deadline:
+        """Wait for pod to be ready (health check passes)."""
+        deadline = asyncio.get_event_loop().time() + timeout_sec
+
+        while asyncio.get_event_loop().time() < deadline:
             pod = await self.get_pod(pod_id)
             if pod and pod.endpoint_url:
                 try:
-                    async with httpx.AsyncClient(timeout=5.0) as probe:
-                        # Probe /health endpoint on the minimal TTS server
-                        r = await probe.get(f"{pod.endpoint_url}/health")
+                    async with httpx.AsyncClient(timeout=5.0) as client:
+                        r = await client.get(f"{pod.endpoint_url}/health")
                         if r.status_code == 200:
                             pod.status = PodStatus.READY
                             return pod
                 except (httpx.ConnectError, httpx.TimeoutException):
                     pass
             await asyncio.sleep(10)
+
         raise TimeoutError(f"Pod {pod_id} did not become ready within {timeout_sec}s")
 
     async def list_active_pods(self) -> list[GpuPod]:
-        data = await self._gql(_LIST_PODS_QUERY)
-        myself = data.get("myself")
-        if not isinstance(myself, dict):
-            return []
+        """List all active (non-terminated) pods."""
+        def _list() -> list[dict[str, object]]:
+            return runpod.get_pods()
+
+        raw_pods = await asyncio.to_thread(_list)
         result: list[GpuPod] = []
-        for raw in myself.get("pods") or []:
-            if isinstance(raw, dict):
-                pod = self._parse_pod(raw)
-                if pod.status != PodStatus.TERMINATED:
-                    result.append(pod)
+        for raw in raw_pods:
+            pod = self._parse_pod(raw)
+            if pod.status != PodStatus.TERMINATED:
+                result.append(pod)
         return result
 
+    async def _find_pod_by_name(
+        self, name: str, service_port: int | None = None
+    ) -> GpuPod | None:
+        """Find a pod by name."""
+        pods = await self.list_active_pods()
+        for pod in pods:
+            # Get full pod info to check name
+            full_pod = await self.get_pod(pod.id)
+            if full_pod:
+                raw = await asyncio.to_thread(lambda: runpod.get_pod(pod.id))
+                if raw and raw.get("name") == name:
+                    return self._parse_pod(raw, service_port)
+        return None
+
     async def aclose(self) -> None:
-        """Close the underlying HTTP client."""
-        await self._client.aclose()
+        """No cleanup needed for SDK-based provider."""
+        pass
