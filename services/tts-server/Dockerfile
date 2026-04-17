@@ -31,14 +31,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN ln -sf /usr/bin/python3 /usr/bin/python
 
+# Install uv for faster package installs (10-100x faster than pip)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
 WORKDIR /app
 
-# Install minimal Python dependencies
+# Install Python dependencies with uv
 COPY services/tts-server/requirements-minimal.txt /tmp/requirements.txt
-RUN python -m pip install --no-cache-dir --upgrade pip && \
-    python -m pip install --no-cache-dir -r /tmp/requirements.txt && \
-    python -m pip install --no-cache-dir --no-deps git+https://github.com/devnen/chatterbox-v2.git@cc0357396d9c73fc1e6c544ee40bb596020edd09 s3tokenizer==0.3.0 onnx==1.16.0 && \
-    python -m pip install --no-cache-dir "protobuf>=4.25.0"
+RUN uv pip install --system --no-cache -r /tmp/requirements.txt && \
+    uv pip install --system --no-cache --no-deps git+https://github.com/devnen/chatterbox-v2.git@cc0357396d9c73fc1e6c544ee40bb596020edd09 s3tokenizer==0.3.0 onnx==1.16.0 && \
+    uv pip install --system --no-cache "protobuf>=4.25.0"
 
 # Copy only the minimal server
 COPY services/tts-server/minimal_server.py /app/minimal_server.py
