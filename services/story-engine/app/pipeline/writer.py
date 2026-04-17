@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
 
 from app.llm import client
 from app.llm.prompts import (
@@ -15,7 +15,7 @@ from app.models.act import ActDraft
 from app.models.outline import ActOutline, FiveActOutline
 from app.models.story_bible import StoryBible
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 def _format_beats(act_outline: ActOutline) -> str:
@@ -43,7 +43,7 @@ async def write_act(
 ) -> ActDraft:
     """Generate prose for a single act."""
     act_num = act_outline.act_number
-    log.info("writer: writing act %d", act_num)
+    log.info("writer: writing act", act_num=act_num)
 
     user_prompt = WRITER_USER.format(
         bible_json=bible.model_dump_json(indent=2),
@@ -60,7 +60,7 @@ async def write_act(
     text = await client.generate_text(system=WRITER_SYSTEM, user=user_prompt)
     text = text.strip()
     word_count = len(text.split())
-    log.info("writer: act %d done, %d words", act_num, word_count)
+    log.info("writer: act done", act_num=act_num, word_count=word_count)
 
     return ActDraft(
         act_number=act_num,
@@ -79,7 +79,7 @@ async def rewrite_act(
 ) -> ActDraft:
     """Rewrite an act that failed inline check."""
     act_num = act_outline.act_number
-    log.info("writer: rewriting act %d", act_num)
+    log.info("writer: rewriting act", act_num=act_num)
 
     user_prompt = ACT_REWRITE_USER.format(
         bible_json=bible.model_dump_json(indent=2),
@@ -97,7 +97,7 @@ async def rewrite_act(
     text = await client.generate_text(system=ACT_REWRITE_SYSTEM, user=user_prompt)
     text = text.strip()
     word_count = len(text.split())
-    log.info("writer: act %d rewrite done, %d words", act_num, word_count)
+    log.info("writer: act rewrite done", act_num=act_num, word_count=word_count)
 
     return ActDraft(
         act_number=act_num,

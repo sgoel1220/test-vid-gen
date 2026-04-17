@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
 
 from app.llm import client
 from app.llm.prompts import FULL_REVIEW_SYSTEM, FULL_REVIEW_USER
@@ -11,7 +11,7 @@ from app.models.critique import FullStoryCritique
 from app.models.outline import FiveActOutline
 from app.models.story_bible import StoryBible
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 def _assemble_full_text(acts: list[ActDraft]) -> str:
@@ -30,7 +30,7 @@ async def review(
 ) -> FullStoryCritique:
     """Review the full assembled story and score it."""
     full_text = _assemble_full_text(acts)
-    log.info("full_reviewer: reviewing %d words", len(full_text.split()))
+    log.info("full_reviewer: reviewing", word_count=len(full_text.split()))
 
     user_prompt = FULL_REVIEW_USER.format(
         bible_json=bible.model_dump_json(indent=2),

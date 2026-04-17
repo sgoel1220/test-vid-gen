@@ -5,7 +5,7 @@ Runs as a background asyncio task. Updates metadata-server at each step.
 
 from __future__ import annotations
 
-import logging
+import structlog
 from typing import TYPE_CHECKING
 
 from app.llm.prompts import (
@@ -30,7 +30,7 @@ from app.pipeline.architect import ArchitectOutput
 if TYPE_CHECKING:
     from app.services.generation import MetadataClient
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 MAX_OUTLINE_LOOPS = 2
 MAX_REVIEW_LOOPS = 3
@@ -65,10 +65,10 @@ async def run_pipeline(
         for outline_loop in range(MAX_OUTLINE_LOOPS):
             critique = await outline_reviewer.run(bible, outline)
             if critique.passes:
-                log.info("outline passed on loop %d", outline_loop + 1)
+                log.info("outline passed", loop=outline_loop + 1)
                 break
 
-            log.info("outline failed, fixing (loop %d)", outline_loop + 1)
+            log.info("outline failed, fixing", loop=outline_loop + 1)
             fix_result = await client.generate_structured(
                 system=ARCHITECT_FIX_SYSTEM,
                 user=ARCHITECT_FIX_USER.format(
@@ -99,9 +99,7 @@ async def run_pipeline(
                 bible, act_outline, prior, draft.text
             )
             if not check.passes:
-                log.info(
-                    "act %d failed inline check, rewriting", act_outline.act_number
-                )
+                log.info("act failed inline check, rewriting", act_num=act_outline.act_number)
                 draft = await writer.rewrite_act(
                     bible, outline, act_outline, prior, check.notes
                 )
@@ -123,7 +121,7 @@ async def run_pipeline(
         for review_loop in range(MAX_REVIEW_LOOPS):
             review = await full_reviewer.review(bible, outline, acts)
             score = review.scores.overall_score
-            log.info("review loop %d: score=%.1f", review_loop + 1, score)
+            log.info("review loop", loop=review_loop + 1, score=score)
 
             await meta.patch_story(
                 story_id,
@@ -132,7 +130,7 @@ async def run_pipeline(
             )
 
             if score >= PASSING_SCORE:
-                log.info("story passed with score %.1f", score)
+                log.info("story passed", score=score)
                 break
 
             if not review.fix_instructions:
@@ -153,7 +151,7 @@ async def run_pipeline(
                     continue
                 act_outline = outline.acts[act_idx]
 
-                log.info("rewriting act %d per review fix", fix.act_number)
+                log.info("rewriting act per review fix", act_num=fix.act_number)
                 new_text = await client.generate_text(
                     system=TARGETED_REWRITE_SYSTEM,
                     user=TARGETED_REWRITE_USER.format(
@@ -185,14 +183,14 @@ async def run_pipeline(
         # ── Done ─────────────────────────────────────────────────────
         await meta.recalculate_words(story_id)
         await meta.patch_story(story_id, status="completed")
-        log.info("pipeline complete for story %s", story_id)
+        log.info("pipeline complete", story_id=story_id)
 
     except Exception:
-        log.exception("pipeline failed for story %s", story_id)
+        log.exception("pipeline failed", story_id=story_id)
         try:
             await meta.patch_story(story_id, status="failed", error=_exc_summary())
         except Exception:
-            log.exception("failed to mark story %s as failed", story_id)
+            log.exception("failed to mark story as failed", story_id=story_id)
 
 
 def _exc_summary() -> str:

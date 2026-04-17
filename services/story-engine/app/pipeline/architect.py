@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
 
 from creepy_pasta_protocol.common import Frozen
 
@@ -11,7 +11,7 @@ from app.llm.prompts import ARCHITECT_SYSTEM, ARCHITECT_USER
 from app.models.outline import FiveActOutline
 from app.models.story_bible import StoryBible
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 class ArchitectOutput(Frozen):

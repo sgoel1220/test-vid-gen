@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
 
 from app.llm import client
 from app.llm.prompts import ACT_CHECK_SYSTEM, ACT_CHECK_USER
@@ -10,7 +10,7 @@ from app.models.act import ActDraft, ActInlineCheck
 from app.models.outline import ActOutline
 from app.models.story_bible import StoryBible
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 async def check_act(
@@ -21,7 +21,7 @@ async def check_act(
 ) -> ActInlineCheck:
     """Run inline consistency check on a single act."""
     act_num = act_outline.act_number
-    log.info("act_reviewer: checking act %d", act_num)
+    log.info("act_reviewer: checking act", act_num=act_num)
 
     prior_text = ""
     if prior_acts:

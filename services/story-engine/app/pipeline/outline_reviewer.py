@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
 
 from app.llm import client
 from app.llm.prompts import OUTLINE_REVIEW_SYSTEM, OUTLINE_REVIEW_USER
@@ -10,7 +10,7 @@ from app.models.critique import OutlineCritique
 from app.models.outline import FiveActOutline
 from app.models.story_bible import StoryBible
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 async def run(bible: StoryBible, outline: FiveActOutline) -> OutlineCritique:

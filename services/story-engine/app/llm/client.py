@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import re
+import structlog
 from typing import Type, TypeVar
 
 from pydantic import BaseModel
@@ -17,7 +17,7 @@ from claude_agent_sdk import (
     query,
 )
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -53,9 +53,9 @@ async def _query_with_retry(
                             text_parts.append(block.text)
                 elif isinstance(message, ResultMessage):
                     log.info(
-                        "llm call cost=$%.4f tokens=%s",
-                        message.total_cost_usd,
-                        message.usage,
+                        "llm call",
+                        cost_usd=message.total_cost_usd,
+                        tokens=message.usage,
                     )
             return text_parts
         except Exception as exc:
@@ -63,15 +63,15 @@ async def _query_with_retry(
             if attempt < MAX_RETRIES - 1:
                 delay = RETRY_BASE_DELAY * (2 ** attempt)
                 log.warning(
-                    "SDK query failed (attempt %d/%d), retrying in %ds: %s",
-                    attempt + 1,
-                    MAX_RETRIES,
-                    delay,
-                    str(exc)[:200],
+                    "SDK query failed, retrying",
+                    attempt=attempt + 1,
+                    max_attempts=MAX_RETRIES,
+                    delay_s=delay,
+                    error=str(exc)[:200],
                 )
                 await asyncio.sleep(delay)
             else:
-                log.error("SDK query failed after %d attempts", MAX_RETRIES)
+                log.error("SDK query failed", max_attempts=MAX_RETRIES)
     raise last_exc  # type: ignore[misc]
 
 
