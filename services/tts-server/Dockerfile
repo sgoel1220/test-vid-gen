@@ -40,10 +40,6 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 COPY services/tts-server/requirements.txt /tmp/requirements.txt
 
-# Install creepy_pasta_protocol (shared package at repo root)
-COPY creepy_pasta_protocol /tmp/creepy_pasta_protocol
-RUN python -m pip install --no-cache-dir -e /tmp/creepy_pasta_protocol
-
 RUN python -m pip install --no-cache-dir --upgrade pip && \
     python -m pip install --no-cache-dir -r /tmp/requirements.txt && \
     python -m pip install --no-cache-dir --no-deps git+https://github.com/devnen/chatterbox-v2.git@cc0357396d9c73fc1e6c544ee40bb596020edd09 s3tokenizer==0.3.0 onnx==1.16.0 && \
@@ -51,7 +47,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip && \
     python -m pip install --no-cache-dir git+https://github.com/huggingface/diffusers@29b91098f68847f4e50d099735532c7d5735b17e
 
 COPY services/tts-server/config.yaml /app/config.yaml
-COPY services/tts-server/app.py services/tts-server/config.py services/tts-server/cpu_runtime.py services/tts-server/engine.py services/tts-server/enums.py services/tts-server/files.py services/tts-server/image_routes.py services/tts-server/job_store.py services/tts-server/lite_clone_server.py services/tts-server/models.py services/tts-server/routes.py services/tts-server/routes_history.py services/tts-server/run_orchestrator.py services/tts-server/utils.py /app/
+COPY services/tts-server/app.py services/tts-server/config.py services/tts-server/cpu_runtime.py services/tts-server/engine.py services/tts-server/enums.py services/tts-server/files.py services/tts-server/image_routes.py services/tts-server/job_store.py services/tts-server/lite_clone_server.py services/tts-server/models.py services/tts-server/routes.py services/tts-server/run_orchestrator.py services/tts-server/utils.py /app/
 COPY services/tts-server/audio /app/audio
 COPY services/tts-server/text /app/text
 COPY services/tts-server/image /app/image

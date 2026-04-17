@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Creepy Brain - Story Viewer</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #1a1a2e;
+      color: #eee;
+    }
+    h1 { color: #e94560; margin-bottom: 10px; }
+    h2 { color: #0f3460; background: #e94560; padding: 8px 12px; border-radius: 4px; }
+    .stories-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .story-btn {
+      background: #16213e;
+      border: 1px solid #e94560;
+      color: #eee;
+      padding: 10px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .story-btn:hover { background: #e94560; }
+    .story-btn.active { background: #e94560; }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    button {
+      background: #e94560;
+      border: none;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover { background: #ff6b6b; }
+    button:disabled { background: #555; cursor: not-allowed; }
+    .script-box {
+      background: #16213e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 20px;
+      white-space: pre-wrap;
+      font-family: Georgia, serif;
+      font-size: 16px;
+      line-height: 1.8;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+    .act-title {
+      color: #e94560;
+      font-size: 20px;
+      font-weight: bold;
+      margin: 30px 0 15px 0;
+      border-bottom: 1px solid #e94560;
+      padding-bottom: 5px;
+    }
+    .act-title:first-child { margin-top: 0; }
+    .meta {
+      color: #888;
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+    .status { padding: 5px 10px; border-radius: 4px; font-size: 12px; }
+    .status.completed { background: #2ecc71; color: white; }
+    .status.generating { background: #f39c12; color: white; }
+    .status.failed { background: #e74c3c; color: white; }
+    .copied {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #2ecc71;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 4px;
+      display: none;
+    }
+    .empty { color: #888; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>Creepy Brain</h1>
+  <p class="meta">Story Viewer & Script Copier</p>
+
+  <div class="stories-list" id="stories-list">
+    <span class="empty">Loading stories...</span>
+  </div>
+
+  <div class="controls">
+    <button id="copy-btn" disabled>Copy Full Script</button>
+    <button id="refresh-btn">Refresh Stories</button>
+  </div>
+
+  <div class="script-box" id="script-box">
+    <span class="empty">Select a story above to view the script.</span>
+  </div>
+
+  <div class="copied" id="copied">Copied to clipboard!</div>
+
+  <script>
+    const API = '';
+    let currentStory = null;
+
+    async function loadStories() {
+      const list = document.getElementById('stories-list');
+      list.innerHTML = '<span class="empty">Loading...</span>';
+
+      try {
+        const res = await fetch(`${API}/api/stories?limit=20`);
+        const stories = await res.json();
+
+        if (stories.length === 0) {
+          list.innerHTML = '<span class="empty">No stories yet.</span>';
+          return;
+        }
+
+        list.innerHTML = stories.map(s => `
+          <button class="story-btn" data-id="${s.id}">
+            ${s.premise.slice(0, 40)}...
+            <span class="status ${s.status}">${s.status}</span>
+          </button>
+        `).join('');
+
+        document.querySelectorAll('.story-btn').forEach(btn => {
+          btn.addEventListener('click', () => loadStory(btn.dataset.id));
+        });
+      } catch (e) {
+        list.innerHTML = `<span class="empty">Error: ${e.message}</span>`;
+      }
+    }
+
+    async function loadStory(id) {
+      const box = document.getElementById('script-box');
+      box.innerHTML = '<span class="empty">Loading story...</span>';
+
+      document.querySelectorAll('.story-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.id === id);
+      });
+
+      try {
+        const res = await fetch(`${API}/api/stories/${id}`);
+        const story = await res.json();
+        currentStory = story;
+
+        if (!story.acts || story.acts.length === 0) {
+          box.innerHTML = `<span class="empty">Story is ${story.status}. No acts yet.</span>`;
+          document.getElementById('copy-btn').disabled = true;
+          return;
+        }
+
+        const html = story.acts.map(act => `
+          <div class="act-title">Act ${act.act_number}: ${act.title}</div>
+          <div>${act.content || '<em>No content</em>'}</div>
+        `).join('\n');
+
+        box.innerHTML = html;
+        document.getElementById('copy-btn').disabled = false;
+      } catch (e) {
+        box.innerHTML = `<span class="empty">Error: ${e.message}</span>`;
+      }
+    }
+
+    function getPlainScript() {
+      if (!currentStory || !currentStory.acts) return '';
+      return currentStory.acts.map(act =>
+        `# Act ${act.act_number}: ${act.title}\n\n${act.content || ''}`
+      ).join('\n\n---\n\n');
+    }
+
+    document.getElementById('copy-btn').addEventListener('click', async () => {
+      const text = getPlainScript();
+      if (!text) return;
+
+      await navigator.clipboard.writeText(text);
+      const copied = document.getElementById('copied');
+      copied.style.display = 'block';
+      setTimeout(() => copied.style.display = 'none', 2000);
+    });
+
+    document.getElementById('refresh-btn').addEventListener('click', loadStories);
+
+    loadStories();
+  </script>
+</body>
+</html>

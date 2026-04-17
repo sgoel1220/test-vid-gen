@@ -24,12 +24,9 @@ jobs:
           - name: tts-server
             dockerfile: services/tts-server/Dockerfile
             image: tts-server
-          - name: metadata-server
-            dockerfile: services/metadata-server/Dockerfile
-            image: metadata-server
-          - name: story-engine
-            dockerfile: services/story-engine/Dockerfile
-            image: story-engine
+          - name: creepy-brain
+            dockerfile: services/creepy-brain/Dockerfile
+            image: creepy-brain
 
     steps:
       - name: Checkout repository

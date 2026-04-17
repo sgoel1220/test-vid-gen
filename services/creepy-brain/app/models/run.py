@@ -1,4 +1,4 @@
-"""TTS run models (from metadata-server)."""
+"""TTS run models."""
 
 import uuid
 from datetime import datetime
