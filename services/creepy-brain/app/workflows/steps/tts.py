@@ -48,10 +48,6 @@ from app.text.normalization import normalize_text
 
 log = logging.getLogger(__name__)
 
-# TTS GPU pod configuration
-_TTS_IMAGE = "ghcr.io/sgoel1220/tts-server:main"
-_TTS_GPU_TYPE = "NVIDIA RTX 4090"
-_TTS_POD_PORTS = [8005]
 _SYNTHESIZE_PATH = "/synthesize"
 
 # Synthesis parameters
@@ -130,11 +126,7 @@ async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]
     # --- 4. Spin up TTS GPU pod ---
     provider = get_provider(settings.runpod_api_key)
     pod = await provider.create_pod(
-        spec=GpuPodSpec(
-            gpu_type=_TTS_GPU_TYPE,
-            image=_TTS_IMAGE,
-            ports=_TTS_POD_PORTS,
-        ),
+        spec=GpuPodSpec.from_config(),
         idempotency_key=f"tts-{workflow_run_id}",
     )
     log.info("tts pod created pod_id=%s provider=%s", pod.id, pod.provider)

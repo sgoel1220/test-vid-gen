@@ -7,7 +7,7 @@ import httpx
 
 from .base import GpuPod, GpuPodSpec, GpuProvider, PodStatus
 
-RUNPOD_API = "https://api.runpod.io/graphql"
+RUNPOD_API_BASE = "https://api.runpod.io/graphql"
 
 _CREATE_POD_MUTATION = """
 mutation CreatePod($input: PodRentInterruptableInput!) {
@@ -15,7 +15,7 @@ mutation CreatePod($input: PodRentInterruptableInput!) {
         id
         name
         desiredStatus
-        machine { gpuDisplayName costPerGpu }
+        machine { gpuDisplayName costPerHr }
     }
 }
 """
@@ -30,7 +30,7 @@ query GetPod($id: String!) {
         runtime {
             ports { ip privatePort publicPort isIpPublic type }
         }
-        machine { gpuDisplayName costPerGpu }
+        machine { gpuDisplayName costPerHr }
     }
 }
 """
@@ -52,7 +52,7 @@ query ListPods {
             runtime {
                 ports { ip privatePort publicPort isIpPublic type }
             }
-            machine { gpuDisplayName costPerGpu }
+            machine { gpuDisplayName costPerHr }
         }
     }
 }
@@ -64,10 +64,8 @@ class RunPodProvider(GpuProvider):
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
-        self._client = httpx.AsyncClient(
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=30.0,
-        )
+        self._api_url = f"{RUNPOD_API_BASE}?api_key={api_key}"
+        self._client = httpx.AsyncClient(timeout=30.0)
 
     async def _gql(
         self,
@@ -77,7 +75,7 @@ class RunPodProvider(GpuProvider):
         payload: dict[str, object] = {"query": query}
         if variables:
             payload["variables"] = variables
-        resp = await self._client.post(RUNPOD_API, json=payload)
+        resp = await self._client.post(self._api_url, json=payload)
         resp.raise_for_status()
         body: dict[str, object] = resp.json()
         if "errors" in body:
@@ -139,7 +137,7 @@ class RunPodProvider(GpuProvider):
             )
         machine: dict[str, object] = machine_raw if isinstance(machine_raw, dict) else {}
         gpu_type: str | None = str(machine["gpuDisplayName"]) if "gpuDisplayName" in machine else None
-        cost_raw = machine.get("costPerGpu")
+        cost_raw = machine.get("costPerHr")
         cost_cents: int | None = int(float(cost_raw) * 100) if cost_raw is not None else None  # type: ignore[arg-type]
 
         # Parse createdAt from the API when available; fall back to None rather than
@@ -194,7 +192,10 @@ class RunPodProvider(GpuProvider):
                 "name": idempotency_key,
                 "imageName": spec.image,
                 "gpuTypeId": spec.gpu_type,
+                "cloudType": spec.cloud_type,
                 "containerDiskInGb": spec.disk_size_gb,
+                "volumeInGb": spec.volume_gb,
+                "dockerArgs": "",  # Use Dockerfile CMD
                 "ports": ports_str,
                 "env": env_list,
             }
