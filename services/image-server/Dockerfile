@@ -1,4 +1,4 @@
-# Minimal Z-Image generation server
+# SDXL-Lightning image server (~7 GB VRAM, fits RTX A4000 16 GB)
 #
 # Build (from repo root):
 #   docker buildx build --platform linux/amd64 \
@@ -23,27 +23,29 @@ ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /app
 
-# Pin versions — stable layer, cached across rebuilds unless deps change
+# No bitsandbytes / sentencepiece / protobuf needed — SDXL uses CLIP
+# text encoders (bundled in transformers) and fits fp16 without quantisation.
 RUN uv pip install --system --no-cache \
-    diffusers==0.33.1 \
-    transformers==4.46.3 \
+    diffusers==0.37.1 \
+    transformers==4.51.3 \
     accelerate==1.6.0 \
     safetensors==0.5.3 \
     Pillow==11.1.0 \
-    huggingface_hub==0.28.1 \
-    hf_transfer==0.1.4 \
+    huggingface_hub==0.34.1 \
+    hf_transfer==0.1.9 \
     fastapi==0.115.6 \
     "uvicorn[standard]==0.32.1" \
     pydantic==2.10.4
 
 RUN mkdir -p /app/hf_cache
 
-# Copy app last — changes here don't invalidate the dep layer above
 COPY services/image-server/server.py /app/server.py
 
 EXPOSE 8006
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8006/health >/dev/null || exit 1
+# ~12 GB total download (base SDXL fp16 + Lightning UNet).
+# With hf_transfer this takes 1-3 min on RunPod.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8006/ready >/dev/null || exit 1
 
 CMD ["python", "server.py"]

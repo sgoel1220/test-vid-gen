@@ -1,16 +1,23 @@
-"""Minimal Z-Image-Turbo server — POST a prompt, get a PNG back (~1s inference)."""
+"""SDXL-Lightning image server — POST a prompt, get a PNG back.
+
+4-step distilled SDXL. ~7 GB VRAM, fits RTX A4000 (16 GB) with headroom.
+No quantization needed. No HF token needed (ungated).
+"""
 
 from __future__ import annotations
 
 import io
 import logging
-from typing import Optional
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import torch
-from diffusers import DiffusionPipeline
+from diffusers import EulerDiscreteScheduler, StableDiffusionXLPipeline, UNet2DConditionModel
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
+from huggingface_hub import hf_hub_download
 from pydantic import BaseModel, Field
+from safetensors.torch import load_file
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -19,19 +26,42 @@ logger = logging.getLogger(__name__)
 # Model singleton
 # ---------------------------------------------------------------------------
 
-_MODEL_ID = "Tongyi-MAI/Z-Image-Turbo"
-_pipe: Optional[DiffusionPipeline] = None
+_BASE_MODEL = "stabilityai/stable-diffusion-xl-base-1.0"
+_LIGHTNING_REPO = "ByteDance/SDXL-Lightning"
+_LIGHTNING_CKPT = "sdxl_lightning_4step_unet.safetensors"
+
+_pipe: StableDiffusionXLPipeline | None = None
 
 
-def _load() -> DiffusionPipeline:
+def _load() -> StableDiffusionXLPipeline:
     global _pipe
     if _pipe is None:
-        logger.info("Loading Z-Image-Turbo pipeline: %s …", _MODEL_ID)
-        _pipe = DiffusionPipeline.from_pretrained(
-            _MODEL_ID, torch_dtype=torch.bfloat16, trust_remote_code=True
+        logger.info("Loading SDXL-Lightning (4-step UNet) …")
+
+        unet_config = UNet2DConditionModel.load_config(_BASE_MODEL, subfolder="unet")
+        unet = UNet2DConditionModel.from_config(unet_config).to(
+            device="cuda", dtype=torch.float16,
         )
-        _pipe = _pipe.to("cuda")
-        logger.info("Z-Image-Turbo pipeline ready.")
+
+        unet.load_state_dict(
+            load_file(
+                hf_hub_download(_LIGHTNING_REPO, _LIGHTNING_CKPT),
+                device="cuda",
+            ),
+        )
+
+        _pipe = StableDiffusionXLPipeline.from_pretrained(
+            _BASE_MODEL,
+            unet=unet,
+            torch_dtype=torch.float16,
+            variant="fp16",
+        ).to("cuda")
+
+        _pipe.scheduler = EulerDiscreteScheduler.from_config(
+            _pipe.scheduler.config, timestep_spacing="trailing",
+        )
+
+        logger.info("SDXL-Lightning pipeline ready.")
     return _pipe
 
 
@@ -39,35 +69,56 @@ def _load() -> DiffusionPipeline:
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="Image Server", description="Z-Image-Turbo generation API (~1s inference).")
 
-
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     _load()
+    yield
+
+
+app = FastAPI(
+    title="Image Server",
+    description="SDXL-Lightning generation API (4-step, ~7 GB VRAM).",
+    lifespan=_lifespan,
+)
 
 
 # ---------------------------------------------------------------------------
-# Request model
+# Models
 # ---------------------------------------------------------------------------
+
 
 class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, description="Image prompt.")
-    negative_prompt: str = Field("", description="Negative prompt.")
-    width: int = Field(1024, ge=256, le=2048)
-    height: int = Field(1024, ge=256, le=2048)
-    steps: int = Field(8, ge=1, le=16)  # Turbo: 8-9 optimal
-    guidance_scale: float = Field(0.0, ge=0.0, le=5.0)  # Turbo: 0.0 recommended
-    seed: Optional[int] = Field(None, ge=0)
+    width: int = Field(1024, ge=512, le=1536)
+    height: int = Field(1024, ge=512, le=1536)
+    steps: int = Field(4, ge=1, le=8)  # Lightning: 4 steps optimal
+    seed: int | None = Field(None, ge=0)
+
+
+class HealthResponse(BaseModel):
+    status: str
+
+
+class ReadyResponse(BaseModel):
+    status: str
 
 
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
+
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> HealthResponse:
+    return HealthResponse(status="ok")
+
+
+@app.get("/ready")
+def ready() -> ReadyResponse:
+    if _pipe is not None:
+        return ReadyResponse(status="ready")
+    raise HTTPException(status_code=503, detail="Model loading")
 
 
 @app.post("/generate", response_class=Response)
@@ -75,19 +126,24 @@ def generate(request: GenerateRequest) -> Response:
     """Generate an image and return it as PNG bytes."""
     pipe = _load()
 
-    generator = None
+    generator: torch.Generator | None = None
     if request.seed is not None:
         generator = torch.Generator(device="cuda").manual_seed(request.seed)
 
-    logger.info("Generating image: steps=%d guidance=%.1f seed=%s", request.steps, request.guidance_scale, request.seed)
+    logger.info(
+        "Generating image: steps=%d size=%dx%d seed=%s",
+        request.steps,
+        request.width,
+        request.height,
+        request.seed,
+    )
 
     result = pipe(
         prompt=request.prompt,
-        negative_prompt=request.negative_prompt or None,
         width=request.width,
         height=request.height,
         num_inference_steps=request.steps,
-        guidance_scale=request.guidance_scale,
+        guidance_scale=0.0,
         generator=generator,
     )
 
@@ -105,4 +161,5 @@ def generate(request: GenerateRequest) -> Response:
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("server:app", host="0.0.0.0", port=8006, reload=False)
