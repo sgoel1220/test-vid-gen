@@ -1,4 +1,4 @@
-"""Minimal image generation server — POST a prompt, get a PNG back."""
+"""Minimal Z-Image-Turbo server — POST a prompt, get a PNG back (~1s inference)."""
 
 from __future__ import annotations
 
@@ -19,19 +19,19 @@ logger = logging.getLogger(__name__)
 # Model singleton
 # ---------------------------------------------------------------------------
 
-_MODEL_ID = "Tongyi-MAI/Z-Image"
+_MODEL_ID = "Tongyi-MAI/Z-Image-Turbo"
 _pipe: Optional[DiffusionPipeline] = None
 
 
 def _load() -> DiffusionPipeline:
     global _pipe
     if _pipe is None:
-        logger.info("Loading Z-Image pipeline: %s …", _MODEL_ID)
+        logger.info("Loading Z-Image-Turbo pipeline: %s …", _MODEL_ID)
         _pipe = DiffusionPipeline.from_pretrained(
             _MODEL_ID, torch_dtype=torch.bfloat16, trust_remote_code=True
         )
         _pipe = _pipe.to("cuda")
-        logger.info("Z-Image pipeline ready.")
+        logger.info("Z-Image-Turbo pipeline ready.")
     return _pipe
 
 
@@ -39,7 +39,7 @@ def _load() -> DiffusionPipeline:
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="Image Server", description="Z-Image generation API.")
+app = FastAPI(title="Image Server", description="Z-Image-Turbo generation API (~1s inference).")
 
 
 @app.on_event("startup")
@@ -56,8 +56,8 @@ class GenerateRequest(BaseModel):
     negative_prompt: str = Field("", description="Negative prompt.")
     width: int = Field(1024, ge=256, le=2048)
     height: int = Field(1024, ge=256, le=2048)
-    steps: int = Field(30, ge=1, le=100)
-    guidance_scale: float = Field(7.5, ge=0.0, le=30.0)
+    steps: int = Field(8, ge=1, le=16)  # Turbo: 8-9 optimal
+    guidance_scale: float = Field(0.0, ge=0.0, le=5.0)  # Turbo: 0.0 recommended
     seed: Optional[int] = Field(None, ge=0)
 
 
