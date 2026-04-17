@@ -10,14 +10,14 @@ from . import hatchet, WORKFLOWS
 test_workflow = hatchet.workflow(name="TestWorkflow")
 
 
-@test_workflow.task(execution_timeout=timedelta(minutes=1))
+@test_workflow.task(execution_timeout=timedelta(minutes=1))  # type: ignore[untyped-decorator]  # hatchet_sdk has no type stubs
 async def step_one(input: EmptyModel, ctx: Context) -> dict[str, object]:
     """First step — simulates work and returns a value."""
     await asyncio.sleep(2)
     return {"message": "Step one complete", "value": 42}
 
 
-@test_workflow.task(execution_timeout=timedelta(minutes=1), parents=[step_one])
+@test_workflow.task(execution_timeout=timedelta(minutes=1), parents=[step_one])  # type: ignore[untyped-decorator]  # hatchet_sdk has no type stubs
 async def step_two(input: EmptyModel, ctx: Context) -> dict[str, object]:
     """Second step — reads step_one output and doubles the value."""
     result: dict[str, object] = ctx.task_output(step_one)
