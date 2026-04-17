@@ -1,6 +1,8 @@
 services:
   brain:
-    build: .
+    build:
+      context: ../..
+      dockerfile: services/creepy-brain/Dockerfile
     image: creepy-brain:latest
     container_name: creepy-brain
     ports:
@@ -25,7 +27,9 @@ services:
     restart: unless-stopped
 
   brain-worker:
-    build: .
+    build:
+      context: ../..
+      dockerfile: services/creepy-brain/Dockerfile
     image: creepy-brain:latest
     container_name: creepy-brain-worker
     entrypoint: ["python", "-m", "app.workflows.worker"]
