@@ -1,0 +1,32 @@
+# Minimal requirements for stateless TTS synthesis
+# CUDA 12.1 runtime dependencies
+
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+# PyTorch CUDA builds
+torch==2.5.1+cu121
+torchaudio==2.5.1+cu121
+
+# FastAPI server
+fastapi>=0.100.0,<0.116.0
+uvicorn[standard]>=0.27.0,<1.0
+
+# Audio I/O
+numpy>=1.24.0,<2.0
+soundfile>=0.12.0,<0.13.0
+
+# Chatterbox dependencies (installed separately via git)
+# chatterbox requires: conformer, einops, omegaconf, resampy, resemble-perth
+conformer==0.3.2
+einops>=0.7.0,<1.0
+omegaconf==2.3.0
+resampy==0.4.3
+resemble-perth==1.0.1
+safetensors>=0.4.0,<0.5.0
+descript-audio-codec==1.0.0
+
+# HuggingFace for model download
+hf_transfer>=0.1.4
+
+# Pydantic for request validation
+pydantic>=2.9

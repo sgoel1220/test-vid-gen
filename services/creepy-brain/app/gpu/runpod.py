@@ -234,9 +234,8 @@ class RunPodProvider(GpuProvider):
             if pod and pod.endpoint_url:
                 try:
                     async with httpx.AsyncClient(timeout=5.0) as probe:
-                        # Probe /api/model-info (guaranteed to exist in the TTS server)
-                        # and require HTTP 200 so a bare-HTTP-server 404 is not accepted.
-                        r = await probe.get(f"{pod.endpoint_url}/api/model-info")
+                        # Probe /health endpoint on the minimal TTS server
+                        r = await probe.get(f"{pod.endpoint_url}/health")
                         if r.status_code == 200:
                             pod.status = PodStatus.READY
                             return pod
