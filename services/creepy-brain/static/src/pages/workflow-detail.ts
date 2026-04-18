@@ -15,6 +15,8 @@ import {
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let workflowId = "";
 let actionInFlight = false;
+let chunkPage = 0;
+const CHUNKS_PER_PAGE = 20;
 
 export function mount(container: HTMLElement, id: string): void {
   workflowId = id;
@@ -42,6 +44,7 @@ async function refresh(): Promise<void> {
     el.innerHTML = renderDetail(wf);
     renderActions(wf);
     attachActionListeners(wf);
+    attachChunkListeners();
   } catch (err) {
     el.innerHTML = `<div class="error">Failed: ${esc(String(err))}</div>`;
   }
@@ -109,6 +112,34 @@ function attachActionListeners(wf: WorkflowDetailResponse): void {
   });
 }
 
+function attachChunkListeners(): void {
+  // Pagination
+  document.getElementById("chunk-prev")?.addEventListener("click", () => {
+    chunkPage--;
+    refresh();
+  });
+  document.getElementById("chunk-next")?.addEventListener("click", () => {
+    chunkPage++;
+    refresh();
+  });
+
+  // Click-to-expand rows
+  document.querySelectorAll<HTMLTableRowElement>(".chunk-row").forEach((row) => {
+    row.style.cursor = "pointer";
+    row.addEventListener("click", (e) => {
+      // Don't toggle when clicking audio controls
+      if ((e.target as HTMLElement).closest("audio")) return;
+      const idx = row.dataset.chunkIdx;
+      const detail = document.querySelector<HTMLTableRowElement>(
+        `tr[data-detail-for="${idx}"]`,
+      );
+      if (detail) {
+        detail.style.display = detail.style.display === "none" ? "" : "none";
+      }
+    });
+  });
+}
+
 function renderDetail(wf: WorkflowDetailResponse): string {
   const cls = statusClass(wf.status);
   const parts: string[] = [];
@@ -169,24 +200,53 @@ function renderDetail(wf: WorkflowDetailResponse): string {
     `);
   }
 
-  // Chunks
+  // Chunks (paginated)
   if (wf.chunks.length > 0) {
-    const rows = wf.chunks.map((c) => {
+    const totalPages = Math.ceil(wf.chunks.length / CHUNKS_PER_PAGE);
+    if (chunkPage >= totalPages) chunkPage = totalPages - 1;
+    if (chunkPage < 0) chunkPage = 0;
+    const start = chunkPage * CHUNKS_PER_PAGE;
+    const pageChunks = wf.chunks.slice(start, start + CHUNKS_PER_PAGE);
+
+    const rows = pageChunks.map((c) => {
       const sc = statusClass(c.tts_status);
       const dur = c.tts_duration_sec != null ? `${c.tts_duration_sec.toFixed(1)}s` : "-";
-      return `<tr>
+      const textPreview = c.chunk_text.length > 80
+        ? esc(c.chunk_text.slice(0, 80)) + "&hellip;"
+        : esc(c.chunk_text);
+      const audio = c.tts_audio_blob_id
+        ? `<audio class="chunk-audio" preload="none" src="/api/blobs/${c.tts_audio_blob_id}"></audio>`
+        : '<span class="muted">-</span>';
+      const completed = c.tts_completed_at ? timeAgo(c.tts_completed_at) : "-";
+      return `<tr class="chunk-row" data-chunk-idx="${c.chunk_index}">
         <td>${c.chunk_index}</td>
+        <td class="chunk-text-cell" title="Click to expand">${textPreview}</td>
         <td><span class="badge ${sc}">${c.tts_status}</span></td>
         <td>${dur}</td>
+        <td>${audio}</td>
+        <td>${completed}</td>
+      </tr>
+      <tr class="chunk-detail-row" data-detail-for="${c.chunk_index}" style="display:none">
+        <td colspan="6"><div class="chunk-full-text">${esc(c.chunk_text)}</div></td>
       </tr>`;
     }).join("");
+
+    const pagination = totalPages > 1
+      ? `<div class="pagination">
+          <button class="btn" id="chunk-prev" ${chunkPage === 0 ? "disabled" : ""}>Prev</button>
+          <span class="pagination-info">Page ${chunkPage + 1} of ${totalPages}</span>
+          <button class="btn" id="chunk-next" ${chunkPage >= totalPages - 1 ? "disabled" : ""}>Next</button>
+        </div>`
+      : "";
+
     parts.push(`
       <div class="section">
-        <h3>Chunks</h3>
+        <h3>Chunks (${wf.chunks.length})</h3>
         <table>
-          <thead><tr><th>#</th><th>TTS Status</th><th>Duration</th></tr></thead>
+          <thead><tr><th>#</th><th>Text</th><th>Status</th><th>Duration</th><th>Audio</th><th>Completed</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
+        ${pagination}
       </div>
     `);
   }
