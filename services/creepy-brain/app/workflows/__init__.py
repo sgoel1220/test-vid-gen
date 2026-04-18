@@ -24,3 +24,4 @@ WORKFLOWS: list[BaseWorkflow[Any]] = []
 from . import test_workflow as _test_workflow  # noqa: F401
 
 from . import content_pipeline as _content_pipeline  # noqa: F401
+from . import recon as _recon  # noqa: F401
