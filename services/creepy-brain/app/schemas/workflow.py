@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import (
     ChunkStatus,
     GpuPodStatus,
+    GpuProvider,
     StepName,
     StepStatus,
     WorkflowStatus,
@@ -38,11 +38,11 @@ class WorkflowResponse(BaseModel):
     id: uuid.UUID
     status: WorkflowStatus
     workflow_type: WorkflowType
-    current_step: Optional[StepName]
+    current_step: StepName | None
     created_at: datetime
-    started_at: Optional[datetime]
-    completed_at: Optional[datetime]
-    error: Optional[str]
+    started_at: datetime | None
+    completed_at: datetime | None
+    error: str | None
 
 
 class WorkflowStepResponse(BaseModel):
@@ -51,9 +51,9 @@ class WorkflowStepResponse(BaseModel):
     step_name: StepName
     status: StepStatus
     attempt_number: int
-    started_at: Optional[datetime]
-    completed_at: Optional[datetime]
-    error: Optional[str]
+    started_at: datetime | None
+    completed_at: datetime | None
+    error: str | None
 
 
 class WorkflowChunkResponse(BaseModel):
@@ -61,24 +61,24 @@ class WorkflowChunkResponse(BaseModel):
 
     chunk_index: int
     tts_status: ChunkStatus
-    tts_duration_sec: Optional[float]
+    tts_duration_sec: float | None
 
 
 class GpuPodResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    provider: str
+    provider: GpuProvider
     status: GpuPodStatus
     created_at: datetime
-    ready_at: Optional[datetime]
-    terminated_at: Optional[datetime]
+    ready_at: datetime | None
+    terminated_at: datetime | None
     total_cost_cents: int
 
 
 class WorkflowDetailResponse(WorkflowResponse):
     input: WorkflowInputSchema
-    result: Optional[WorkflowResultSchema]
+    result: WorkflowResultSchema | None
     steps: list[WorkflowStepResponse]
     chunks: list[WorkflowChunkResponse]
     gpu_pods: list[GpuPodResponse]

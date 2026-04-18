@@ -7,21 +7,39 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Step function signature: (workflow_input, context) -> output dict
-StepFn = Callable[[Any, "StepContext"], Awaitable[dict[str, object]]]
+# Any is deliberate here: each workflow can define its own validated input model.
+StepFn = Callable[[Any, "StepContext"], Awaitable[BaseModel]]
+StepOutputMap = dict[str, BaseModel]
+
+
+class SkippedStepOutput(BaseModel):
+    """Common output shape for workflow steps that are intentionally skipped."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skipped: Literal[True] = True
+    reason: str = Field(description="Reason the step did not run")
+
+
+class EmptyStepOutput(BaseModel):
+    """Placeholder for historical completed steps with no serialized output."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class StepContext(BaseModel):
     """Runtime context passed to each step function."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     workflow_run_id: str = Field(description="UUID string of the workflow run")
-    parent_outputs: dict[str, dict[str, object]] = Field(
+    parent_outputs: StepOutputMap = Field(
         default_factory=dict,
-        description="Keyed by step name, contains the output dict of each completed parent step",
+        description="Keyed by step name, contains each completed parent step output model",
     )
 
 
@@ -31,7 +49,7 @@ class StepDef(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str = Field(description="Step name, must match StepName enum value for DB tracking")
-    fn: StepFn = Field(description="Async callable: (input, ctx) -> dict")
+    fn: StepFn = Field(description="Async callable: (input, ctx) -> Pydantic output model")
     parents: list[str] = Field(
         default_factory=list,
         description="Names of steps that must complete before this one starts",

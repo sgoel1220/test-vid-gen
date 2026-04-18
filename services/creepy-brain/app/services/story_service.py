@@ -12,8 +12,8 @@ explicit at the point of use and eliminates double-commit risk.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import Optional, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,7 +43,7 @@ class StoryService:
         await self._session.refresh(story)
         return story
 
-    async def get(self, story_id: uuid.UUID) -> Optional[Story]:
+    async def get(self, story_id: uuid.UUID) -> Story | None:
         """Get story by ID with acts eagerly loaded."""
         result = await self._session.execute(
             select(Story)

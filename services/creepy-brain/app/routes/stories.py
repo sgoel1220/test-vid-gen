@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Optional
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -37,25 +36,25 @@ class GenerateStoryResponse(BaseModel):
 
 class ActResponse(BaseModel):
     act_number: int
-    title: Optional[str]
-    word_count: Optional[int]
+    title: str | None
+    word_count: int | None
 
 
 class StoryResponse(BaseModel):
     id: uuid.UUID
-    title: Optional[str]
+    title: str | None
     premise: str
     status: StoryStatus
-    word_count: Optional[int]
+    word_count: int | None
     acts: list[ActResponse]
 
 
 class StoryListItem(BaseModel):
     id: uuid.UUID
-    title: Optional[str]
+    title: str | None
     premise: str
     status: StoryStatus
-    word_count: Optional[int]
+    word_count: int | None
 
 
 # ---------------------------------------------------------------------------

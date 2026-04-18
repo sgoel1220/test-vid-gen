@@ -19,13 +19,15 @@ import collections
 import logging
 import uuid
 
+from pydantic import BaseModel
+from sqlalchemy import select
+
 import app.db as _db
 from app.models.enums import StepName, StepStatus
 from app.models.workflow import WorkflowStep
 from app.services.workflow_service import WorkflowService
-from sqlalchemy import select
 
-from .models import StepDef, StepContext, WorkflowDef
+from .models import EmptyStepOutput, StepDef, StepContext, StepOutputMap, WorkflowDef
 
 log = logging.getLogger(__name__)
 
@@ -108,13 +110,13 @@ class WorkflowRunner:
         workflow_def: WorkflowDef,
         workflow_input: object,
         workflow_id: uuid.UUID,
-        completed_outputs: dict[str, dict[str, object]] | None = None,
+        completed_outputs: StepOutputMap | None = None,
     ) -> None:
         self._def = workflow_def
         self.workflow_input = workflow_input  # public so engine can recover it for retry
         self._workflow_id = workflow_id
         # Accumulates outputs as steps complete; pre-seeded for resumed runs.
-        self._outputs: dict[str, dict[str, object]] = dict(completed_outputs or {})
+        self._outputs: StepOutputMap = dict(completed_outputs or {})
 
     async def run(self) -> None:
         """Execute the workflow end-to-end, persisting state to DB."""
@@ -170,10 +172,7 @@ class WorkflowRunner:
             for ws in result.scalars().all():
                 name = ws.step_name.value
                 if name not in self._outputs:
-                    output_schema = ws.output_json
-                    self._outputs[name] = (
-                        output_schema.model_dump() if output_schema is not None else {}
-                    )
+                    self._outputs[name] = ws.output_json or EmptyStepOutput()
 
     async def _execute_step(self, step: StepDef) -> str | None:
         """Execute a single step with retry. Returns error string on permanent failure."""
@@ -207,9 +206,10 @@ class WorkflowRunner:
                     step.fn(self.workflow_input, ctx),
                     timeout=step.timeout_sec,
                 )
-                if not isinstance(output, dict):
+                if not isinstance(output, BaseModel):
                     raise TypeError(
-                        f"Step '{step.name}' must return dict, got {type(output).__name__}"
+                        f"Step '{step.name}' must return a Pydantic model, "
+                        f"got {type(output).__name__}"
                     )
                 self._outputs[step.name] = output
                 await self._db_complete_step(step.name)
@@ -316,6 +316,6 @@ class WorkflowRunner:
         except Exception as exc:
             log.error("workflow %s: _fail_workflow failed: %s", self._workflow_id, exc)
 
-    def get_outputs(self) -> dict[str, dict[str, object]]:
+    def get_outputs(self) -> StepOutputMap:
         """Return a copy of completed step outputs (used by engine for retry)."""
         return dict(self._outputs)

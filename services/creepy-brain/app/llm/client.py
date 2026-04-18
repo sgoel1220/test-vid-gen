@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Any, Protocol, Type, TypeVar
+from typing import Any, Protocol, TypeVar
 
 import httpx
 from pydantic import BaseModel
@@ -39,7 +39,7 @@ class AnthropicProvider:
             model=self._model,
             max_tokens=8192,
             system=system,
-            messages=messages,  # type: ignore[arg-type]
+            messages=messages,
         )
         log.info(
             "llm call provider=anthropic input_tokens=%d output_tokens=%d",
@@ -49,7 +49,7 @@ class AnthropicProvider:
         parts: list[str] = []
         for block in response.content:
             if hasattr(block, "text"):
-                parts.append(block.text)  # type: ignore[union-attr]
+                parts.append(block.text)
         return "".join(parts)
 
 
@@ -148,7 +148,7 @@ async def _call_with_retry(system: str, messages: list[dict[str, Any]]) -> str:
 async def generate_structured(
     system: str,
     user: str,
-    response_model: Type[T],
+    response_model: type[T],
 ) -> T:
     """Call the LLM and parse the response into a Pydantic model."""
     schema_str = str(response_model.model_json_schema())

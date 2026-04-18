@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import desc, select
@@ -395,7 +394,7 @@ class ChunkForImageStep(BaseModel):
     index: int = Field(ge=0, description="Zero-based chunk position")
     text: str = Field(description="Chunk text content")
     blob_id: str | None = Field(description="UUID of the WAV blob (None if TTS failed)")
-    tts_status: str = Field(description="Chunk TTS status value")
+    tts_status: ChunkStatus = Field(description="Chunk TTS status")
     scene_id: str | None = Field(description="UUID of the linked scene (None if unlinked)")
 
 
@@ -423,7 +422,7 @@ async def get_chunks_for_image_step(
             index=c.chunk_index,
             text=c.chunk_text,
             blob_id=str(c.tts_audio_blob_id) if c.tts_audio_blob_id else None,
-            tts_status=c.tts_status.value,
+            tts_status=c.tts_status,
             scene_id=str(c.scene_id) if c.scene_id else None,
         )
         for c in chunks
@@ -451,7 +450,7 @@ async def get_scenes_for_workflow(
     return list(result.scalars().all())
 
 
-def get_optional_workflow_id(workflow_run_id: str) -> Optional[uuid.UUID]:
+def get_optional_workflow_id(workflow_run_id: str) -> uuid.UUID | None:
     """Parse the workflow run ID string to a UUID, or return None on failure."""
     try:
         return uuid.UUID(workflow_run_id)

@@ -33,7 +33,7 @@ async def _ensure_db() -> None:
             await _db.init_db()
 
 
-async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, object]:
+async def execute(input: WorkflowInputSchema, ctx: StepContext) -> GenerateStoryStepOutput:
     """Generate a story from the workflow premise using the LLM pipeline.
 
     1. Ensures the database is initialised (safe to call from the worker process).
@@ -101,4 +101,4 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
         title=completed_story.title or "",
         word_count=completed_story.word_count or 0,
         act_count=len(completed_story.acts),
-    ).model_dump()
+    )

@@ -21,7 +21,7 @@ Usage::
 """
 
 from .engine import WorkflowEngine, engine
-from .models import StepContext, StepDef, StepFn, WorkflowDef
+from .models import EmptyStepOutput, SkippedStepOutput, StepContext, StepDef, StepFn, WorkflowDef
 from .runner import WorkflowRunner, get_downstream_steps
 from .scheduler import CronScheduler, CronEntry
 
@@ -32,6 +32,8 @@ __all__ = [
     "StepDef",
     "StepFn",
     "StepContext",
+    "SkippedStepOutput",
+    "EmptyStepOutput",
     "WorkflowRunner",
     "get_downstream_steps",
     "CronScheduler",

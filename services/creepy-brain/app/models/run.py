@@ -1,8 +1,9 @@
 """TTS run models."""
 
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
@@ -17,17 +18,17 @@ class Run(BaseModel):
 
     __tablename__ = "runs"
 
-    workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workflows.id", ondelete="SET NULL"),
         nullable=True,
     )
-    story_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    story_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("stories.id", ondelete="SET NULL"),
         nullable=True,
     )
-    voice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    voice_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("voices.id", ondelete="SET NULL"),
         nullable=True,
@@ -38,13 +39,13 @@ class Run(BaseModel):
         nullable=False,
         default=RunStatus.PENDING,
     )
-    final_audio_blob_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    final_audio_blob_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workflow_blobs.id", ondelete="SET NULL"),
         nullable=True,
     )
-    total_duration_sec: Mapped[Optional[float]] = mapped_column(nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    total_duration_sec: Mapped[float | None] = mapped_column(nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     chunks: Mapped[list["RunChunk"]] = relationship(
@@ -67,12 +68,12 @@ class RunChunk(BaseModel):
     )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
-    audio_blob_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    audio_blob_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workflow_blobs.id", ondelete="SET NULL"),
         nullable=True,
     )
-    duration_sec: Mapped[Optional[float]] = mapped_column(nullable=True)
+    duration_sec: Mapped[float | None] = mapped_column(nullable=True)
     status: Mapped[ChunkStatus] = mapped_column(
         SQLEnum(ChunkStatus, native_enum=False, length=20),
         nullable=False,

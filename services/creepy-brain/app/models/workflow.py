@@ -1,8 +1,9 @@
 """Workflow orchestration models."""
 
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
@@ -44,17 +45,17 @@ class Workflow(BaseModel):
         nullable=False,
         default=WorkflowStatus.PENDING,
     )
-    current_step: Mapped[Optional[StepName]] = mapped_column(
+    current_step: Mapped[StepName | None] = mapped_column(
         SQLEnum(StepName, native_enum=False, length=50),
         nullable=True,
     )
-    result_json: Mapped[Optional[WorkflowResultSchema]] = mapped_column(
+    result_json: Mapped[WorkflowResultSchema | None] = mapped_column(
         PydanticType(WorkflowResultSchema),
         nullable=True,
     )
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     steps: Mapped[list["WorkflowStep"]] = relationship(
@@ -103,23 +104,23 @@ class WorkflowStep(BaseModel):
         default=StepStatus.PENDING,
     )
     # Discriminated union types with Pydantic validation
-    input_json: Mapped[Optional[StepInputSchema]] = mapped_column(
+    input_json: Mapped[StepInputSchema | None] = mapped_column(
         PydanticType(StepInputSchema),  # type: ignore[arg-type]  # Annotated discriminated union
         nullable=True,
     )
-    output_json: Mapped[Optional[StepOutputSchema]] = mapped_column(
+    output_json: Mapped[StepOutputSchema | None] = mapped_column(
         PydanticType(StepOutputSchema),  # type: ignore[arg-type]  # Annotated discriminated union
         nullable=True,
     )
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    gpu_pod_id: Mapped[Optional[str]] = mapped_column(
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gpu_pod_id: Mapped[str | None] = mapped_column(
         String(100),
         ForeignKey("gpu_pods.id", ondelete="SET NULL"),
         nullable=True,
     )
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="steps")
@@ -144,8 +145,8 @@ class WorkflowScene(BaseModel):
     scene_index: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # Image prompt (saved before GPU spin-up)
-    image_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    image_negative_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    image_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_negative_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Image generation result
     image_status: Mapped[ChunkStatus] = mapped_column(
@@ -153,12 +154,12 @@ class WorkflowScene(BaseModel):
         nullable=False,
         default=ChunkStatus.PENDING,
     )
-    image_blob_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    image_blob_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workflow_blobs.id", ondelete="SET NULL"),
         nullable=True,
     )
-    image_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    image_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="scenes")
@@ -188,16 +189,16 @@ class WorkflowChunk(BaseModel):
         nullable=False,
         default=ChunkStatus.PENDING,
     )
-    tts_audio_blob_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    tts_audio_blob_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workflow_blobs.id", ondelete="SET NULL"),
         nullable=True,
     )
-    tts_duration_sec: Mapped[Optional[float]] = mapped_column(nullable=True)
-    tts_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    tts_duration_sec: Mapped[float | None] = mapped_column(nullable=True)
+    tts_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Link to scene (for image)
-    scene_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    scene_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workflow_scenes.id", ondelete="SET NULL"),
         nullable=True,
@@ -205,7 +206,7 @@ class WorkflowChunk(BaseModel):
 
     # Relationships
     workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="chunks")
-    scene: Mapped[Optional["WorkflowScene"]] = relationship("WorkflowScene", back_populates="chunks")
+    scene: Mapped[WorkflowScene | None] = relationship("WorkflowScene", back_populates="chunks")
 
     __table_args__ = (
         UniqueConstraint("workflow_id", "chunk_index"),
@@ -219,7 +220,7 @@ class WorkflowBlob(BaseModel):
 
     __tablename__ = "workflow_blobs"
 
-    workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workflows.id", ondelete="SET NULL"),
         nullable=True,
@@ -233,6 +234,6 @@ class WorkflowBlob(BaseModel):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # Relationships
-    workflow: Mapped[Optional["Workflow"]] = relationship("Workflow", back_populates="blobs")
+    workflow: Mapped[Workflow | None] = relationship("Workflow", back_populates="blobs")
 
     __table_args__ = (Index("idx_workflow_blobs_workflow", "workflow_id"),)

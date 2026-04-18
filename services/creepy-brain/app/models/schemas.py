@@ -1,7 +1,9 @@
 """Pydantic schemas for JSONB fields in SQLAlchemy models."""
 
+from __future__ import annotations
+
 import uuid
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -22,14 +24,14 @@ class WorkflowInputSchema(BaseModel):
 class WorkflowResultSchema(BaseModel):
     """Result data from a completed workflow."""
 
-    story_id: Optional[uuid.UUID] = Field(None, description="Generated story ID")
-    run_id: Optional[uuid.UUID] = Field(None, description="TTS run ID")
-    final_audio_blob_id: Optional[uuid.UUID] = Field(None, description="Final audio blob ID")
-    final_video_blob_id: Optional[uuid.UUID] = Field(None, description="Final video blob ID")
-    total_duration_sec: Optional[float] = Field(None, description="Total audio duration")
-    chunk_count: Optional[int] = Field(None, description="Number of chunks processed")
-    gpu_pod_id: Optional[str] = Field(None, description="GPU pod used")
-    total_cost_cents: Optional[int] = Field(None, description="Total cost in cents")
+    story_id: uuid.UUID | None = Field(None, description="Generated story ID")
+    run_id: uuid.UUID | None = Field(None, description="TTS run ID")
+    final_audio_blob_id: uuid.UUID | None = Field(None, description="Final audio blob ID")
+    final_video_blob_id: uuid.UUID | None = Field(None, description="Final video blob ID")
+    total_duration_sec: float | None = Field(None, description="Total audio duration")
+    chunk_count: int | None = Field(None, description="Number of chunks processed")
+    gpu_pod_id: str | None = Field(None, description="GPU pod used")
+    total_cost_cents: int | None = Field(None, description="Total cost in cents")
 
 
 # Step Input Schemas (with discriminator)
@@ -70,12 +72,10 @@ class StitchFinalStepInput(BaseModel):
 
 # Discriminated union for step inputs
 StepInputSchema = Annotated[
-    Union[
-        GenerateStoryStepInput,
-        TtsSynthesisStepInput,
-        ImageGenerationStepInput,
-        StitchFinalStepInput,
-    ],
+    GenerateStoryStepInput
+    | TtsSynthesisStepInput
+    | ImageGenerationStepInput
+    | StitchFinalStepInput,
     Field(discriminator="step_type"),
 ]
 
@@ -120,12 +120,10 @@ class StitchFinalStepOutput(BaseModel):
 
 # Discriminated union for step outputs
 StepOutputSchema = Annotated[
-    Union[
-        GenerateStoryStepOutput,
-        TtsSynthesisStepOutput,
-        ImageGenerationStepOutput,
-        StitchFinalStepOutput,
-    ],
+    GenerateStoryStepOutput
+    | TtsSynthesisStepOutput
+    | ImageGenerationStepOutput
+    | StitchFinalStepOutput,
     Field(discriminator="step_type"),
 ]
 

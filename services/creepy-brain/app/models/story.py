@@ -1,8 +1,9 @@
 """Story generation models."""
 
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
@@ -19,27 +20,27 @@ class Story(BaseModel):
 
     __tablename__ = "stories"
 
-    workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workflows.id", ondelete="SET NULL"),
         nullable=True,
     )
-    title: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     premise: Mapped[str] = mapped_column(Text, nullable=False)
-    outline: Mapped[Optional[StoryOutlineSchema]] = mapped_column(
+    outline: Mapped[StoryOutlineSchema | None] = mapped_column(
         PydanticType(StoryOutlineSchema),
         nullable=True,
     )
-    full_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    word_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    full_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[StoryStatus] = mapped_column(
         SQLEnum(StoryStatus, native_enum=False, length=20),
         nullable=False,
         default=StoryStatus.PENDING,
     )
-    llm_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     total_tokens_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     acts: Mapped[list["StoryAct"]] = relationship(
@@ -61,9 +62,9 @@ class StoryAct(BaseModel):
         nullable=False,
     )
     act_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    word_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     revision_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Relationships

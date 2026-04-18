@@ -2,9 +2,12 @@
 
 import asyncio
 from datetime import datetime, timezone
+from typing import cast
 
 import httpx
 import runpod
+
+from app.models.enums import GpuProvider as GpuProviderName
 
 from .base import GpuPod, GpuPodSpec, GpuProvider, PodStatus
 
@@ -59,7 +62,7 @@ class RunPodProvider(GpuProvider):
 
         return GpuPod(
             id=pod_id,
-            provider="runpod",
+            provider=GpuProviderName.RUNPOD,
             status=status,
             endpoint_url=endpoint_url,
             gpu_type=gpu_type,
@@ -80,15 +83,18 @@ class RunPodProvider(GpuProvider):
         env_dict = spec.env or {}
 
         def _create() -> dict[str, object]:
-            return runpod.create_pod(
-                name=idempotency_key,
-                image_name=spec.image,
-                gpu_type_id=spec.gpu_type,
-                cloud_type=spec.cloud_type,
-                container_disk_in_gb=spec.disk_size_gb,
-                volume_in_gb=spec.volume_gb,
-                ports=ports_str,
-                env=env_dict,
+            return cast(
+                dict[str, object],
+                runpod.create_pod(
+                    name=idempotency_key,
+                    image_name=spec.image,
+                    gpu_type_id=spec.gpu_type,
+                    cloud_type=spec.cloud_type,
+                    container_disk_in_gb=spec.disk_size_gb,
+                    volume_in_gb=spec.volume_gb,
+                    ports=ports_str,
+                    env=env_dict,
+                ),
             )
 
         try:
@@ -105,8 +111,9 @@ class RunPodProvider(GpuProvider):
         self, pod_id: str, service_port: int | None = None
     ) -> GpuPod | None:
         """Get pod status by ID."""
+
         def _get() -> dict[str, object]:
-            return runpod.get_pod(pod_id)
+            return cast(dict[str, object], runpod.get_pod(pod_id))
 
         try:
             raw = await asyncio.to_thread(_get)
@@ -118,6 +125,7 @@ class RunPodProvider(GpuProvider):
 
     async def terminate_pod(self, pod_id: str) -> bool:
         """Terminate a pod."""
+
         def _terminate() -> object:
             return runpod.terminate_pod(pod_id)
 
@@ -157,8 +165,9 @@ class RunPodProvider(GpuProvider):
 
     async def list_active_pods(self) -> list[GpuPod]:
         """List all active (non-terminated) pods."""
+
         def _list() -> list[dict[str, object]]:
-            return runpod.get_pods()
+            return cast(list[dict[str, object]], runpod.get_pods())
 
         raw_pods = await asyncio.to_thread(_list)
         result: list[GpuPod] = []
@@ -172,8 +181,9 @@ class RunPodProvider(GpuProvider):
         self, name: str, service_port: int | None = None
     ) -> GpuPod | None:
         """Find a pod by name using a single get_pods() call."""
+
         def _list() -> list[dict[str, object]]:
-            return runpod.get_pods()
+            return cast(list[dict[str, object]], runpod.get_pods())
 
         raw_pods = await asyncio.to_thread(_list)
         for raw in raw_pods:

@@ -25,7 +25,7 @@ from app.models.workflow import Workflow, WorkflowStep
 from app.models.enums import StepName
 from app.services.workflow_service import WorkflowService
 
-from .models import WorkflowDef
+from .models import StepOutputMap, WorkflowDef
 from .runner import WorkflowRunner, get_downstream_steps
 
 log = logging.getLogger(__name__)
@@ -117,7 +117,7 @@ class WorkflowEngine:
 
         # Recover the existing runner BEFORE cancelling (preserves outputs + input).
         existing_runner = self._runners.get(run_id)
-        existing_outputs: dict[str, dict[str, object]] = (
+        existing_outputs: StepOutputMap = (
             existing_runner.get_outputs() if existing_runner is not None else {}
         )
         wf_def: WorkflowDef | None = (

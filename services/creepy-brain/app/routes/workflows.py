@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 import structlog
 from fastapi import APIRouter, HTTPException
@@ -124,7 +123,7 @@ async def create_workflow(request: CreateWorkflowRequest, db: DbSession) -> Work
 @router.get("", response_model=list[WorkflowResponse])
 async def list_workflows(
     db: DbSession,
-    status: Optional[WorkflowStatus] = None,
+    status: WorkflowStatus | None = None,
     limit: int = 20,
 ) -> list[WorkflowResponse]:
     """List workflows, newest first, optionally filtered by status."""

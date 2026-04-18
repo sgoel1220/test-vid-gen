@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -12,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.models.enums import RunStatus
 from app.models.run import Run
 from app.schemas.run import CreateRunRequest, PatchRunRequest
+from app.services.errors import ResourceNotFoundError
 
 
 async def create(session: AsyncSession, req: CreateRunRequest) -> Run:
@@ -38,7 +38,7 @@ async def get(session: AsyncSession, run_id: uuid.UUID) -> Run:
     )
     run = result.scalar_one_or_none()
     if run is None:
-        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+        raise ResourceNotFoundError("Run", run_id)
     return run
 
 

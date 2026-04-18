@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -42,7 +41,7 @@ from app.config import settings
 from app.gpu import GpuPodSpec, get_provider
 from app.gpu.lifecycle import terminate_and_finalize
 from app.models.enums import BlobType, GpuProvider as GpuProviderEnum
-from app.models.schemas import WorkflowInputSchema
+from app.models.schemas import GenerateStoryStepOutput, WorkflowInputSchema
 from app.services import blob_service
 from app.services.story_service import StoryService
 from app.services.cost_service import CostService
@@ -84,7 +83,27 @@ class TtsStepOutput(BaseModel):
     chunks: list[TtsChunkResult] = Field(description="Per-chunk results")
 
 
-async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, object]:
+class TtsAllChunksResult(BaseModel):
+    """Aggregate result after synthesizing all queued chunks."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_results: list[TtsChunkResult] = Field(description="Per-chunk synthesis results")
+    total_duration_sec: float = Field(ge=0, description="Total valid audio duration")
+
+
+class ChunkSynthesisResult(BaseModel):
+    """Result of a single chunk synthesis attempt group."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    wav_bytes: bytes = Field(description="Best available WAV bytes")
+    attempts_used: int = Field(ge=1, description="Number of attempts made")
+    duration_sec: float = Field(ge=0, description="Best available duration")
+    validation_passed: bool = Field(description="Whether validation passed")
+
+
+async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput:
     """Synthesize audio for the story via a TTS GPU pod.
 
     Args:
@@ -92,25 +111,17 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
         ctx: step execution context (provides workflow_run_id and parent outputs).
 
     Returns:
-        dict with keys: pod_id, chunk_count, total_duration_sec, chunks
+        Pydantic output model with pod_id, chunk_count, total_duration_sec, and chunks.
     """
     # --- 1. Get story_id from parent step output, then fetch full_text from DB ---
     # full_text is intentionally NOT serialized into the step output to avoid
     # passing large text through the engine; we read it directly from Postgres.
-    story_output: dict[str, Any] = ctx.parent_outputs.get("generate_story", {})
-    story_id_raw: uuid.UUID | str | None = story_output.get("story_id")
-
-    if not story_id_raw:
+    story_output = ctx.parent_outputs.get("generate_story")
+    if story_output is None:
         raise ValueError("generate_story step did not produce story_id")
 
-    # Parent output may be a plain dict (JSON path, story_id
-    # is a str) or preserve the native Python type (story_id is uuid.UUID).
-    # Accept both to guard against the internal _data.parents shape changing.
-    story_id_for_text: uuid.UUID = (
-        story_id_raw
-        if isinstance(story_id_raw, uuid.UUID)
-        else uuid.UUID(str(story_id_raw))
-    )
+    story_result = GenerateStoryStepOutput.model_validate(story_output)
+    story_id_for_text: uuid.UUID = story_result.story_id
     story_id_str: str = str(story_id_for_text)
 
     _session_maker = _db.async_session_maker
@@ -177,7 +188,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
         async with _session_maker() as session:
             await CostService(session).mark_ready(pod.id, pod.endpoint_url)
 
-        chunk_results, total_duration_sec = await _synthesize_all_chunks(
+        all_chunks_result = await _synthesize_all_chunks(
             endpoint_url=pod.endpoint_url,
             chunks=chunks,
             voice_name=voice_name,
@@ -191,15 +202,15 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
 
     log.info(
         "tts_synthesis complete chunks=%d total_dur=%.1fs pod=%s",
-        len(chunk_results), total_duration_sec, pod.id,
+        len(all_chunks_result.chunk_results), all_chunks_result.total_duration_sec, pod.id,
     )
 
     return TtsStepOutput(
         pod_id=pod.id,
-        chunk_count=len(chunk_results),
-        total_duration_sec=total_duration_sec,
-        chunks=chunk_results,
-    ).model_dump()
+        chunk_count=len(all_chunks_result.chunk_results),
+        total_duration_sec=all_chunks_result.total_duration_sec,
+        chunks=all_chunks_result.chunk_results,
+    )
 
 
 async def _synthesize_all_chunks(
@@ -207,7 +218,7 @@ async def _synthesize_all_chunks(
     chunks: list[str],
     voice_name: str,
     workflow_run_id: str,
-) -> tuple[list[TtsChunkResult], float]:
+) -> TtsAllChunksResult:
     """Synthesize all chunks sequentially and persist each result to Postgres.
 
     Failed chunks are re-queued for additional retry rounds (up to
@@ -221,7 +232,7 @@ async def _synthesize_all_chunks(
         workflow_run_id: workflow run ID (used for DB FK and logging).
 
     Returns:
-        Tuple of (chunk_results, total_duration_sec).
+        Pydantic model with chunk results and total duration.
     """
     # Parse workflow_id for DB FK (best-effort; None if run ID is not a UUID)
     workflow_id_uuid: uuid.UUID | None
@@ -258,15 +269,13 @@ async def _synthesize_all_chunks(
             failed: list[tuple[int, str]] = []
 
             for idx, chunk_text in pending:
-                wav_bytes, attempts_used, duration_sec, validation_passed = (
-                    await _synthesize_with_retry(
-                        client=client,
-                        chunk_text=chunk_text,
-                        chunk_index=idx,
-                        voice_name=voice_name,
-                        max_retries=_MAX_CHUNK_RETRIES,
-                        seed_offset=seed_offset,
-                    )
+                synthesis_result = await _synthesize_with_retry(
+                    client=client,
+                    chunk_text=chunk_text,
+                    chunk_index=idx,
+                    voice_name=voice_name,
+                    max_retries=_MAX_CHUNK_RETRIES,
+                    seed_offset=seed_offset,
                 )
 
                 # Persist blob and update chunk progress row
@@ -277,7 +286,7 @@ async def _synthesize_all_chunks(
                 async with session_maker() as session:
                     blob = await blob_service.store(
                         session=session,
-                        data=wav_bytes,
+                        data=synthesis_result.wav_bytes,
                         mime_type="audio/wav",
                         blob_type=BlobType.CHUNK_AUDIO,
                         workflow_id=workflow_id_uuid,
@@ -289,13 +298,13 @@ async def _synthesize_all_chunks(
                             chunk_index=idx,
                             chunk_text=chunk_text,
                         )
-                        if validation_passed:
+                        if synthesis_result.validation_passed:
                             await svc.complete_chunk_tts(
                                 workflow_id=workflow_id_uuid,
                                 chunk_index=idx,
                                 blob_id=blob.id,
-                                duration_sec=duration_sec,
-                                attempts_used=attempts_used,
+                                duration_sec=synthesis_result.duration_sec,
+                                attempts_used=synthesis_result.attempts_used,
                             )
                         else:
                             # Save best-effort audio but mark failed for now;
@@ -304,24 +313,28 @@ async def _synthesize_all_chunks(
                                 workflow_id=workflow_id_uuid,
                                 chunk_index=idx,
                                 blob_id=blob.id,
-                                attempts_used=attempts_used,
+                                attempts_used=synthesis_result.attempts_used,
                             )
                     await session.commit()
 
-                total_duration_sec += duration_sec
+                total_duration_sec += synthesis_result.duration_sec
 
-                if validation_passed:
+                if synthesis_result.validation_passed:
                     chunk_results.append(TtsChunkResult(
                         index=idx,
                         text=chunk_text,
                         blob_id=str(blob.id),
-                        duration_sec=duration_sec,
-                        attempts_used=attempts_used,
+                        duration_sec=synthesis_result.duration_sec,
+                        attempts_used=synthesis_result.attempts_used,
                         validation_passed=True,
                     ))
                     log.info(
                         "chunk %d/%d done blob_id=%s dur=%.1fs attempts=%d validated=True",
-                        idx + 1, len(chunks), blob.id, duration_sec, attempts_used,
+                        idx + 1,
+                        len(chunks),
+                        blob.id,
+                        synthesis_result.duration_sec,
+                        synthesis_result.attempts_used,
                     )
                 else:
                     # Enqueue for next round (or record final failure below)
@@ -349,7 +362,10 @@ async def _synthesize_all_chunks(
                 idx + 1, len(chunks), _MAX_REQUEUE_ROUNDS + 1,
             )
 
-    return chunk_results, total_duration_sec
+    return TtsAllChunksResult(
+        chunk_results=chunk_results,
+        total_duration_sec=total_duration_sec,
+    )
 
 
 async def _synthesize_with_retry(
@@ -359,7 +375,7 @@ async def _synthesize_with_retry(
     voice_name: str,
     max_retries: int,
     seed_offset: int = 0,
-) -> tuple[bytes, int, float, bool]:
+) -> ChunkSynthesisResult:
     """Synthesize a single chunk, retrying on validation failure.
 
     Args:
@@ -370,7 +386,7 @@ async def _synthesize_with_retry(
         max_retries: Maximum additional attempts after the first try.
 
     Returns:
-        Tuple of (wav_bytes, attempts_used, duration_sec, validation_passed).
+        Pydantic model with WAV bytes, attempts, duration, and validation status.
         If all attempts fail validation, returns best-effort audio with
         validation_passed=False so the caller can mark the chunk accordingly.
     """
@@ -419,7 +435,12 @@ async def _synthesize_with_retry(
                 "chunk %d passed on attempt %d (dur=%.1fs)",
                 chunk_index, attempt + 1, validation.duration_sec,
             )
-            return candidate, attempt + 1, validation.duration_sec, True
+            return ChunkSynthesisResult(
+                wav_bytes=candidate,
+                attempts_used=attempt + 1,
+                duration_sec=validation.duration_sec,
+                validation_passed=True,
+            )
 
         log.warning(
             "chunk %d validation failed attempt %d: %s",
@@ -431,4 +452,9 @@ async def _synthesize_with_retry(
         "chunk %d: all %d attempt(s) failed validation; saving best-effort audio as FAILED",
         chunk_index, max_retries + 1,
     )
-    return best_wav, max_retries + 1, best_duration, False
+    return ChunkSynthesisResult(
+        wav_bytes=best_wav,
+        attempts_used=max_retries + 1,
+        duration_sec=best_duration,
+        validation_passed=False,
+    )

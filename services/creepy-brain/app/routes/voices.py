@@ -38,7 +38,7 @@ async def upload_voice(
         blob_type=BlobType.VOICE_AUDIO,
     )
 
-    voice, created = await voice_service.get_or_create(
+    voice_result = await voice_service.get_or_create(
         session,
         name=name,
         audio_path=str(blob.id),
@@ -46,7 +46,10 @@ async def upload_voice(
         is_default=is_default,
     )
     await session.commit()
-    return CreateVoiceResponse(voice=VoiceResponse.model_validate(voice), created=created)
+    return CreateVoiceResponse(
+        voice=VoiceResponse.model_validate(voice_result.voice),
+        created=voice_result.created,
+    )
 
 
 @router.get("", response_model=list[VoiceResponse])

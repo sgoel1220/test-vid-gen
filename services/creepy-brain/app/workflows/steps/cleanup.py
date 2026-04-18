@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.engine import StepContext
+from app.engine import SkippedStepOutput, StepContext
 from sqlalchemy import select
 
 from app.config import settings
@@ -43,16 +42,7 @@ class CleanupStepOutput(BaseModel):
     results: list[PodCleanupResult] = Field(description="Per-pod termination results")
 
 
-class SkippedStepOutput(BaseModel):
-    """Output when cleanup is skipped."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    skipped: bool = True
-    reason: str
-
-
-async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, object]:
+async def execute(input: WorkflowInputSchema, ctx: StepContext) -> CleanupStepOutput | SkippedStepOutput:
     """Terminate active GPU pods when the ContentPipeline workflow fails.
 
     This is registered as the ``on_failure`` hook for ContentPipeline, so it
@@ -64,12 +54,12 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
     await ensure_db()
     session_maker = get_session_maker()
 
-    workflow_id: Optional[uuid.UUID] = get_optional_workflow_id(ctx.workflow_run_id)
+    workflow_id: uuid.UUID | None = get_optional_workflow_id(ctx.workflow_run_id)
     if workflow_id is None:
         log.warning(
             "cleanup_gpu_pod: could not parse workflow_run_id=%s", ctx.workflow_run_id
         )
-        return SkippedStepOutput(reason="unparseable_workflow_run_id").model_dump()
+        return SkippedStepOutput(reason="unparseable_workflow_run_id")
 
     # Load active (non-terminated, non-errored) pods linked to this workflow.
     async with session_maker() as session:
@@ -83,7 +73,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
 
     if not pods:
         log.info("cleanup_gpu_pod: no active pods for workflow %s", workflow_id)
-        return SkippedStepOutput(reason="no_active_pods").model_dump()
+        return SkippedStepOutput(reason="no_active_pods")
 
     provider = get_provider(settings.runpod_api_key)
     pod_results: list[PodCleanupResult] = []
@@ -101,4 +91,4 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
             )
             pod_results.append(PodCleanupResult(pod_id=pod_id, error=str(exc)))
 
-    return CleanupStepOutput(pod_count=len(pods), results=pod_results).model_dump()
+    return CleanupStepOutput(pod_count=len(pods), results=pod_results)

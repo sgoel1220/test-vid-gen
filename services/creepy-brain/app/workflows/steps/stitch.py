@@ -11,21 +11,21 @@ import io
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import soundfile as sf
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.engine import StepContext
+from app.engine import SkippedStepOutput, StepContext
 
 import app.db as _db  # module ref — always reads the live async_session_maker value
 from app.audio.encoding import encode_wav_to_mp3
-from app.models.enums import BlobType
+from app.models.enums import BlobType, ChunkStatus
 from app.models.schemas import WorkflowInputSchema
 from app.services import blob_service
 from app.services.workflow_service import ChunkForImageStep, get_optional_workflow_id
+from app.workflows.steps.image import ImageStepOutput, SceneImageResult
 
 log = structlog.get_logger(__name__)
 
@@ -47,7 +47,7 @@ class StitchStepOutput(BaseModel):
     total_duration_sec: float = Field(ge=0, description="Total audio duration in seconds")
 
 
-async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, object]:
+async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOutput | SkippedStepOutput:
     """Stitch audio chunks and optionally create video with images.
 
     Args:
@@ -55,13 +55,12 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
         ctx: step execution context (provides workflow_run_id and parent outputs).
 
     Returns:
-        dict with keys: final_audio_blob_id, final_video_blob_id, chunk_count, total_duration_sec
-        OR {"skipped": True, "reason": "..."} if stitch_video=False
+        Pydantic output model, or skipped output if stitching is disabled.
     """
     # Early return if stitching disabled
     if not input.stitch_video:
         log.info("stitch_final skipped: stitch_video=False")
-        return {"skipped": True, "reason": "stitch_video=False"}
+        return SkippedStepOutput(reason="stitch_video=False")
 
     workflow_run_id: str = ctx.workflow_run_id
     workflow_id = get_optional_workflow_id(workflow_run_id)
@@ -75,7 +74,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
     log.info("stitch_final started workflow_id=%s", workflow_run_id)
 
     # Get parent step outputs
-    image_output: dict[str, Any] = ctx.parent_outputs.get("image_generation", {})
+    image_output = ctx.parent_outputs.get("image_generation")
 
     # --- 1. Fetch WAV chunk blobs from DB ---
     session_maker = _db.async_session_maker
@@ -97,7 +96,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
     # --- Quality gate: skip non-completed chunks ---
     valid_chunks: list[ChunkForImageStep] = []
     for chunk in chunk_data:
-        if chunk.tts_status != "completed":
+        if chunk.tts_status != ChunkStatus.COMPLETED:
             log.warning(
                 "stitch_final: skipping chunk %s (tts_status=%s)",
                 chunk.index,
@@ -179,12 +178,15 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
     )
 
     # --- 5. Create video if images exist ---
-    if not image_output.get("skipped") and image_output.get("scenes"):
-        scenes = image_output["scenes"]
-        log.info("stitch_final: creating video with %d scene images", len(scenes))
+    if image_output is not None and not isinstance(image_output, SkippedStepOutput):
+        image_step_output = ImageStepOutput.model_validate(image_output)
+        log.info(
+            "stitch_final: creating video with %d scene images",
+            len(image_step_output.scenes),
+        )
 
         video_blob_id = await _create_video(
-            scenes=scenes,
+            scenes=image_step_output.scenes,
             mp3_bytes=mp3_bytes,
             workflow_id=workflow_id,
         )
@@ -199,11 +201,11 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
         output.total_duration_sec,
     )
 
-    return output.model_dump()
+    return output
 
 
 async def _create_video(
-    scenes: list[dict[str, Any]],
+    scenes: list[SceneImageResult],
     mp3_bytes: bytes,
     workflow_id: uuid.UUID,
 ) -> uuid.UUID:
@@ -226,7 +228,7 @@ async def _create_video(
         # Fetch and write image files
         async with session_maker() as session:
             for i, scene in enumerate(scenes):
-                blob_id_str = scene.get("image_blob_id")
+                blob_id_str = scene.image_blob_id
                 if not blob_id_str:
                     continue
                 blob = await blob_service.get(session, uuid.UUID(blob_id_str))

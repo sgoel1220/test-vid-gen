@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -99,10 +98,10 @@ def _split_into_sentences(text: str) -> list[str]:
     return [s for s in result if s]
 
 
-def _segment_text(full_text: str) -> list[tuple[Optional[str], str]]:
+def _segment_text(full_text: str) -> list[tuple[str | None, str]]:
     if not full_text or full_text.isspace():
         return []
-    segments: list[tuple[Optional[str], str]] = []
+    segments: list[tuple[str | None, str]] = []
     for part in _NON_VERBAL_CUE.split(full_text):
         if not part or part.isspace():
             continue

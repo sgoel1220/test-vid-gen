@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -37,9 +37,20 @@ class EmptyModel(BaseModel):
     pass
 
 
+class ReconStepOutput(BaseModel):
+    """Summary of an orphaned GPU pod sweep."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    db_checked: int = Field(ge=0, description="Number of DB-tracked pods inspected")
+    provider_untracked: int = Field(ge=0, description="Number of untracked provider pods found")
+    terminated: int = Field(ge=0, description="Number of pods terminated")
+    error: str | None = Field(default=None, description="Non-fatal sweep error")
+
+
 async def _recon_orphaned_pods(
     input: EmptyModel, ctx: StepContext
-) -> dict[str, object]:
+) -> ReconStepOutput:
     """Find and terminate orphaned GPU pods.
 
     Two-phase sweep:
@@ -50,7 +61,12 @@ async def _recon_orphaned_pods(
     await _ensure_db()
     session_maker = _db.async_session_maker
     if session_maker is None:
-        return {"error": "db_not_initialized"}
+        return ReconStepOutput(
+            db_checked=0,
+            provider_untracked=0,
+            terminated=0,
+            error="db_not_initialized",
+        )
 
     now = datetime.now(timezone.utc)
     provider = get_provider(settings.runpod_api_key)
@@ -125,11 +141,11 @@ async def _recon_orphaned_pods(
         untracked,
         terminated,
     )
-    return {
-        "db_checked": len(db_pods),
-        "provider_untracked": untracked,
-        "terminated": terminated,
-    }
+    return ReconStepOutput(
+        db_checked=len(db_pods),
+        provider_untracked=untracked,
+        terminated=terminated,
+    )
 
 
 async def _terminate_pod(

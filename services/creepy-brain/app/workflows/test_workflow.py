@@ -11,19 +11,28 @@ class EmptyModel(BaseModel):
     pass
 
 
-async def _step_one(input: EmptyModel, ctx: StepContext) -> dict[str, object]:
+class StepOneOutput(BaseModel):
+    message: str
+    value: int
+
+
+class StepTwoOutput(BaseModel):
+    message: str
+
+
+async def _step_one(input: EmptyModel, ctx: StepContext) -> StepOneOutput:
     """First step — simulates work and returns a value."""
     await asyncio.sleep(2)
-    return {"message": "Step one complete", "value": 42}
+    return StepOneOutput(message="Step one complete", value=42)
 
 
-async def _step_two(input: EmptyModel, ctx: StepContext) -> dict[str, object]:
+async def _step_two(input: EmptyModel, ctx: StepContext) -> StepTwoOutput:
     """Second step — reads step_one output and doubles the value."""
-    result = ctx.parent_outputs.get("step_one", {})
-    raw_value = result.get("value")
-    assert isinstance(raw_value, int)
-    value: int = raw_value
-    return {"message": f"Step two complete, doubled: {value * 2}"}
+    result = ctx.parent_outputs.get("step_one")
+    if result is None:
+        raise ValueError("step_one output missing")
+    step_one = StepOneOutput.model_validate(result)
+    return StepTwoOutput(message=f"Step two complete, doubled: {step_one.value * 2}")
 
 
 test_workflow_def = WorkflowDef(

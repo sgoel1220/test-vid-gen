@@ -6,7 +6,7 @@ import asyncio
 import io
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import soundfile as sf
@@ -14,7 +14,10 @@ import torch
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from chatterbox.tts import ChatterboxTTS
 
 WAV_MEDIA_TYPE = "audio/wav"
 
@@ -90,10 +93,19 @@ class ReadinessResponse(BaseModel):
     ready: bool = Field(..., description="Whether the model has loaded.")
 
 
+class SynthesisResult(BaseModel):
+    """Raw Chatterbox synthesis result before WAV encoding."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    wav_tensor: torch.Tensor | None = Field(description="Generated audio tensor")
+    sample_rate: int = Field(gt=0, description="Sample rate for the generated audio")
+
+
 # ---------------------------------------------------------------------------
 # TTS Engine (lazy-loaded singleton)
 # ---------------------------------------------------------------------------
-_model: object | None = None
+_model: "ChatterboxTTS | None" = None
 _model_lock = asyncio.Lock()
 
 
@@ -104,7 +116,7 @@ def _get_device() -> str:
     return "cpu"
 
 
-async def _ensure_model_loaded() -> object:
+async def _ensure_model_loaded() -> "ChatterboxTTS":
     """Load the TTS model if not already loaded."""
     global _model
     async with _model_lock:
@@ -128,7 +140,7 @@ async def _ensure_model_loaded() -> object:
 
 
 def _synthesize_sync(
-    model: object,
+    model: "ChatterboxTTS",
     text: str,
     audio_prompt_path: str,
     seed: int,
@@ -138,12 +150,8 @@ def _synthesize_sync(
     repetition_penalty: float,
     min_p: float,
     top_p: float,
-) -> tuple[torch.Tensor, int]:
+) -> SynthesisResult:
     """Synchronous synthesis using Chatterbox."""
-    from chatterbox.tts import ChatterboxTTS
-
-    assert isinstance(model, ChatterboxTTS)
-
     # Set seed for reproducibility
     if seed > 0:
         torch.manual_seed(seed)
@@ -160,7 +168,7 @@ def _synthesize_sync(
         min_p=min_p,
         top_p=top_p,
     )
-    return wav, model.sr
+    return SynthesisResult(wav_tensor=wav, sample_rate=model.sr)
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +209,7 @@ async def synthesize(request: SynthesizeRequest) -> Response:
 
     # Run synthesis in thread pool
     loop = asyncio.get_running_loop()
-    wav_tensor, sample_rate = await loop.run_in_executor(
+    synthesis_result = await loop.run_in_executor(
         None,
         lambda: _synthesize_sync(
             model=model,
@@ -217,10 +225,16 @@ async def synthesize(request: SynthesizeRequest) -> Response:
         ),
     )
 
-    if wav_tensor is None:
+    if synthesis_result.wav_tensor is None:
         raise HTTPException(status_code=500, detail="Synthesis failed.")
 
-    return Response(content=encode_to_wav_bytes(wav_tensor, sample_rate), media_type=WAV_MEDIA_TYPE)
+    return Response(
+        content=encode_to_wav_bytes(
+            synthesis_result.wav_tensor,
+            synthesis_result.sample_rate,
+        ),
+        media_type=WAV_MEDIA_TYPE,
+    )
 
 
 @app.on_event("startup")

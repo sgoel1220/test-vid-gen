@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Optional
 
-from app.engine import StepContext, StepDef, WorkflowDef, engine
+from pydantic import BaseModel
+
+from app.engine import SkippedStepOutput, StepContext, StepDef, WorkflowDef, engine
 from app.models.schemas import WorkflowInputSchema, WorkflowResultSchema
 from app.services.workflow_service import WorkflowService, get_optional_workflow_id
 
@@ -45,32 +46,30 @@ def _to_uuid(val: object) -> uuid.UUID | None:
 
 async def _stitch_final(
     input: WorkflowInputSchema, ctx: StepContext
-) -> dict[str, object]:
+) -> BaseModel:
     """Stitch audio/images and mark workflow COMPLETED on success."""
     result = await stitch.execute(input, ctx)
 
-    if result.get("skipped"):
+    if isinstance(result, SkippedStepOutput):
         log.info("stitch_final: skipped, not updating workflow DB")
         return result
 
-    workflow_id: Optional[uuid.UUID] = get_optional_workflow_id(ctx.workflow_run_id)
+    workflow_id: uuid.UUID | None = get_optional_workflow_id(ctx.workflow_run_id)
     if workflow_id is not None:
         await ensure_db()
         async with get_session_maker()() as session:
             svc = WorkflowService(session)
-            _duration_val = result.get("total_duration_sec")
-            _count_val = result.get("chunk_count")
-            if _duration_val is None:
-                log.warning("stitch_final: total_duration_sec missing from result, defaulting to 0.0")
-            if _count_val is None:
-                log.warning("stitch_final: chunk_count missing from result, defaulting to 0")
+            if not isinstance(result, stitch.StitchStepOutput):
+                raise TypeError(
+                    f"stitch_final returned unexpected output: {type(result).__name__}"
+                )
             wf_result = WorkflowResultSchema(
                 story_id=None,
                 run_id=None,
-                final_audio_blob_id=_to_uuid(result.get("final_audio_blob_id")),
-                final_video_blob_id=_to_uuid(result.get("final_video_blob_id")),
-                total_duration_sec=float(_duration_val) if _duration_val is not None else 0.0,  # type: ignore[arg-type]
-                chunk_count=int(_count_val) if _count_val is not None else 0,  # type: ignore[call-overload]
+                final_audio_blob_id=_to_uuid(result.final_audio_blob_id),
+                final_video_blob_id=_to_uuid(result.final_video_blob_id),
+                total_duration_sec=result.total_duration_sec,
+                chunk_count=result.chunk_count,
                 gpu_pod_id=None,
                 total_cost_cents=None,
             )
@@ -82,7 +81,7 @@ async def _stitch_final(
 
 async def _cleanup_gpu_pod(
     input: WorkflowInputSchema, ctx: StepContext
-) -> dict[str, object]:
+) -> BaseModel:
     """Terminate active GPU pods on workflow failure.
 
     The runner marks the workflow FAILED after this step completes — no need to

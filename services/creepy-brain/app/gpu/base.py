@@ -10,9 +10,12 @@ ERROR     – provider reported an error state
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.models.enums import GpuProvider as GpuProviderName
 
 
 class PodStatus(str, Enum):
@@ -23,9 +26,10 @@ class PodStatus(str, Enum):
     ERROR = "error"
 
 
-@dataclass
-class GpuPodSpec:
+class GpuPodSpec(BaseModel):
     """Spec for creating a GPU pod. Defaults loaded from config."""
+
+    model_config = ConfigDict(extra="forbid")
 
     gpu_type: str
     image: str
@@ -33,7 +37,7 @@ class GpuPodSpec:
     volume_gb: int
     ports: list[int]
     cloud_type: str = "COMMUNITY"  # COMMUNITY or SECURE
-    env: dict[str, str] = field(default_factory=dict)
+    env: dict[str, str] = Field(default_factory=dict)
 
     @classmethod
     def from_config(cls) -> "GpuPodSpec":
@@ -50,10 +54,13 @@ class GpuPodSpec:
         )
 
 
-@dataclass
-class GpuPod:
+class GpuPod(BaseModel):
+    """Provider-agnostic GPU pod state."""
+
+    model_config = ConfigDict(extra="forbid")
+
     id: str
-    provider: str
+    provider: GpuProviderName
     status: PodStatus
     endpoint_url: str | None
     gpu_type: str | None
