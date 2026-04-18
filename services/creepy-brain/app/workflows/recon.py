@@ -11,17 +11,17 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-import app.db as _db
 from app.config import settings
 from app.engine import StepContext, StepDef, WorkflowDef, engine
 from app.gpu import GpuProvider, get_provider
 from app.models.enums import GpuPodStatus, WorkflowStatus
 from app.models.gpu_pod import GpuPod
 from app.models.workflow import Workflow
+from app.workflows.db_helpers import ensure_db, get_session_maker
+from app.workflows.schemas import EmptyWorkflowInput
 
 log = logging.getLogger(__name__)
 
@@ -33,12 +33,8 @@ _TERMINAL_STATUSES = {WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowS
 RECON_CRON = "*/5 * * * *"
 
 
-class EmptyModel(BaseModel):
-    pass
-
-
 async def _recon_orphaned_pods(
-    input: EmptyModel, ctx: StepContext
+    input: EmptyWorkflowInput, ctx: StepContext
 ) -> dict[str, object]:
     """Find and terminate orphaned GPU pods.
 
@@ -47,10 +43,8 @@ async def _recon_orphaned_pods(
     2. Provider sweep — list all live pods from RunPod and terminate any that
        are not tracked in our DB or have no linked workflow.
     """
-    await _ensure_db()
-    session_maker = _db.async_session_maker
-    if session_maker is None:
-        return {"error": "db_not_initialized"}
+    await ensure_db()
+    session_maker = get_session_maker()
 
     now = datetime.now(timezone.utc)
     provider = get_provider(settings.runpod_api_key)
@@ -173,16 +167,6 @@ def _check_orphaned(pod: GpuPod, now: datetime) -> str | None:
         return f"no_workflow (age={minutes:.0f}m)"
 
     return None
-
-
-_db_init_lock = __import__("asyncio").Lock()
-
-
-async def _ensure_db() -> None:
-    """Initialize the DB engine if not already done (idempotent)."""
-    async with _db_init_lock:
-        if _db.async_session_maker is None:
-            await _db.init_db()
 
 
 # ---------------------------------------------------------------------------

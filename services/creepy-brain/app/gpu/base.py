@@ -12,15 +12,8 @@ ERROR     – provider reported an error state
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 
-
-class PodStatus(str, Enum):
-    CREATING = "creating"
-    RUNNING = "running"
-    READY = "ready"
-    TERMINATED = "terminated"
-    ERROR = "error"
+from app.models.enums import GpuPodStatus
 
 
 @dataclass
@@ -54,7 +47,7 @@ class GpuPodSpec:
 class GpuPod:
     id: str
     provider: str
-    status: PodStatus
+    status: GpuPodStatus
     endpoint_url: str | None
     gpu_type: str | None
     cost_per_hour_cents: int | None

@@ -7,13 +7,14 @@ import uuid
 from typing import Optional
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.models.enums import StoryStatus
 from app.models.story import Story
+from app.services.http_errors import require_found
 from app.services.story_service import StoryService
 
 log = structlog.get_logger()
@@ -141,9 +142,7 @@ async def get_story(
 ) -> StoryResponse:
     """Get story detail including acts."""
     svc = StoryService(session)
-    story = await svc.get(story_id)
-    if story is None:
-        raise HTTPException(status_code=404, detail="Story not found")
+    story = require_found(await svc.get(story_id), "Story not found")
     return _story_to_response(story)
 
 

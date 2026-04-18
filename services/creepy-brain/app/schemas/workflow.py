@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from app.models.enums import (
     ChunkStatus,
@@ -19,15 +19,8 @@ from app.models.enums import (
 from app.models.schemas import WorkflowInputSchema, WorkflowResultSchema
 
 
-class CreateWorkflowRequest(BaseModel):
+class CreateWorkflowRequest(WorkflowInputSchema):
     """Request body for POST /api/workflows."""
-
-    premise: str = Field(..., description="Story premise or prompt")
-    voice_name: str = Field(..., description="Voice to use for TTS")
-    generate_images: bool = Field(default=False)
-    stitch_video: bool = Field(default=False)
-    max_revisions: int = Field(default=3)
-    target_word_count: int = Field(default=5000)
 
 
 class WorkflowResponse(BaseModel):

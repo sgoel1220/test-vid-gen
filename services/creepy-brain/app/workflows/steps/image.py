@@ -29,27 +29,30 @@ import uuid
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.engine import StepContext
 
-import app.db as _db
 from app.config import settings
 from app.gpu import GpuPodSpec, get_provider
-from app.gpu.lifecycle import terminate_and_finalize
+from app.gpu.lifecycle import (
+    create_recorded_pod,
+    terminate_and_finalize,
+    wait_for_recorded_ready,
+)
 from app.llm.image_prompts import generate_scene_image_prompt
-from app.models.enums import BlobType, ChunkStatus, GpuProvider as GpuProviderEnum
+from app.models.enums import BlobType, ChunkStatus
 from app.models.schemas import WorkflowInputSchema
 from app.models.workflow import WorkflowScene
 from app.services import blob_service
-from app.services.cost_service import CostService
 from app.services.workflow_service import (
-    ChunkForImageStep,
     WorkflowService,
     get_chunks_for_image_step,
     get_optional_workflow_id,
     get_scenes_for_workflow,
 )
 from app.text.scene_grouping import Scene, group_chunks_into_scenes
+from app.workflows.db_helpers import get_session_maker
 
 log = logging.getLogger(__name__)
 
@@ -186,10 +189,7 @@ async def execute(
     log.info("image_generation started workflow_id=%s", workflow_run_id)
 
     # --- 2. Get chunk texts from DB ---
-    session_maker = _db.async_session_maker
-    assert session_maker is not None, (
-        "DB not initialized — call init_db() before starting"
-    )
+    session_maker = get_session_maker()
     async with session_maker() as session:
         chunk_data = await get_chunks_for_image_step(session, workflow_id_uuid)
         existing_scenes = await get_scenes_for_workflow(session, workflow_id_uuid)
@@ -253,48 +253,37 @@ async def execute(
         scenes=pending_scenes,
         workflow_id=workflow_id_uuid,
         existing_scene_map=existing_scene_map,
+        session_maker=session_maker,
     )
     log.info("image_generation: %d prompts generated and saved", len(scene_prompts))
 
     # --- 6. Spin up image GPU pod ---
     provider = get_provider(settings.runpod_api_key)
-    pod = await provider.create_pod(
+    pod = await create_recorded_pod(
+        provider,
+        session_maker,
         spec=_image_pod_spec(),
         idempotency_key=f"img-{workflow_run_id}",
+        workflow_id=workflow_id_uuid,
+        label="image",
     )
-    log.info("image pod created pod_id=%s provider=%s", pod.id, pod.provider)
-
-    # Persist pod to DB for cost tracking
-    session_maker = _db.async_session_maker
-    assert session_maker is not None
-    async with session_maker() as session:
-        cost_svc = CostService(session)
-        await cost_svc.record_pod(
-            pod_id=pod.id,
-            provider=GpuProviderEnum(pod.provider),
-            workflow_id=workflow_id_uuid,
-            gpu_type=pod.gpu_type,
-            cost_per_hour_cents=pod.cost_per_hour_cents,
-        )
 
     # --- 7. Wait for pod ready, then generate images ---
     try:
-        pod = await provider.wait_for_ready(
+        pod, endpoint_url = await wait_for_recorded_ready(
+            provider,
+            session_maker,
             pod.id,
             timeout_sec=settings.pod_ready_timeout_sec,
+            label="image",
             service_port=settings.image_server_port,
         )
-        assert pod.endpoint_url is not None, f"pod {pod.id} ready but has no endpoint_url"
-        log.info("image pod ready endpoint=%s", pod.endpoint_url)
-
-        # Mark pod ready for cost tracking (start billing clock)
-        async with session_maker() as session:
-            await CostService(session).mark_ready(pod.id, pod.endpoint_url)
 
         new_results = await _generate_images_from_prompts(
-            endpoint_url=pod.endpoint_url,
+            endpoint_url=endpoint_url,
             scene_prompts=scene_prompts,
             workflow_id=workflow_id_uuid,
+            session_maker=session_maker,
         )
     finally:
         # --- 8. Terminate image pod ---
@@ -326,6 +315,7 @@ async def _generate_and_save_prompts(
     scenes: list[Scene],
     workflow_id: uuid.UUID,
     existing_scene_map: dict[int, WorkflowScene],
+    session_maker: async_sessionmaker[AsyncSession],
 ) -> list[ScenePrompt]:
     """Generate image prompts for pending scenes and save to DB.
 
@@ -336,14 +326,12 @@ async def _generate_and_save_prompts(
         scenes: List of Scene objects that need prompt generation.
         workflow_id: Workflow UUID for DB FK.
         existing_scene_map: Map of scene_index to existing WorkflowScene (for resume).
+        session_maker: SQLAlchemy async session factory.
 
     Returns:
         List of ScenePrompt with prompts ready for image generation.
     """
     scene_prompts: list[ScenePrompt] = []
-
-    session_maker = _db.async_session_maker
-    assert session_maker is not None
 
     for scene in scenes:
         # Check if scene already has a prompt (partial resume)
@@ -411,6 +399,7 @@ async def _generate_images_from_prompts(
     endpoint_url: str,
     scene_prompts: list[ScenePrompt],
     workflow_id: uuid.UUID,
+    session_maker: async_sessionmaker[AsyncSession],
 ) -> list[SceneImageResult]:
     """Generate images for scenes using pre-saved prompts.
 
@@ -418,14 +407,12 @@ async def _generate_images_from_prompts(
         endpoint_url: Base URL of the ready image GPU pod.
         scene_prompts: List of ScenePrompt with prompts already saved to DB.
         workflow_id: Workflow UUID for DB FK.
+        session_maker: SQLAlchemy async session factory.
 
     Returns:
         List of SceneImageResult with blob IDs.
     """
     scene_results: list[SceneImageResult] = []
-
-    session_maker = _db.async_session_maker
-    assert session_maker is not None
 
     async with httpx.AsyncClient(
         base_url=endpoint_url, timeout=_GENERATE_TIMEOUT_SEC

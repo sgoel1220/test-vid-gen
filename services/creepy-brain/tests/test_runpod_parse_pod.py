@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.gpu.base import GpuPod, PodStatus
+from app.models.enums import GpuPodStatus
 from app.gpu.runpod import RunPodProvider
 
 
@@ -28,19 +28,19 @@ def _base_raw(*, desired: str = "RUNNING", ports: list[dict[str, object]] | None
 class TestParsePodStatus:
     def test_running(self) -> None:
         pod = _provider()._parse_pod(_base_raw(desired="RUNNING"))
-        assert pod.status == PodStatus.RUNNING
+        assert pod.status == GpuPodStatus.RUNNING
 
     def test_exited(self) -> None:
         pod = _provider()._parse_pod(_base_raw(desired="EXITED"))
-        assert pod.status == PodStatus.TERMINATED
+        assert pod.status == GpuPodStatus.TERMINATED
 
     def test_terminated(self) -> None:
         pod = _provider()._parse_pod(_base_raw(desired="TERMINATED"))
-        assert pod.status == PodStatus.TERMINATED
+        assert pod.status == GpuPodStatus.TERMINATED
 
     def test_unknown_maps_to_creating(self) -> None:
         pod = _provider()._parse_pod(_base_raw(desired="PENDING"))
-        assert pod.status == PodStatus.CREATING
+        assert pod.status == GpuPodStatus.CREATING
 
 
 class TestParsePodEndpoint:
@@ -90,7 +90,7 @@ class TestParsePodCreatedAt:
 
     def test_none_when_missing(self) -> None:
         raw = _base_raw()
-        del raw["createdAt"]  # type: ignore[misc]
+        del raw["createdAt"]
         pod = _provider()._parse_pod(raw)
         assert pod.created_at is None
 

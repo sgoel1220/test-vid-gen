@@ -49,7 +49,7 @@ class AnthropicProvider:
         parts: list[str] = []
         for block in response.content:
             if hasattr(block, "text"):
-                parts.append(block.text)  # type: ignore[union-attr]
+                parts.append(block.text)
         return "".join(parts)
 
 

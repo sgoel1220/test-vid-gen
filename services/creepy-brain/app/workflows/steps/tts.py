@@ -33,22 +33,26 @@ from typing import Any
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.engine import StepContext
 
-import app.db as _db
 from app.audio.validation import validate_chunk_audio
 from app.config import settings
 from app.gpu import GpuPodSpec, get_provider
-from app.gpu.lifecycle import terminate_and_finalize
-from app.models.enums import BlobType, GpuProvider as GpuProviderEnum
+from app.gpu.lifecycle import (
+    create_recorded_pod,
+    terminate_and_finalize,
+    wait_for_recorded_ready,
+)
+from app.models.enums import BlobType
 from app.models.schemas import WorkflowInputSchema
 from app.services import blob_service
 from app.services.story_service import StoryService
-from app.services.cost_service import CostService
 from app.services.workflow_service import WorkflowService, get_optional_workflow_id
 from app.text.chunking import chunk_text_by_sentences
 from app.text.normalization import normalize_text
+from app.workflows.db_helpers import get_session_maker
 
 log = logging.getLogger(__name__)
 
@@ -113,11 +117,8 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
     )
     story_id_str: str = str(story_id_for_text)
 
-    _session_maker = _db.async_session_maker
-    assert _session_maker is not None, (
-        "DB not initialized — call init_db() before starting"
-    )
-    async with _session_maker() as _session:
+    session_maker = get_session_maker()
+    async with session_maker() as _session:
         _story = await StoryService(_session).get(story_id_for_text)
 
     if _story is None:
@@ -148,44 +149,37 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
 
     # --- 4. Spin up TTS GPU pod ---
     provider = get_provider(settings.runpod_api_key)
-    pod = await provider.create_pod(
+    workflow_id_for_pod = get_optional_workflow_id(workflow_run_id)
+    pod = await create_recorded_pod(
+        provider,
+        session_maker,
         spec=GpuPodSpec.from_config(),
         idempotency_key=f"tts-{workflow_run_id}",
+        workflow_id=workflow_id_for_pod,
+        label="tts",
     )
-    log.info("tts pod created pod_id=%s provider=%s", pod.id, pod.provider)
-
-    # Persist pod to DB for cost tracking
-    workflow_id_for_pod = get_optional_workflow_id(workflow_run_id)
-    async with _session_maker() as session:
-        cost_svc = CostService(session)
-        await cost_svc.record_pod(
-            pod_id=pod.id,
-            provider=GpuProviderEnum(pod.provider),
-            workflow_id=workflow_id_for_pod,
-            gpu_type=pod.gpu_type,
-            cost_per_hour_cents=pod.cost_per_hour_cents,
-        )
 
     # --- 5. Wait for pod ready, then synthesize all chunks ---
     # Pod is terminated in the finally block regardless of success or failure.
     try:
-        pod = await provider.wait_for_ready(pod.id, timeout_sec=settings.pod_ready_timeout_sec)
-        assert pod.endpoint_url is not None, f"pod {pod.id} ready but has no endpoint_url"
-        log.info("tts pod ready endpoint=%s", pod.endpoint_url)
-
-        # Mark pod ready for cost tracking (start billing clock)
-        async with _session_maker() as session:
-            await CostService(session).mark_ready(pod.id, pod.endpoint_url)
+        pod, endpoint_url = await wait_for_recorded_ready(
+            provider,
+            session_maker,
+            pod.id,
+            timeout_sec=settings.pod_ready_timeout_sec,
+            label="tts",
+        )
 
         chunk_results, total_duration_sec = await _synthesize_all_chunks(
-            endpoint_url=pod.endpoint_url,
+            endpoint_url=endpoint_url,
             chunks=chunks,
             voice_name=voice_name,
             workflow_run_id=workflow_run_id,
+            session_maker=session_maker,
         )
     finally:
         try:
-            await terminate_and_finalize(provider, pod.id, _session_maker)
+            await terminate_and_finalize(provider, pod.id, session_maker)
         except Exception as term_exc:
             log.error("failed to terminate tts pod %s: %s", pod.id, term_exc)
 
@@ -207,6 +201,7 @@ async def _synthesize_all_chunks(
     chunks: list[str],
     voice_name: str,
     workflow_run_id: str,
+    session_maker: async_sessionmaker[AsyncSession],
 ) -> tuple[list[TtsChunkResult], float]:
     """Synthesize all chunks sequentially and persist each result to Postgres.
 
@@ -219,6 +214,7 @@ async def _synthesize_all_chunks(
         chunks: List of text chunks to synthesize.
         voice_name: Voice ID for the TTS endpoint.
         workflow_run_id: workflow run ID (used for DB FK and logging).
+        session_maker: SQLAlchemy async session factory.
 
     Returns:
         Tuple of (chunk_results, total_duration_sec).
@@ -270,10 +266,6 @@ async def _synthesize_all_chunks(
                 )
 
                 # Persist blob and update chunk progress row
-                session_maker = _db.async_session_maker
-                assert session_maker is not None, (
-                    "DB not initialized — call init_db() before starting"
-                )
                 async with session_maker() as session:
                     blob = await blob_service.store(
                         session=session,

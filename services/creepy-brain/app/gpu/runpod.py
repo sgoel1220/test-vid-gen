@@ -2,11 +2,14 @@
 
 import asyncio
 from datetime import datetime, timezone
+from typing import cast
 
 import httpx
 import runpod
 
-from .base import GpuPod, GpuPodSpec, GpuProvider, PodStatus
+from app.models.enums import GpuPodStatus
+
+from .base import GpuPod, GpuPodSpec, GpuProvider
 
 
 class RunPodProvider(GpuProvider):
@@ -22,11 +25,11 @@ class RunPodProvider(GpuProvider):
         desired = str(raw.get("desiredStatus", ""))
 
         if desired == "RUNNING":
-            status = PodStatus.RUNNING
+            status = GpuPodStatus.RUNNING
         elif desired in ("EXITED", "TERMINATED"):
-            status = PodStatus.TERMINATED
+            status = GpuPodStatus.TERMINATED
         else:
-            status = PodStatus.CREATING
+            status = GpuPodStatus.CREATING
 
         # Build endpoint URL using RunPod proxy format
         endpoint_url: str | None = None
@@ -73,22 +76,25 @@ class RunPodProvider(GpuProvider):
 
         # Check for existing pod with same name
         existing = await self._find_pod_by_name(idempotency_key, service_port)
-        if existing and existing.status != PodStatus.TERMINATED:
+        if existing and existing.status != GpuPodStatus.TERMINATED:
             return existing
 
         ports_str = ",".join(f"{p}/http" for p in spec.ports)
         env_dict = spec.env or {}
 
         def _create() -> dict[str, object]:
-            return runpod.create_pod(
-                name=idempotency_key,
-                image_name=spec.image,
-                gpu_type_id=spec.gpu_type,
-                cloud_type=spec.cloud_type,
-                container_disk_in_gb=spec.disk_size_gb,
-                volume_in_gb=spec.volume_gb,
-                ports=ports_str,
-                env=env_dict,
+            return cast(
+                dict[str, object],
+                runpod.create_pod(
+                    name=idempotency_key,
+                    image_name=spec.image,
+                    gpu_type_id=spec.gpu_type,
+                    cloud_type=spec.cloud_type,
+                    container_disk_in_gb=spec.disk_size_gb,
+                    volume_in_gb=spec.volume_gb,
+                    ports=ports_str,
+                    env=env_dict,
+                ),
             )
 
         try:
@@ -97,7 +103,7 @@ class RunPodProvider(GpuProvider):
         except Exception:
             # On error, check if pod was created by concurrent call
             recovered = await self._find_pod_by_name(idempotency_key, service_port)
-            if recovered and recovered.status != PodStatus.TERMINATED:
+            if recovered and recovered.status != GpuPodStatus.TERMINATED:
                 return recovered
             raise
 
@@ -106,7 +112,7 @@ class RunPodProvider(GpuProvider):
     ) -> GpuPod | None:
         """Get pod status by ID."""
         def _get() -> dict[str, object]:
-            return runpod.get_pod(pod_id)
+            return cast(dict[str, object], runpod.get_pod(pod_id))
 
         try:
             raw = await asyncio.to_thread(_get)
@@ -147,7 +153,7 @@ class RunPodProvider(GpuProvider):
                     async with httpx.AsyncClient(timeout=5.0) as client:
                         r = await client.get(f"{pod.endpoint_url}/health")
                         if r.status_code == 200:
-                            pod.status = PodStatus.READY
+                            pod.status = GpuPodStatus.READY
                             return pod
                 except (httpx.ConnectError, httpx.TimeoutException):
                     pass
@@ -158,13 +164,13 @@ class RunPodProvider(GpuProvider):
     async def list_active_pods(self) -> list[GpuPod]:
         """List all active (non-terminated) pods."""
         def _list() -> list[dict[str, object]]:
-            return runpod.get_pods()
+            return cast(list[dict[str, object]], runpod.get_pods())
 
         raw_pods = await asyncio.to_thread(_list)
         result: list[GpuPod] = []
         for raw in raw_pods:
             pod = self._parse_pod(raw)
-            if pod.status != PodStatus.TERMINATED:
+            if pod.status != GpuPodStatus.TERMINATED:
                 result.append(pod)
         return result
 
@@ -173,13 +179,13 @@ class RunPodProvider(GpuProvider):
     ) -> GpuPod | None:
         """Find a pod by name using a single get_pods() call."""
         def _list() -> list[dict[str, object]]:
-            return runpod.get_pods()
+            return cast(list[dict[str, object]], runpod.get_pods())
 
         raw_pods = await asyncio.to_thread(_list)
         for raw in raw_pods:
             if raw.get("name") == name:
                 pod = self._parse_pod(raw, service_port)
-                if pod.status != PodStatus.TERMINATED:
+                if pod.status != GpuPodStatus.TERMINATED:
                     return pod
         return None
 

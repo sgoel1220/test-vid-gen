@@ -17,15 +17,16 @@ import numpy as np
 import soundfile as sf
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.engine import StepContext
 
-import app.db as _db  # module ref — always reads the live async_session_maker value
 from app.audio.encoding import encode_wav_to_mp3
 from app.models.enums import BlobType
 from app.models.schemas import WorkflowInputSchema
 from app.services import blob_service
 from app.services.workflow_service import ChunkForImageStep, get_optional_workflow_id
+from app.workflows.db_helpers import get_session_maker
 
 log = structlog.get_logger(__name__)
 
@@ -78,10 +79,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
     image_output: dict[str, Any] = ctx.parent_outputs.get("image_generation", {})
 
     # --- 1. Fetch WAV chunk blobs from DB ---
-    session_maker = _db.async_session_maker
-    assert session_maker is not None, (
-        "DB not initialized — call init_db() before starting"
-    )
+    session_maker = get_session_maker()
 
     async with session_maker() as session:
         from app.services.workflow_service import get_chunks_for_image_step
@@ -187,6 +185,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
             scenes=scenes,
             mp3_bytes=mp3_bytes,
             workflow_id=workflow_id,
+            session_maker=session_maker,
         )
         output.final_video_blob_id = str(video_blob_id)
         log.info("stitch_final: saved final video blob_id=%s", video_blob_id)
@@ -206,6 +205,7 @@ async def _create_video(
     scenes: list[dict[str, Any]],
     mp3_bytes: bytes,
     workflow_id: uuid.UUID,
+    session_maker: async_sessionmaker[AsyncSession],
 ) -> uuid.UUID:
     """Create video from scene images and audio using ffmpeg.
 
@@ -213,13 +213,11 @@ async def _create_video(
         scenes: Scene results from image_generation step (each has image_blob_id).
         mp3_bytes: Final MP3 audio bytes.
         workflow_id: Workflow UUID for blob storage.
+        session_maker: SQLAlchemy async session factory.
 
     Returns:
         UUID of the saved video blob.
     """
-    session_maker = _db.async_session_maker
-    assert session_maker is not None
-
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
