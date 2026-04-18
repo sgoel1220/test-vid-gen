@@ -34,7 +34,7 @@ class Story(BaseModel):
     full_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[StoryStatus] = mapped_column(
-        SQLEnum(StoryStatus, native_enum=False, length=20),
+        SQLEnum(StoryStatus, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=False,
         default=StoryStatus.PENDING,
     )

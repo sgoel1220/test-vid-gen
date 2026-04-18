@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import typing
 from typing import Any, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 from sqlalchemy import TypeDecorator
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -16,12 +17,24 @@ class PydanticType(TypeDecorator[T]):
 
     This type handles automatic serialization/deserialization between
     Pydantic models and PostgreSQL JSONB columns.
+
+    Supports both plain BaseModel subclasses and Annotated discriminated
+    unions (e.g. ``Annotated[A | B, Field(discriminator=...)]``).
     """
 
     impl = JSONB
     cache_ok = True
 
     def __init__(self, pydantic_model: type[T], **kwargs: Any) -> None:
+        # For Annotated unions or plain unions, use TypeAdapter.
+        origin = typing.get_origin(pydantic_model)
+        if origin is not None:
+            # Annotated[Union[...], Field(...)] or Union[...]
+            self._adapter: TypeAdapter[Any] = TypeAdapter(pydantic_model)
+            self._is_union = True
+        else:
+            self._adapter = TypeAdapter(pydantic_model)
+            self._is_union = False
         self.pydantic_model = pydantic_model
         super().__init__(**kwargs)
 
@@ -30,12 +43,11 @@ class PydanticType(TypeDecorator[T]):
         if value is None:
             return None
         if isinstance(value, dict):
-            # If already a dict, validate and convert to model first
-            value = self.pydantic_model.model_validate(value)
-        return value.model_dump(mode="json")
+            value = self._adapter.validate_python(value)
+        return self._adapter.dump_python(value, mode="json")
 
     def process_result_value(self, value: dict[str, Any] | None, dialect: Any) -> T | None:
         """Convert dict from database to Pydantic model."""
         if value is None:
             return None
-        return self.pydantic_model.model_validate(value)
+        return self._adapter.validate_python(value)

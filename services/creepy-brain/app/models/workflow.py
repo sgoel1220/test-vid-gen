@@ -33,7 +33,7 @@ class Workflow(BaseModel):
     __tablename__ = "workflows"
 
     workflow_type: Mapped[WorkflowType] = mapped_column(
-        SQLEnum(WorkflowType, native_enum=False, length=50),
+        SQLEnum(WorkflowType, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=False,
     )
     input_json: Mapped[WorkflowInputSchema] = mapped_column(
@@ -41,12 +41,12 @@ class Workflow(BaseModel):
         nullable=False,
     )
     status: Mapped[WorkflowStatus] = mapped_column(
-        SQLEnum(WorkflowStatus, native_enum=False, length=20),
+        SQLEnum(WorkflowStatus, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=False,
         default=WorkflowStatus.PENDING,
     )
     current_step: Mapped[StepName | None] = mapped_column(
-        SQLEnum(StepName, native_enum=False, length=50),
+        SQLEnum(StepName, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=True,
     )
     result_json: Mapped[WorkflowResultSchema | None] = mapped_column(
@@ -95,11 +95,11 @@ class WorkflowStep(BaseModel):
         nullable=False,
     )
     step_name: Mapped[StepName] = mapped_column(
-        SQLEnum(StepName, native_enum=False, length=50),
+        SQLEnum(StepName, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=False,
     )
     status: Mapped[StepStatus] = mapped_column(
-        SQLEnum(StepStatus, native_enum=False, length=20),
+        SQLEnum(StepStatus, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=False,
         default=StepStatus.PENDING,
     )
@@ -150,7 +150,7 @@ class WorkflowScene(BaseModel):
 
     # Image generation result
     image_status: Mapped[ChunkStatus] = mapped_column(
-        SQLEnum(ChunkStatus, native_enum=False, length=20),
+        SQLEnum(ChunkStatus, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=False,
         default=ChunkStatus.PENDING,
     )
@@ -185,7 +185,7 @@ class WorkflowChunk(BaseModel):
 
     # TTS fields
     tts_status: Mapped[ChunkStatus] = mapped_column(
-        SQLEnum(ChunkStatus, native_enum=False, length=20),
+        SQLEnum(ChunkStatus, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=False,
         default=ChunkStatus.PENDING,
     )
@@ -226,7 +226,7 @@ class WorkflowBlob(BaseModel):
         nullable=True,
     )
     blob_type: Mapped[BlobType] = mapped_column(
-        SQLEnum(BlobType, native_enum=False, length=20),
+        SQLEnum(BlobType, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=False,
     )
     data: Mapped[bytes] = mapped_column(nullable=False)

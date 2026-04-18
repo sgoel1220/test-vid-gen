@@ -35,7 +35,7 @@ class Run(BaseModel):
     )
     input_text: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[RunStatus] = mapped_column(
-        SQLEnum(RunStatus, native_enum=False, length=20),
+        SQLEnum(RunStatus, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=False,
         default=RunStatus.PENDING,
     )
@@ -75,7 +75,7 @@ class RunChunk(BaseModel):
     )
     duration_sec: Mapped[float | None] = mapped_column(nullable=True)
     status: Mapped[ChunkStatus] = mapped_column(
-        SQLEnum(ChunkStatus, native_enum=False, length=20),
+        SQLEnum(ChunkStatus, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=False,
         default=ChunkStatus.PENDING,
     )

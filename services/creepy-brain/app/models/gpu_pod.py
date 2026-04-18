@@ -20,7 +20,7 @@ class GpuPod(Base):
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     provider: Mapped[GpuProvider] = mapped_column(
-        SQLEnum(GpuProvider, native_enum=False, length=20),
+        SQLEnum(GpuProvider, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=False,
     )
     workflow_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -30,7 +30,7 @@ class GpuPod(Base):
     )
     endpoint_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     status: Mapped[GpuPodStatus] = mapped_column(
-        SQLEnum(GpuPodStatus, native_enum=False, length=20),
+        SQLEnum(GpuPodStatus, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=False,
     )
     gpu_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
