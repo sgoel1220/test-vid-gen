@@ -22,6 +22,7 @@ from app.gpu import GpuProvider, get_provider
 from app.models.enums import GpuPodStatus, WorkflowStatus
 from app.models.gpu_pod import GpuPod
 from app.models.workflow import Workflow
+from app.workflows.types import EmptyModel
 
 log = logging.getLogger(__name__)
 
@@ -31,10 +32,6 @@ _TERMINAL_STATUSES = {WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowS
 
 # Cron expression for the scheduler (*/5 * * * * = every 5 minutes)
 RECON_CRON = "*/5 * * * *"
-
-
-class EmptyModel(BaseModel):
-    pass
 
 
 class ReconStepOutput(BaseModel):
