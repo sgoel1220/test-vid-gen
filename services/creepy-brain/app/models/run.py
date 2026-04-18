@@ -38,7 +38,11 @@ class Run(BaseModel):
         nullable=False,
         default=RunStatus.PENDING,
     )
-    final_audio_blob_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    final_audio_blob_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflow_blobs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     total_duration_sec: Mapped[Optional[float]] = mapped_column(nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -63,7 +67,11 @@ class RunChunk(BaseModel):
     )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
-    audio_blob_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    audio_blob_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflow_blobs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     duration_sec: Mapped[Optional[float]] = mapped_column(nullable=True)
     status: Mapped[ChunkStatus] = mapped_column(
         SQLEnum(ChunkStatus, native_enum=False, length=20),

@@ -112,7 +112,11 @@ class WorkflowStep(BaseModel):
         nullable=True,
     )
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    gpu_pod_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    gpu_pod_id: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        ForeignKey("gpu_pods.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -149,7 +153,11 @@ class WorkflowScene(BaseModel):
         nullable=False,
         default=ChunkStatus.PENDING,
     )
-    image_blob_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    image_blob_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflow_blobs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     image_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
@@ -180,7 +188,11 @@ class WorkflowChunk(BaseModel):
         nullable=False,
         default=ChunkStatus.PENDING,
     )
-    tts_audio_blob_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    tts_audio_blob_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflow_blobs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     tts_duration_sec: Mapped[Optional[float]] = mapped_column(nullable=True)
     tts_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 

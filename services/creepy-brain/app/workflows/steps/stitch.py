@@ -90,6 +90,25 @@ async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]
             "tts_synthesis step may not have completed"
         )
 
+    # --- Quality gate: skip non-completed chunks ---
+    valid_chunks: list[dict[str, object]] = []
+    for chunk in chunk_data:
+        if chunk.get("tts_status") != "completed":
+            log.warning(
+                "stitch_final: skipping chunk %s (tts_status=%s)",
+                chunk.get("index"),
+                chunk.get("tts_status"),
+            )
+        else:
+            valid_chunks.append(chunk)
+
+    if not valid_chunks:
+        raise ValueError(
+            f"All {len(chunk_data)} chunks failed TTS for workflow "
+            f"{workflow_run_id}; cannot stitch"
+        )
+
+    chunk_data = valid_chunks
     log.info("stitch_final: %d chunks to stitch", len(chunk_data))
 
     # --- 2. Decode WAV blobs and concatenate ---
