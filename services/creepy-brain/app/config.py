@@ -48,9 +48,9 @@ class Settings(BaseSettings):
     tts_default_voice: str = "old_man_low.wav"
     tts_seed: int = 1234
     tts_exaggeration: float = 0.4
-    tts_cfg_weight: float = 0.7
-    tts_temperature: float = 0.3
-    tts_repetition_penalty: float = 1.2
+    tts_cfg_weight: float = 0.5
+    tts_temperature: float = 0.7
+    tts_repetition_penalty: float = 1.05
     tts_min_p: float = 0.05
     tts_top_p: float = 1.0
     tts_chunk_size: int = 300
