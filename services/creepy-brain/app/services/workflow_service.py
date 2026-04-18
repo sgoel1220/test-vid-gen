@@ -406,6 +406,9 @@ class ChunkForImageStep(BaseModel):
     blob_id: str | None = Field(description="UUID of the WAV blob (None if TTS failed)")
     tts_status: ChunkStatus = Field(description="Chunk TTS status")
     scene_id: str | None = Field(description="UUID of the linked scene (None if unlinked)")
+    duration_sec: float | None = Field(
+        default=None, description="TTS audio duration in seconds (None if TTS not done)"
+    )
 
 
 async def get_chunks_for_image_step(
@@ -434,6 +437,7 @@ async def get_chunks_for_image_step(
             blob_id=str(c.tts_audio_blob_id) if c.tts_audio_blob_id else None,
             tts_status=c.tts_status,
             scene_id=str(c.scene_id) if c.scene_id else None,
+            duration_sec=c.tts_duration_sec,
         )
         for c in chunks
     ]
