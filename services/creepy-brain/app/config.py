@@ -33,9 +33,6 @@ class Settings(BaseSettings):
     postgres_db: str = "creepy_brain"
     db_echo: bool = False
 
-    # Hatchet workflow engine settings
-    hatchet_client_token: str = ""
-
     # GPU provider settings
     runpod_api_key: str = ""
 

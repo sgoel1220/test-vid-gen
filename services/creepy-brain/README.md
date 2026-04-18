@@ -10,13 +10,11 @@ Creepy Brain is the orchestration layer that coordinates the end-to-end content 
 - Image Generation (SDXL)
 - Final Stitching
 
-This service uses Hatchet for workflow orchestration and provides a unified API and dashboard for managing content creation workflows.
-
 ## Architecture
 
 - **Framework**: FastAPI
 - **Database**: PostgreSQL (via SQLAlchemy async)
-- **Workflow Engine**: Hatchet (to be integrated)
+- **Workflow Engine**: In-process engine (runs inside FastAPI, no external worker)
 - **Port**: 8006
 
 ## Quick Start
@@ -28,42 +26,17 @@ This service uses Hatchet for workflow orchestration and provides a unified API 
 
 ### Running with Docker
 
-The stack runs two application processes from the same image:
-
-| Container | Role |
-|-----------|------|
-| `creepy-brain` | FastAPI API server (port 8006) — also runs Alembic migrations on startup |
-| `creepy-brain-worker` | Hatchet workflow worker — connects to Hatchet engine and processes workflow steps |
-
 ```bash
 # 1. Create .env from example and fill in required keys
 cp .env.example .env
 # Edit .env:
 #   ANTHROPIC_API_KEY=sk-ant-...
-#   HATCHET_CLIENT_TOKEN=<token from Hatchet dashboard → Settings → API Tokens>
 
-# 2. Start all services (API server + worker + Hatchet engine + postgres)
+# 2. Start all services (API server + postgres)
 docker compose up
 
-# API server:      http://localhost:8006
-# Hatchet UI:      http://localhost:8888  (check Workers tab to confirm brain-worker connected)
+# API server: http://localhost:8006
 ```
-
-To view worker logs:
-```bash
-docker compose logs brain-worker -f
-```
-
-To manually trigger the test workflow:
-```bash
-curl -X POST http://localhost:8006/api/workflows/test
-```
-
-> Story generation requires `ANTHROPIC_API_KEY` in `.env`. Without it the generate
-> endpoint returns 202 but background generation will fail with status `failed`.
->
-> Hatchet workflows require `HATCHET_CLIENT_TOKEN` in `.env`. Without it `brain-worker`
-> will fail to connect to the Hatchet engine.
 
 ### Local Development
 
@@ -120,7 +93,6 @@ Key settings:
 - `POSTGRES_USER` - Database user
 - `POSTGRES_PASSWORD` - Database password
 - `ANTHROPIC_API_KEY` - API key for story generation
-- `HATCHET_CLIENT_TOKEN` - API token for the Hatchet workflow engine (required by `brain-worker`)
 - `JSON_LOGS` - `true` for JSON logs (production), `false` for pretty logs (dev)
 
 ## Development Roadmap
@@ -133,8 +105,8 @@ Key settings:
 - Structured logging (structlog), Prometheus metrics
 - Docker Compose setup (service + postgres)
 
-### Phase 2: Hatchet Integration (Next)
-- Add Hatchet engine to Docker Compose
+### Phase 2: Workflow Engine (✓ Complete)
+- In-process workflow engine (no external worker daemon)
 - GPU provider abstraction (RunPod + local dev)
 - ContentPipeline workflow definition
 - Step implementations: generate_story, tts_synthesis, image_generation, stitch_final

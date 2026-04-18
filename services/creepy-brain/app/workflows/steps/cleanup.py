@@ -55,11 +55,11 @@ class SkippedStepOutput(BaseModel):
 async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, object]:
     """Terminate active GPU pods when the ContentPipeline workflow fails.
 
-    This is registered as the ``on_failure`` hook for ContentPipeline, so Hatchet
+    This is registered as the ``on_failure`` hook for ContentPipeline, so it
     calls it automatically whenever any step fails.  It is safe to call even when
     no pod exists — it returns early with ``skipped=True`` in that case.
 
-    Returns a summary dict that Hatchet serialises; callers do not rely on it.
+    Returns a summary dict; callers do not rely on it.
     """
     await ensure_db()
     session_maker = get_session_maker()

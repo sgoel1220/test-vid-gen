@@ -89,7 +89,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
 
     Args:
         input: Validated workflow input (contains voice_name).
-        ctx: Hatchet execution context (provides workflow_run_id and parent outputs).
+        ctx: step execution context (provides workflow_run_id and parent outputs).
 
     Returns:
         dict with keys: pod_id, chunk_count, total_duration_sec, chunks
@@ -103,7 +103,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
     if not story_id_raw:
         raise ValueError("generate_story step did not produce story_id")
 
-    # Hatchet may deserialize parent output as a plain dict (JSON path, story_id
+    # Parent output may be a plain dict (JSON path, story_id
     # is a str) or preserve the native Python type (story_id is uuid.UUID).
     # Accept both to guard against the internal _data.parents shape changing.
     story_id_for_text: uuid.UUID = (
@@ -115,7 +115,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
 
     _session_maker = _db.async_session_maker
     assert _session_maker is not None, (
-        "DB not initialized — call init_db() before starting the Hatchet worker"
+        "DB not initialized — call init_db() before starting"
     )
     async with _session_maker() as _session:
         _story = await StoryService(_session).get(story_id_for_text)
@@ -218,7 +218,7 @@ async def _synthesize_all_chunks(
         endpoint_url: Base URL of the ready TTS GPU pod.
         chunks: List of text chunks to synthesize.
         voice_name: Voice ID for the TTS endpoint.
-        workflow_run_id: Hatchet workflow run ID (used for DB FK and logging).
+        workflow_run_id: workflow run ID (used for DB FK and logging).
 
     Returns:
         Tuple of (chunk_results, total_duration_sec).
@@ -272,7 +272,7 @@ async def _synthesize_all_chunks(
                 # Persist blob and update chunk progress row
                 session_maker = _db.async_session_maker
                 assert session_maker is not None, (
-                    "DB not initialized — call init_db() before starting the Hatchet worker"
+                    "DB not initialized — call init_db() before starting"
                 )
                 async with session_maker() as session:
                     blob = await blob_service.store(

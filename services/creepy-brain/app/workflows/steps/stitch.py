@@ -52,7 +52,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
 
     Args:
         input: Validated workflow input (contains stitch_video flag).
-        ctx: Hatchet execution context (provides workflow_run_id and parent outputs).
+        ctx: step execution context (provides workflow_run_id and parent outputs).
 
     Returns:
         dict with keys: final_audio_blob_id, final_video_blob_id, chunk_count, total_duration_sec
@@ -80,7 +80,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
     # --- 1. Fetch WAV chunk blobs from DB ---
     session_maker = _db.async_session_maker
     assert session_maker is not None, (
-        "DB not initialized — call init_db() before starting the Hatchet worker"
+        "DB not initialized — call init_db() before starting"
     )
 
     async with session_maker() as session:

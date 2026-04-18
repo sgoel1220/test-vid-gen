@@ -1,6 +1,6 @@
 """Shared DB initialization helpers for workflow steps.
 
-Each Hatchet step may run in a fresh process context, so DB initialization
+Each step runs in-process, DB initialization
 must be idempotent.  This module centralises the lock-guarded lazy init
 pattern that was previously duplicated across cleanup, content_pipeline,
 and other step modules.
@@ -28,6 +28,6 @@ def get_session_maker() -> async_sessionmaker[AsyncSession]:
     """Return the active session maker, raising if DB was not initialized."""
     maker = _db.async_session_maker
     assert maker is not None, (
-        "DB not initialized — call ensure_db() before starting the Hatchet worker"
+        "DB not initialized — call ensure_db() before starting"
     )
     return maker
