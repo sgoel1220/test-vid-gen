@@ -183,8 +183,12 @@ async def get_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowDetailR
         chunks=[
             WorkflowChunkResponse(
                 chunk_index=c.chunk_index,
+                chunk_text=c.chunk_text,
                 tts_status=c.tts_status,
                 tts_duration_sec=c.tts_duration_sec,
+                tts_audio_blob_id=c.tts_audio_blob_id,
+                tts_completed_at=c.tts_completed_at,
+                scene_id=c.scene_id,
             )
             for c in sorted(workflow.chunks, key=lambda c: c.chunk_index)
         ],

@@ -70,8 +70,12 @@ class WorkflowChunkResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     chunk_index: int
+    chunk_text: str
     tts_status: ChunkStatus
     tts_duration_sec: float | None
+    tts_audio_blob_id: uuid.UUID | None
+    tts_completed_at: datetime | None
+    scene_id: uuid.UUID | None
 
 
 class GpuPodResponse(BaseModel):
