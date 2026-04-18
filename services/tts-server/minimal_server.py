@@ -6,7 +6,7 @@ import asyncio
 import io
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Literal
 
 import numpy as np
 import soundfile as sf
@@ -76,6 +76,18 @@ class SynthesizeRequest(BaseModel):
     repetition_penalty: float = Field(1.2, ge=1.0, le=5.0, description="Penalize repeated tokens.")
     min_p: float = Field(0.05, ge=0.0, le=1.0, description="Min probability threshold.")
     top_p: float = Field(1.0, ge=0.0, le=1.0, description="Nucleus sampling threshold.")
+
+
+class HealthResponse(BaseModel):
+    """Response body for /health endpoint."""
+
+    status: Literal["ok"] = Field(description="Service health status.")
+
+
+class ReadinessResponse(BaseModel):
+    """Response body for /ready endpoint."""
+
+    ready: bool = Field(..., description="Whether the model has loaded.")
 
 
 # ---------------------------------------------------------------------------
@@ -161,16 +173,16 @@ app = FastAPI(
 )
 
 
-@app.get("/health")
-async def health() -> dict[str, str]:
+@app.get("/health", response_model=HealthResponse)
+async def health() -> HealthResponse:
     """Health check endpoint."""
-    return {"status": "ok"}
+    return HealthResponse(status="ok")
 
 
-@app.get("/ready")
-async def ready() -> dict[str, bool]:
+@app.get("/ready", response_model=ReadinessResponse)
+async def ready() -> ReadinessResponse:
     """Readiness check - returns true when model is loaded."""
-    return {"ready": _model is not None}
+    return ReadinessResponse(ready=_model is not None)
 
 
 @app.post("/synthesize")

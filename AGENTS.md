@@ -296,7 +296,6 @@ chatterbox-tts-lite/
 ├── services/
 │   ├── tts-server/              # Minimal TTS GPU pod
 │   │   ├── minimal_server.py    # FastAPI app with /synthesize only
-│   │   ├── requirements-minimal.txt
 │   │   └── Dockerfile
 │   │
 │   └── creepy-brain/            # Orchestration service
@@ -322,7 +321,6 @@ The TTS server is a **minimal stateless synthesis pod**. All orchestration logic
 | File | Role |
 |------|------|
 | `minimal_server.py` | FastAPI app with `/synthesize`, `/health`, `/ready` |
-| `requirements-minimal.txt` | Minimal deps: torch, chatterbox, fastapi, soundfile |
 | `Dockerfile` | Slim GPU image (~5 min build vs 15+ min) |
 
 ## API Endpoints (TTS Server)
@@ -346,9 +344,6 @@ The TTS server is a **minimal stateless synthesis pod**. All orchestration logic
 ## Commands
 
 ```bash
-# Install minimal TTS dependencies
-cd services/tts-server && python3 -m pip install -r requirements-minimal.txt
-
 # Start the minimal TTS server
 cd services/tts-server && python3 minimal_server.py
 
