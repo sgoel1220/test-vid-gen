@@ -1,3 +1,12 @@
+# Stage 1: Build dashboard frontend
+FROM node:20-slim AS frontend
+WORKDIR /build
+COPY services/creepy-brain/package.json services/creepy-brain/package-lock.json* ./
+RUN npm ci --ignore-scripts
+COPY services/creepy-brain/static/src/ ./static/src/
+RUN npx esbuild static/src/main.ts --bundle --outfile=static/dist/app.js --format=esm --target=es2020
+
+# Stage 2: Python runtime
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -14,22 +23,15 @@ COPY services/creepy-brain/pyproject.toml ./
 # Install Python dependencies
 RUN pip install --no-cache-dir -e .
 
-# Build dashboard frontend
-COPY services/creepy-brain/package.json services/creepy-brain/package-lock.json* ./
-COPY services/creepy-brain/static/src/ ./static/src/
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
-    && npm ci --ignore-scripts \
-    && npm run build \
-    && rm -rf node_modules package.json package-lock.json static/src \
-    && apt-get purge -y nodejs npm && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
-
 # Copy application code
 COPY services/creepy-brain/app/ ./app/
 COPY services/creepy-brain/alembic/ ./alembic/
 COPY services/creepy-brain/alembic.ini ./
 COPY services/creepy-brain/entrypoint.sh ./
 COPY services/creepy-brain/static/dashboard.html services/creepy-brain/static/index.html services/creepy-brain/static/full_story.wav* ./static/
+
+# Copy built frontend from stage 1
+COPY --from=frontend /build/static/dist/app.js ./static/dist/app.js
 
 RUN chmod +x entrypoint.sh
 
