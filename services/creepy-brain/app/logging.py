@@ -13,7 +13,7 @@ def configure_logging(json_logs: bool = True) -> None:
         json_logs: If True, output JSON logs. If False, use pretty console output for dev.
     """
 
-    processors = [
+    processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),

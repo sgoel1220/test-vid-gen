@@ -20,7 +20,13 @@ class RunPodProvider(GpuProvider):
         runpod.api_key = api_key
 
     def _parse_pod(self, raw: dict[str, object], service_port: int | None = None) -> GpuPod:
-        """Parse a raw RunPod API dict into a GpuPod."""
+        """Parse a raw RunPod API dict into a GpuPod.
+
+        Endpoint URL is constructed from public IP/port pairs:
+        - If service_port given, finds the entry where privatePort matches and isIpPublic is True.
+        - If service_port is None, uses the first publicly exposed port.
+        - Returns None endpoint if no matching public port is found.
+        """
         pod_id = str(raw["id"])
         desired = str(raw.get("desiredStatus", ""))
 
@@ -31,24 +37,44 @@ class RunPodProvider(GpuProvider):
         else:
             status = PodStatus.CREATING
 
-        # Build endpoint URL using RunPod proxy format
+        # Build endpoint URL from public IP/port mappings
         endpoint_url: str | None = None
         runtime = raw.get("runtime")
-        if isinstance(runtime, dict) and runtime.get("ports"):
-            # Use the RunPod proxy URL format
-            if service_port:
-                endpoint_url = f"https://{pod_id}-{service_port}.proxy.runpod.net"
-            else:
-                endpoint_url = f"https://{pod_id}-8005.proxy.runpod.net"
+        if isinstance(runtime, dict):
+            ports: list[dict[str, object]] = []
+            raw_ports = runtime.get("ports")
+            if isinstance(raw_ports, list):
+                ports = [p for p in raw_ports if isinstance(p, dict)]
 
-        machine = raw.get("machine") or {}
-        if isinstance(machine, dict):
+            if service_port is not None:
+                for p in ports:
+                    if p.get("privatePort") == service_port and p.get("isIpPublic"):
+                        ip = str(p.get("ip", ""))
+                        pub = p.get("publicPort")
+                        if ip and pub is not None:
+                            endpoint_url = f"http://{ip}:{pub}"
+                            break
+            else:
+                for p in ports:
+                    if p.get("isIpPublic"):
+                        ip = str(p.get("ip", ""))
+                        pub = p.get("publicPort")
+                        if ip and pub is not None:
+                            endpoint_url = f"http://{ip}:{pub}"
+                            break
+
+        machine = raw.get("machine")
+        if machine is None:
+            gpu_type: str | None = None
+            cost_cents: int | None = None
+        elif isinstance(machine, dict):
             gpu_type = str(machine.get("gpuDisplayName", "")) or None
-            cost_raw = machine.get("costPerHr")
+            cost_raw = machine.get("costPerGpu") or machine.get("costPerHr")
             cost_cents = int(float(cost_raw) * 100) if cost_raw else None
         else:
-            gpu_type = None
-            cost_cents = None
+            raise TypeError(
+                f"Expected 'machine' to be a dict or None, got {type(machine).__name__!r}"
+            )
 
         created_at: datetime | None = None
         raw_created_at = raw.get("createdAt")

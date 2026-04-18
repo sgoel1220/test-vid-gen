@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar, cast
 
 import httpx
 from pydantic import BaseModel
@@ -35,11 +35,13 @@ class AnthropicProvider:
         self._model = model
 
     async def complete(self, system: str, messages: list[dict[str, Any]]) -> str:
+        import anthropic as _anthropic
+        typed_messages = cast(list[_anthropic.types.MessageParam], messages)
         response = await self._client.messages.create(
             model=self._model,
             max_tokens=8192,
             system=system,
-            messages=messages,
+            messages=typed_messages,
         )
         log.info(
             "llm call provider=anthropic input_tokens=%d output_tokens=%d",
