@@ -64,10 +64,14 @@ export interface WorkflowDetail extends Workflow {
 
 export interface GpuPod {
   id: string;
+  provider: string;
+  workflow_id: string | null;
   status: string;
-  cost_per_hr: number;
-  started_at: string;
-  stopped_at?: string;
+  gpu_type: string;
+  cost_per_hour_cents: number;
+  total_cost_cents: number;
+  created_at: string;
+  terminated_at: string | null;
 }
 
 export function fetchWorkflows(status?: string): Promise<Workflow[]> {
@@ -81,6 +85,19 @@ export function fetchWorkflow(id: string): Promise<WorkflowDetail> {
 
 // NOTE: /api/gpu-pods is not yet implemented in the backend.
 // This will be wired up when the backend endpoint is added (see bead for GPU pod monitoring).
-export function fetchGpuPods(): Promise<GpuPod[]> {
-  return apiFetch<GpuPod[]>("/api/gpu-pods");
+export function fetchGpuPods(status?: string): Promise<GpuPod[]> {
+  const params = status ? `?status=${status}` : "";
+  return apiFetch<GpuPod[]>(`/api/gpu-pods${params}`);
+}
+
+export async function terminatePod(podId: string): Promise<void> {
+  const res = await fetch(`/api/gpu-pods/${podId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Failed to terminate pod: ${res.status}`);
+}
+
+/** Terminal pod statuses — anything else is considered billable/active. */
+const TERMINAL_STATUSES = new Set(["terminated", "error"]);
+
+export function isActivePod(pod: GpuPod): boolean {
+  return !TERMINAL_STATUSES.has(pod.status);
 }

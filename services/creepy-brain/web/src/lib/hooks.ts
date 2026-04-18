@@ -17,10 +17,10 @@ export function useWorkflow(id: string) {
   );
 }
 
-export function useGpuPods() {
+export function useGpuPods(status?: string) {
   return useSWR<GpuPod[]>(
-    "gpu-pods",
-    fetchGpuPods,
+    ["gpu-pods", status],
+    () => fetchGpuPods(status),
     { refreshInterval: 10000 }
   );
 }
