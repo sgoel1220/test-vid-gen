@@ -3,18 +3,44 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+import soundfile as sf
 import torch
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from audio.encoding import encode_to_wav_bytes, WAV_MEDIA_TYPE
-from files import validate_voice_path
+WAV_MEDIA_TYPE = "audio/wav"
+
+
+def encode_to_wav_bytes(wav_tensor: torch.Tensor, sample_rate: int) -> bytes:
+    """Convert a synthesis tensor to WAV bytes (PCM-16)."""
+    audio_np: np.ndarray = wav_tensor.squeeze().cpu().numpy()
+    audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
+    buf = io.BytesIO()
+    sf.write(buf, audio_int16, sample_rate, format="wav", subtype="PCM_16")
+    return buf.getvalue()
+
+
+def validate_voice_path(voice: str, ref_base: Path) -> Path:
+    """Resolve *voice* relative to *ref_base* and reject path traversal.
+
+    Returns the resolved path on success.
+    Raises ``ValueError`` for traversal attempts and ``FileNotFoundError``
+    when the file does not exist.
+    """
+    ref_path = (ref_base / voice).resolve()
+    if not str(ref_path).startswith(str(ref_base.resolve()) + "/"):
+        raise ValueError("Invalid voice filename.")
+    if not ref_path.is_file():
+        raise FileNotFoundError(f"Voice '{voice}' not found.")
+    return ref_path
 
 # ---------------------------------------------------------------------------
 # Logging setup
