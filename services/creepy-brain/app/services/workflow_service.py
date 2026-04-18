@@ -16,7 +16,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import ChunkStatus, StepName, StepStatus, WorkflowStatus
-from app.models.schemas import WorkflowResultSchema
+from app.models.schemas import StepOutputSchema, WorkflowResultSchema
 from app.models.workflow import Workflow, WorkflowChunk, WorkflowScene, WorkflowStep
 
 
@@ -277,11 +277,21 @@ class WorkflowService:
         self,
         workflow_id: uuid.UUID,
         step_name: StepName,
+        output: StepOutputSchema | None = None,
     ) -> None:
-        """Mark the RUNNING WorkflowStep as COMPLETED (flush only)."""
+        """Mark the RUNNING WorkflowStep as COMPLETED (flush only).
+
+        Args:
+            workflow_id: The owning workflow UUID.
+            step_name: The step that completed.
+            output: Optional Pydantic output model to persist in ``output_json``
+                so that retry/resume paths can hydrate parent outputs correctly.
+        """
         step = await self._get_running_step_or_raise(workflow_id, step_name)
         step.status = StepStatus.COMPLETED
         step.completed_at = datetime.now(timezone.utc)
+        if output is not None:
+            step.output_json = output
         await self._session.flush()
 
     async def fail_step(

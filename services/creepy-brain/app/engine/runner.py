@@ -24,12 +24,33 @@ from sqlalchemy import select
 
 import app.db as _db
 from app.models.enums import StepName, StepStatus
+from app.models.schemas import (
+    GenerateStoryStepOutput,
+    ImageGenerationStepOutput,
+    StepOutputSchema,
+    StitchFinalStepOutput,
+    TtsSynthesisStepOutput,
+)
 from app.models.workflow import WorkflowStep
 from app.services.workflow_service import WorkflowService
 
 from .models import EmptyStepOutput, StepDef, StepContext, StepOutputMap, WorkflowDef
 
 log = logging.getLogger(__name__)
+
+_STEP_OUTPUT_TYPES = (
+    GenerateStoryStepOutput,
+    TtsSynthesisStepOutput,
+    ImageGenerationStepOutput,
+    StitchFinalStepOutput,
+)
+
+
+def _as_step_output_schema(output: BaseModel) -> StepOutputSchema | None:
+    """Return *output* as StepOutputSchema if it is a known concrete type, else None."""
+    if isinstance(output, _STEP_OUTPUT_TYPES):
+        return output
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +233,7 @@ class WorkflowRunner:
                         f"got {type(output).__name__}"
                     )
                 self._outputs[step.name] = output
-                await self._db_complete_step(step.name)
+                await self._db_complete_step(step.name, output)
                 log.info("workflow %s: step '%s' completed", self._workflow_id, step.name)
                 return None
             except asyncio.TimeoutError:
@@ -275,7 +296,7 @@ class WorkflowRunner:
         except Exception as exc:
             log.error("workflow %s: _db_start_step '%s' failed: %s", self._workflow_id, step_name, exc)
 
-    async def _db_complete_step(self, step_name: str) -> None:
+    async def _db_complete_step(self, step_name: str, output: BaseModel) -> None:
         try:
             name_enum = StepName(step_name)
         except ValueError:
@@ -285,7 +306,11 @@ class WorkflowRunner:
             return
         try:
             async with session_maker() as session:
-                await WorkflowService(session).complete_step(self._workflow_id, name_enum)
+                await WorkflowService(session).complete_step(
+                    self._workflow_id,
+                    name_enum,
+                    output=_as_step_output_schema(output),
+                )
                 await session.commit()
         except Exception as exc:
             log.error("workflow %s: _db_complete_step '%s' failed: %s", self._workflow_id, step_name, exc)
