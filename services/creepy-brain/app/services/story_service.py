@@ -35,9 +35,20 @@ class StoryService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def create(self, premise: str) -> Story:
-        """Create a new story record in pending state (flush only)."""
-        story = Story(premise=premise, status=StoryStatus.PENDING)
+    async def create(
+        self,
+        premise: str,
+        workflow_id: uuid.UUID | None = None,
+    ) -> Story:
+        """Create a new story record in pending state (flush only).
+
+        Args:
+            premise: The story premise text.
+            workflow_id: Optional FK to the owning Workflow row.  Pass this
+                whenever a Workflow DB row already exists so the story can be
+                joined to its workflow.
+        """
+        story = Story(premise=premise, status=StoryStatus.PENDING, workflow_id=workflow_id)
         self._session.add(story)
         await self._session.flush()
         await self._session.refresh(story)

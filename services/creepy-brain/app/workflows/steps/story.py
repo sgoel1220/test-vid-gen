@@ -53,13 +53,18 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> GenerateStory
 
     premise: str = input.premise
 
-    # Create the story row.
-    # story.workflow_id is intentionally left null: assigning ctx.workflow_run_id
-    # would violate the FK until a Workflow row for that run ID exists.
-    # Cross-reference can be added once Workflow creation is in place.
+    # Parse the workflow_run_id into a UUID.  The Workflow DB row already
+    # exists at this point (created by the API layer before engine.trigger()),
+    # so setting workflow_id is safe and allows Story-to-Workflow joins.
+    workflow_uuid: uuid.UUID | None = None
+    try:
+        workflow_uuid = uuid.UUID(ctx.workflow_run_id)
+    except ValueError:
+        log.warning("story step: could not parse workflow_run_id=%r as UUID", ctx.workflow_run_id)
+
     async with session_maker() as session:
         svc = StoryService(session)
-        story = await svc.create(premise=premise)
+        story = await svc.create(premise=premise, workflow_id=workflow_uuid)
         await session.commit()
         story_id: uuid.UUID = story.id
 
