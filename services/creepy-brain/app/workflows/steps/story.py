@@ -23,7 +23,7 @@ _db_init_lock: asyncio.Lock = asyncio.Lock()
 async def _ensure_db() -> None:
     """Initialize the DB engine if not already done.
 
-    The Hatchet worker process runs independently from the FastAPI server that
+    The workflow step runs inside the FastAPI process.
     normally calls ``init_db()`` during lifespan startup.  This helper ensures
     the session maker is ready regardless of which process is executing the
     step, and it is idempotent after the first call.
@@ -40,7 +40,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
     2. Creates a story record in PENDING state.
     3. Runs the full architect -> writer -> reviewer pipeline.
     4. Verifies the story reached COMPLETED status.
-    5. Returns a ``GenerateStoryStepOutput`` dict for Hatchet to serialise.
+    5. Returns a ``GenerateStoryStepOutput`` dict.
 
     Raises:
         RuntimeError: If the pipeline did not complete successfully.
@@ -55,7 +55,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
 
     # Create the story row.
     # story.workflow_id is intentionally left null: assigning ctx.workflow_run_id
-    # would violate the FK until a Workflow row for that Hatchet run ID exists.
+    # would violate the FK until a Workflow row for that run ID exists.
     # Cross-reference can be added once Workflow creation is in place.
     async with session_maker() as session:
         svc = StoryService(session)

@@ -1,7 +1,7 @@
 """In-process workflow engine data models.
 
-StepContext replaces hatchet_sdk.Context for step functions.
-StepDef and WorkflowDef replace Hatchet's workflow/task decorators.
+
+
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ StepFn = Callable[[Any, "StepContext"], Awaitable[dict[str, object]]]
 
 
 class StepContext(BaseModel):
-    """Runtime context passed to each step function (replaces hatchet_sdk.Context)."""
+    """Runtime context passed to each step function."""
 
     workflow_run_id: str = Field(description="UUID string of the workflow run")
     parent_outputs: dict[str, dict[str, object]] = Field(
@@ -40,7 +40,7 @@ class StepDef(BaseModel):
     max_retries: int = Field(default=0, ge=0, description="Max retry attempts after first failure")
     is_on_failure: bool = Field(
         default=False,
-        description="If True, this step runs only when the workflow fails (replaces Hatchet on_failure_task)",
+        description="If True, this step runs only when the workflow fails",
     )
 
 

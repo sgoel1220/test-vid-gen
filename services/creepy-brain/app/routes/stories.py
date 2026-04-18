@@ -125,7 +125,7 @@ async def generate_story(
                     log.exception("pipeline_fail_status_update_failed", story_id=str(story.id))
 
     # Retain a reference so the task is not garbage-collected mid-flight.
-    # Interim solution — will be replaced by Hatchet (bead Chatterbox-TTS-Server-104).
+    # Triggers the workflow engine in-process.
     bg_tasks: set[asyncio.Task[None]] = request.app.state.background_tasks
     task: asyncio.Task[None] = asyncio.create_task(_run())
     bg_tasks.add(task)

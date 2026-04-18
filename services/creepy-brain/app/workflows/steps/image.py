@@ -164,7 +164,7 @@ async def execute(
 
     Args:
         input: Validated workflow input (contains generate_images flag).
-        ctx: Hatchet execution context (provides workflow_run_id).
+        ctx: step execution context (provides workflow_run_id).
 
     Returns:
         dict with keys: scenes, pod_id, scene_count (or skipped/reason if skipped)
@@ -188,7 +188,7 @@ async def execute(
     # --- 2. Get chunk texts from DB ---
     session_maker = _db.async_session_maker
     assert session_maker is not None, (
-        "DB not initialized — call init_db() before starting the Hatchet worker"
+        "DB not initialized — call init_db() before starting"
     )
     async with session_maker() as session:
         chunk_data = await get_chunks_for_image_step(session, workflow_id_uuid)
@@ -318,7 +318,7 @@ async def execute(
         pod.id,
     )
 
-    # Return as dict for Hatchet serialization
+    # Return as dict
     return output.model_dump()
 
 

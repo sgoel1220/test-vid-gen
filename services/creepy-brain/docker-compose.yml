@@ -17,86 +17,10 @@ services:
       - POSTGRES_PASSWORD=dev_password
       - POSTGRES_DB=creepy_brain
       # - JSON_LOGS=true  # Set to false for pretty dev logs, true for production JSON
-      - HATCHET_CLIENT_TLS_STRATEGY=none
-      - HATCHET_CLIENT_SERVER_URL=http://hatchet-engine:8888
       # ANTHROPIC_API_KEY and LLM_MODEL are loaded from .env (copy .env.example → .env)
-      # HATCHET_CLIENT_TOKEN is loaded from .env (create token in Hatchet dashboard)
     depends_on:
       postgres:
         condition: service_healthy
-      hatchet-engine:
-        condition: service_started
-    restart: unless-stopped
-
-  brain-worker:
-    build:
-      context: ../..
-      dockerfile: services/creepy-brain/Dockerfile
-    image: creepy-brain:latest
-    container_name: creepy-brain-worker
-    entrypoint: ["python", "-m", "app.workflows.worker"]
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=creepy_brain
-      - POSTGRES_PASSWORD=dev_password
-      - POSTGRES_DB=creepy_brain
-      - HATCHET_CLIENT_TLS_STRATEGY=none
-      - HATCHET_CLIENT_SERVER_URL=http://hatchet-engine:8888
-      # HATCHET_CLIENT_TOKEN is loaded from .env (create token in Hatchet dashboard)
-    depends_on:
-      postgres:
-        condition: service_healthy
-      hatchet-engine:
-        condition: service_healthy
-      brain:
-        condition: service_started
-    restart: unless-stopped
-
-  # hatchet-setup: create hatchet user+db on every start (idempotent)
-  hatchet-setup:
-    image: postgres:16-alpine
-    command: >
-      sh -c "psql postgresql://creepy_brain:dev_password@postgres:5432/creepy_brain
-      -f /ensure-hatchet.sql"
-    volumes:
-      - ./postgres/ensure-hatchet.sql:/ensure-hatchet.sql:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: on-failure
-
-  # hatchet-lite: all-in-one Hatchet for dev (no separate RabbitMQ/migration needed)
-  # Dashboard UI: http://localhost:8888  |  gRPC: localhost:7070
-  hatchet-engine:
-    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:latest
-    environment:
-      DATABASE_URL: "postgresql://hatchet:hatchet@postgres:5432/hatchet"
-      SERVER_AUTH_COOKIE_SECRETS: "devtokensecret16 devtokensecret32"
-      SERVER_AUTH_COOKIE_DOMAIN: 192.168.1.10
-      SERVER_AUTH_COOKIE_INSECURE: "t"
-      SERVER_AUTH_RESTRICT_NON_VERIFIED: "false"
-      SERVER_GRPC_BROADCAST_ADDRESS: "hatchet-engine:7070"
-      SERVER_GRPC_BIND_ADDRESS: "0.0.0.0"
-      SERVER_GRPC_PORT: "7070"
-      SERVER_GRPC_INSECURE: "t"
-      SERVER_URL: "http://192.168.1.10:8888"
-    ports:
-      - "8888:8888"  # Dashboard UI
-      - "7070:7070"  # gRPC for workers
-    volumes:
-      - hatchet_data:/hatchet/config
-    depends_on:
-      hatchet-setup:
-        condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8888/api/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 15
     restart: unless-stopped
 
   postgres:
@@ -108,8 +32,6 @@ services:
       - POSTGRES_DB=creepy_brain
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Runs on fresh volumes only (existing volumes handled by hatchet-setup)
-      - ./postgres/init-hatchet.sql:/docker-entrypoint-initdb.d/init-hatchet.sql
     ports:
       - "5433:5432"  # Avoid conflict with default postgres port
     healthcheck:
@@ -121,4 +43,3 @@ services:
 
 volumes:
   postgres_data:
-  hatchet_data:

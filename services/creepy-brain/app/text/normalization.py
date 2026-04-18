@@ -2,7 +2,7 @@
 
 Normalizes story text to remove markdown, fix punctuation, and produce
 clean prose suitable for TTS. Results are cached in-memory by text hash
-to avoid redundant LLM calls across Hatchet step retries within the same
+to avoid redundant LLM calls across step retries within the same
 worker process.
 """
 
@@ -44,7 +44,7 @@ def _text_hash(text: str) -> str:
 async def normalize_text(text: str) -> str:
     """Normalize *text* for TTS synthesis via a single LLM API call.
 
-    Results are cached in-process by SHA-256 hash of the input, so Hatchet
+    Results are cached in-process by SHA-256 hash of the input, so the engine
     step retries within the same worker process will not re-call the LLM.
 
     Args:

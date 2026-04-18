@@ -1,7 +1,7 @@
 """In-process workflow engine — public API.
 
-Replace hatchet_sdk with this engine for running workflows inside the
-FastAPI process without an external worker daemon.
+Runs workflows inside the 
+
 
 Usage::
 

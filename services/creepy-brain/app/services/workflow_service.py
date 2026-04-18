@@ -452,7 +452,7 @@ async def get_scenes_for_workflow(
 
 
 def get_optional_workflow_id(workflow_run_id: str) -> Optional[uuid.UUID]:
-    """Parse the Hatchet workflow run ID string to a UUID, or return None on failure."""
+    """Parse the workflow run ID string to a UUID, or return None on failure."""
     try:
         return uuid.UUID(workflow_run_id)
     except ValueError:

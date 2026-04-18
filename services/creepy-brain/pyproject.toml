@@ -17,7 +17,6 @@ dependencies = [
     "prometheus-fastapi-instrumentator>=6.0.0",
     "anthropic>=0.25.0",
     "python-multipart>=0.0.9",
-    "hatchet-sdk>=1.0.0",
     "croniter>=2.0.0",
     "numpy>=1.26.0",
     "soundfile>=0.12.0",
@@ -53,5 +52,5 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["prometheus_client.*", "prometheus_fastapi_instrumentator.*", "hatchet_sdk.*", "soundfile.*", "httpx.*", "croniter.*", "runpod.*"]
+module = ["prometheus_client.*", "prometheus_fastapi_instrumentator.*", "soundfile.*", "httpx.*", "croniter.*", "runpod.*"]
 ignore_missing_imports = true
