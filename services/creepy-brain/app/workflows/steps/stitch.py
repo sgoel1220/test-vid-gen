@@ -17,6 +17,7 @@ import numpy as np
 import soundfile as sf
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.engine import SkippedStepOutput, StepContext
@@ -24,8 +25,13 @@ from app.engine import SkippedStepOutput, StepContext
 from app.audio.encoding import encode_wav_to_mp3
 from app.models.enums import BlobType, ChunkStatus
 from app.models.json_schemas import WorkflowInputSchema
+from app.models.workflow import WorkflowBlob
 from app.services import blob_service
-from app.services.workflow_service import ChunkForImageStep, get_optional_workflow_id
+from app.services.workflow_service import (
+    ChunkForImageStep,
+    get_chunks_for_image_step,
+    get_optional_workflow_id,
+)
 from app.workflows.db_helpers import get_session_maker
 from app.workflows.steps.image import ImageStepOutput, SceneImageResult
 
@@ -51,6 +57,9 @@ class StitchStepOutput(BaseModel):
 
 async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOutput | SkippedStepOutput:
     """Stitch audio chunks and optionally create video with images.
+
+    Supports resume: if final audio/video blobs already exist for this
+    workflow, returns existing results without re-encoding.
 
     Args:
         input: Validated workflow input (contains stitch_video flag).
@@ -78,12 +87,48 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
     # Get parent step outputs
     image_output = ctx.parent_outputs.get("image_generation")
 
-    # --- 1. Fetch WAV chunk blobs from DB ---
     session_maker = get_session_maker()
 
+    # --- Resume check: look for existing final blobs (defer data to avoid loading MB) ---
     async with session_maker() as session:
-        from app.services.workflow_service import get_chunks_for_image_step
+        existing_blobs_result = await session.execute(
+            select(
+                WorkflowBlob.id,
+                WorkflowBlob.blob_type,
+            ).where(
+                WorkflowBlob.workflow_id == workflow_id,
+                WorkflowBlob.blob_type.in_([BlobType.FINAL_AUDIO, BlobType.FINAL_VIDEO]),
+            )
+        )
+        existing_blobs = {row.blob_type: row.id for row in existing_blobs_result.all()}
 
+    existing_audio_id: uuid.UUID | None = existing_blobs.get(BlobType.FINAL_AUDIO)
+    existing_video_id: uuid.UUID | None = existing_blobs.get(BlobType.FINAL_VIDEO)
+
+    # If both exist (or audio exists and no video needed), return early
+    needs_video = image_output is not None and not isinstance(image_output, SkippedStepOutput)
+    if existing_audio_id is not None:
+        if not needs_video or existing_video_id is not None:
+            log.info(
+                "stitch_final: resuming — final blobs already exist (audio=%s, video=%s)",
+                existing_audio_id,
+                existing_video_id,
+            )
+            async with session_maker() as session:
+                chunk_data = await get_chunks_for_image_step(session, workflow_id)
+
+            chunk_count = len([c for c in chunk_data if c.tts_status == ChunkStatus.COMPLETED])
+            total_dur = sum(c.duration_sec or 0.0 for c in chunk_data if c.tts_status == ChunkStatus.COMPLETED)
+
+            return StitchStepOutput(
+                final_audio_blob_id=str(existing_audio_id),
+                final_video_blob_id=str(existing_video_id) if existing_video_id else None,
+                chunk_count=chunk_count,
+                total_duration_sec=total_dur,
+            )
+
+    # --- 1. Fetch WAV chunk blobs from DB ---
+    async with session_maker() as session:
         chunk_data = await get_chunks_for_image_step(session, workflow_id)
 
     if not chunk_data:
@@ -150,32 +195,40 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
         sample_rate,
     )
 
-    # --- 3. Encode to MP3 ---
-    mp3_bytes = await encode_wav_to_mp3(stitched, sample_rate)
-    log.info("stitch_final: encoded MP3, size=%d bytes", len(mp3_bytes))
+    # --- 3. Encode to MP3 (skip if audio blob already exists from partial resume) ---
+    if existing_audio_id is not None:
+        async with session_maker() as session:
+            audio_blob_obj = await blob_service.get(session, existing_audio_id)
+        mp3_bytes = audio_blob_obj.data
+        audio_blob_id = existing_audio_id
+        log.info("stitch_final: reusing existing audio blob %s", audio_blob_id)
+    else:
+        mp3_bytes = await encode_wav_to_mp3(stitched, sample_rate)
+        log.info("stitch_final: encoded MP3, size=%d bytes", len(mp3_bytes))
 
-    # --- 4. Store final audio blob ---
-    async with session_maker() as session:
-        audio_blob = await blob_service.store(
-            session=session,
-            data=mp3_bytes,
-            mime_type="audio/mpeg",
-            blob_type=BlobType.FINAL_AUDIO,
-            workflow_id=workflow_id,
-        )
-        await session.commit()
+        # --- 4. Store final audio blob ---
+        async with session_maker() as session:
+            audio_blob = await blob_service.store(
+                session=session,
+                data=mp3_bytes,
+                mime_type="audio/mpeg",
+                blob_type=BlobType.FINAL_AUDIO,
+                workflow_id=workflow_id,
+            )
+            await session.commit()
+            audio_blob_id = audio_blob.id
 
-    log.info("stitch_final: saved final audio blob_id=%s", audio_blob.id)
+        log.info("stitch_final: saved final audio blob_id=%s", audio_blob_id)
 
     output = StitchStepOutput(
-        final_audio_blob_id=str(audio_blob.id),
+        final_audio_blob_id=str(audio_blob_id),
         final_video_blob_id=None,
         chunk_count=len(chunk_data),
         total_duration_sec=total_duration_sec,
     )
 
     # --- 5. Create video if images exist ---
-    if image_output is not None and not isinstance(image_output, SkippedStepOutput):
+    if needs_video:
         image_step_output = ImageStepOutput.model_validate(image_output)
         log.info(
             "stitch_final: creating video with %d scene images",

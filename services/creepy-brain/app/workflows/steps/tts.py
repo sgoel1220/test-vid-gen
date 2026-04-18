@@ -44,11 +44,16 @@ from app.gpu.lifecycle import (
     terminate_and_finalize,
     wait_for_recorded_ready,
 )
-from app.models.enums import BlobType
+from app.models.enums import BlobType, ChunkStatus
 from app.models.json_schemas import GenerateStoryStepOutput, WorkflowInputSchema
 from app.services import blob_service
 from app.services import story_service as _story_service
-from app.services.workflow_service import WorkflowService, get_optional_workflow_id
+from app.services.workflow_service import (
+    ChunkForImageStep,
+    WorkflowService,
+    get_chunks_for_image_step,
+    get_optional_workflow_id,
+)
 from app.text.chunking import chunk_text_by_sentences
 from app.text.normalization import normalize_text
 from app.workflows.db_helpers import get_session_maker
@@ -110,6 +115,10 @@ class ChunkSynthesisResult(BaseModel):
 async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput:
     """Synthesize audio for the story via a TTS GPU pod.
 
+    Supports sub-unit resume: if some chunks are already COMPLETED in DB
+    (from a previous partial run), only pending chunks are synthesized.
+    No GPU pod is spun up if all chunks are already done.
+
     Args:
         input: Validated workflow input (contains voice_name).
         ctx: step execution context (provides workflow_run_id and parent outputs).
@@ -118,8 +127,6 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
         Pydantic output model with pod_id, chunk_count, total_duration_sec, and chunks.
     """
     # --- 1. Get story_id from parent step output, then fetch full_text from DB ---
-    # full_text is intentionally NOT serialized into the step output to avoid
-    # passing large text through the engine; we read it directly from Postgres.
     story_output = ctx.parent_outputs.get("generate_story")
     if story_output is None:
         raise ValueError("generate_story step did not produce story_id")
@@ -161,7 +168,61 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
 
     log.info("tts_synthesis: %d chunks to synthesize", len(chunks))
 
-    # --- 4. Spin up TTS GPU pod ---
+    # --- 4. Check for already-completed chunks (sub-unit resume) ---
+    workflow_id_uuid: uuid.UUID | None = get_optional_workflow_id(workflow_run_id)
+
+    resumed_results: list[TtsChunkResult] = []
+    pending_chunks: list[tuple[int, str]] = []
+    resumed_duration: float = 0.0
+
+    if workflow_id_uuid is not None:
+        async with session_maker() as session:
+            existing = await get_chunks_for_image_step(session, workflow_id_uuid)
+
+        existing_by_index: dict[int, ChunkForImageStep] = {c.index: c for c in existing}
+
+        for idx, chunk_text in enumerate(chunks):
+            db_chunk = existing_by_index.get(idx)
+            if (
+                db_chunk is not None
+                and db_chunk.tts_status == ChunkStatus.COMPLETED
+                and db_chunk.blob_id
+            ):
+                # Already completed — reuse result
+                dur = db_chunk.duration_sec or 0.0
+                resumed_results.append(TtsChunkResult(
+                    index=idx,
+                    text=chunk_text,
+                    blob_id=db_chunk.blob_id,
+                    duration_sec=dur,
+                    attempts_used=1,
+                    validation_passed=True,
+                ))
+                resumed_duration += dur
+            else:
+                pending_chunks.append((idx, chunk_text))
+    else:
+        pending_chunks = list(enumerate(chunks))
+
+    if resumed_results:
+        log.info(
+            "tts_synthesis: resuming — %d chunks already done, %d pending",
+            len(resumed_results),
+            len(pending_chunks),
+        )
+
+    # --- 5. If no pending chunks, return early (no GPU pod needed) ---
+    if not pending_chunks:
+        log.info("tts_synthesis: all %d chunks already completed, skipping GPU pod", len(chunks))
+        all_results = sorted(resumed_results, key=lambda r: r.index)
+        return TtsStepOutput(
+            pod_id="",
+            chunk_count=len(all_results),
+            total_duration_sec=resumed_duration,
+            chunks=all_results,
+        )
+
+    # --- 6. Spin up TTS GPU pod ---
     provider = get_provider(settings.runpod_api_key)
     workflow_id_for_pod = get_optional_workflow_id(workflow_run_id)
     pod = await create_recorded_pod(
@@ -173,8 +234,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
         label="tts",
     )
 
-    # --- 5. Wait for pod ready, then synthesize all chunks ---
-    # Pod is terminated in the finally block regardless of success or failure.
+    # --- 7. Wait for pod ready, then synthesize pending chunks ---
     try:
         pod, endpoint_url = await wait_for_recorded_ready(
             provider,
@@ -186,7 +246,8 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
 
         all_chunks_result = await _synthesize_all_chunks(
             endpoint_url=endpoint_url,
-            chunks=chunks,
+            pending_chunks=pending_chunks,
+            total_chunk_count=len(chunks),
             voice_name=voice_name,
             workflow_run_id=workflow_run_id,
             session_maker=session_maker,
@@ -197,27 +258,33 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
         except Exception as term_exc:
             log.error("failed to terminate tts pod %s: %s", pod.id, term_exc)
 
+    # --- 8. Merge resumed + newly synthesized results ---
+    merged = resumed_results + all_chunks_result.chunk_results
+    merged.sort(key=lambda r: r.index)
+    total_duration = resumed_duration + all_chunks_result.total_duration_sec
+
     log.info(
         "tts_synthesis complete chunks=%d total_dur=%.1fs pod=%s",
-        len(all_chunks_result.chunk_results), all_chunks_result.total_duration_sec, pod.id,
+        len(merged), total_duration, pod.id,
     )
 
     return TtsStepOutput(
         pod_id=pod.id,
-        chunk_count=len(all_chunks_result.chunk_results),
-        total_duration_sec=all_chunks_result.total_duration_sec,
-        chunks=all_chunks_result.chunk_results,
+        chunk_count=len(merged),
+        total_duration_sec=total_duration,
+        chunks=merged,
     )
 
 
 async def _synthesize_all_chunks(
     endpoint_url: str,
-    chunks: list[str],
+    pending_chunks: list[tuple[int, str]],
+    total_chunk_count: int,
     voice_name: str,
     workflow_run_id: str,
     session_maker: async_sessionmaker[AsyncSession],
 ) -> TtsAllChunksResult:
-    """Synthesize all chunks sequentially and persist each result to Postgres.
+    """Synthesize pending chunks sequentially and persist each result to Postgres.
 
     Failed chunks are re-queued for additional retry rounds (up to
     ``_MAX_REQUEUE_ROUNDS``) with shifted seeds so each round produces
@@ -225,7 +292,8 @@ async def _synthesize_all_chunks(
 
     Args:
         endpoint_url: Base URL of the ready TTS GPU pod.
-        chunks: List of text chunks to synthesize.
+        pending_chunks: List of (chunk_index, chunk_text) tuples to synthesize.
+        total_chunk_count: Total number of chunks in the workflow (for logging).
         voice_name: Voice ID for the TTS endpoint.
         workflow_run_id: workflow run ID (used for DB FK and logging).
         session_maker: SQLAlchemy async session factory.
@@ -247,8 +315,8 @@ async def _synthesize_all_chunks(
     chunk_results: list[TtsChunkResult] = []
     total_duration_sec: float = 0.0
 
-    # Build initial queue: list of (chunk_index, chunk_text)
-    pending: list[tuple[int, str]] = list(enumerate(chunks))
+    # Use the provided pending list directly (already filtered for resume)
+    pending: list[tuple[int, str]] = list(pending_chunks)
 
     async with httpx.AsyncClient(base_url=endpoint_url, timeout=_SYNTHESIZE_TIMEOUT_SEC) as client:
         attempts_per_chunk = _MAX_CHUNK_RETRIES + 1  # attempts used per round
@@ -327,7 +395,7 @@ async def _synthesize_all_chunks(
                     log.info(
                         "chunk %d/%d done blob_id=%s dur=%.1fs attempts=%d validated=True",
                         idx + 1,
-                        len(chunks),
+                        total_chunk_count,
                         blob.id,
                         synthesis_result.duration_sec,
                         synthesis_result.attempts_used,
@@ -338,7 +406,7 @@ async def _synthesize_all_chunks(
                     log.warning(
                         "chunk %d/%d failed round %d — will %s",
                         idx + 1,
-                        len(chunks),
+                        total_chunk_count,
                         requeue_round,
                         "requeue" if requeue_round < _MAX_REQUEUE_ROUNDS else "save as FAILED",
                     )
@@ -360,7 +428,7 @@ async def _synthesize_all_chunks(
             log.error(
                 "chunk %d/%d: exhausted all %d requeue round(s); marked FAILED",
                 idx + 1,
-                len(chunks),
+                total_chunk_count,
                 _MAX_REQUEUE_ROUNDS + 1,
             )
 
