@@ -1,6 +1,6 @@
 """Audio encoding utilities using ffmpeg subprocess."""
 
-import subprocess
+import asyncio
 import tempfile
 from pathlib import Path
 
@@ -8,7 +8,7 @@ import numpy as np
 import numpy.typing as npt
 
 
-def encode_wav_to_mp3(
+async def encode_wav_to_mp3(
     audio: npt.NDArray[np.float32],
     sample_rate: int,
     bitrate: str = "192k",
@@ -53,15 +53,16 @@ def encode_wav_to_mp3(
             str(tmp_path),
         ]
 
-        result = subprocess.run(
-            cmd,
-            input=audio_int16.tobytes(),
-            capture_output=True,
-            check=False,
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+        _, stderr_bytes = await proc.communicate(input=audio_int16.tobytes())
 
-        if result.returncode != 0:
-            stderr = result.stderr.decode("utf-8", errors="replace")
+        if proc.returncode != 0:
+            stderr = stderr_bytes.decode("utf-8", errors="replace")
             raise RuntimeError(f"ffmpeg encoding failed: {stderr}")
 
         return tmp_path.read_bytes()

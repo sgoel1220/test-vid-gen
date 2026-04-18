@@ -6,8 +6,8 @@ optionally creates video with images using ffmpeg.
 
 from __future__ import annotations
 
+import asyncio
 import io
-import subprocess
 import tempfile
 import uuid
 from pathlib import Path
@@ -155,7 +155,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, obj
     )
 
     # --- 3. Encode to MP3 ---
-    mp3_bytes = encode_wav_to_mp3(stitched, sample_rate)
+    mp3_bytes = await encode_wav_to_mp3(stitched, sample_rate)
     log.info("stitch_final: encoded MP3, size=%d bytes", len(mp3_bytes))
 
     # --- 4. Store final audio blob ---
@@ -256,9 +256,14 @@ async def _create_video(
             str(video_path),
         ]
 
-        result = subprocess.run(cmd, capture_output=True, check=False)
-        if result.returncode != 0:
-            stderr = result.stderr.decode("utf-8", errors="replace")
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr_bytes = await proc.communicate()
+        if proc.returncode != 0:
+            stderr = stderr_bytes.decode("utf-8", errors="replace")
             raise RuntimeError(f"ffmpeg video creation failed: {stderr}")
 
         video_bytes = video_path.read_bytes()
