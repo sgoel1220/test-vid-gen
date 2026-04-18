@@ -48,7 +48,11 @@ def upgrade() -> None:
     )
     op.create_index("idx_voices_audio_blob", "voices", ["audio_blob_id"])
 
-    # 2. Backfill: any row where audio_path looks like a UUID is an uploaded
+    # 2. Relax audio_path to nullable FIRST (must happen before backfill
+    #    sets audio_path = NULL for uploaded voices).
+    op.alter_column("voices", "audio_path", nullable=True)
+
+    # 3. Backfill: any row where audio_path looks like a UUID is an uploaded
     #    voice that stored str(blob.id) in the wrong column.  Move it to
     #    audio_blob_id and clear audio_path.
     op.execute(
@@ -60,11 +64,22 @@ def upgrade() -> None:
         """
     )
 
-    # 3. Relax audio_path to nullable (built-in file voices keep their path;
-    #    uploaded voices have NULL audio_path after backfill).
-    op.alter_column("voices", "audio_path", nullable=True)
+    # 4. Deduplicate defaults: keep only the most recently created default voice.
+    op.execute(
+        """
+        UPDATE voices
+        SET is_default = FALSE
+        WHERE is_default = TRUE
+          AND id != (
+              SELECT id FROM voices
+              WHERE is_default = TRUE
+              ORDER BY created_at DESC
+              LIMIT 1
+          )
+        """
+    )
 
-    # 4. Partial unique index: only one is_default = TRUE row permitted.
+    # 5. Partial unique index: only one is_default = TRUE row permitted.
     op.execute(
         """
         CREATE UNIQUE INDEX uq_voices_single_default

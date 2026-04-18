@@ -130,6 +130,15 @@ Work is NOT complete until `git push` succeeds.
 4. Push: `git pull --rebase && git push && git status`
 5. Verify status shows "up to date with origin"
 
+## Fix It Right
+
+Always fix issues at the source — never apply runtime hacks, container patches, or workarounds.
+
+- **No container-level hotfixes** — if the image is broken, fix the code, commit, rebuild
+- **No monkey-patching** — fix the import, the schema, the config properly
+- **Think long-term** — every hack is debt that compounds; a proper fix pays off on every future deploy
+- **Broken deploy = broken code** — treat import errors, missing modules, and config drift as bugs to fix in source
+
 ## Architecture Reference
 
 See `docs/ARCHITECTURE.md` for project structure, API endpoints, GPU rules, and deploy info.

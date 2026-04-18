@@ -172,9 +172,21 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
 
     log.info("tts_synthesis: %d chunks to synthesize", len(chunks))
 
-    # --- 4. Check for already-completed chunks (sub-unit resume) ---
-    workflow_id_uuid: uuid.UUID | None = get_optional_workflow_id(workflow_run_id)
+    # --- 3.5. Persist all chunks to DB (text only, PENDING status) ---
+    workflow_id_uuid = get_optional_workflow_id(workflow_run_id)
+    if workflow_id_uuid is not None:
+        async with session_maker() as session:
+            svc = WorkflowService(session)
+            for idx, chunk_text in enumerate(chunks):
+                await svc.upsert_chunk(
+                    workflow_id=workflow_id_uuid,
+                    chunk_index=idx,
+                    chunk_text=chunk_text,
+                )
+            await session.commit()
+        log.info("tts_synthesis: persisted %d chunks to DB", len(chunks))
 
+    # --- 4. Check for already-completed chunks (sub-unit resume) ---
     resumed_results: list[TtsChunkResult] = []
     pending_chunks: list[tuple[int, str]] = []
     resumed_duration: float = 0.0
@@ -363,11 +375,6 @@ async def _synthesize_all_chunks(
                     )
                     if workflow_id_uuid is not None:
                         svc = WorkflowService(session)
-                        await svc.upsert_chunk(
-                            workflow_id=workflow_id_uuid,
-                            chunk_index=idx,
-                            chunk_text=chunk_text,
-                        )
                         if synthesis_result.validation_passed:
                             await svc.complete_chunk_tts(
                                 workflow_id=workflow_id_uuid,

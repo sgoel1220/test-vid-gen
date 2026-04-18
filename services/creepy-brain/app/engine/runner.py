@@ -20,6 +20,13 @@ import logging
 import uuid
 
 from app.models.enums import StepName, StepStatus
+from app.models.json_schemas import (
+    GenerateStoryStepOutput,
+    ImageGenerationStepOutput,
+    StepOutputSchema,
+    StitchFinalStepOutput,
+    TtsSynthesisStepOutput,
+)
 from app.models.workflow import WorkflowStep
 from app.services.workflow_service import WorkflowService
 from sqlalchemy import select

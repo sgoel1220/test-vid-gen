@@ -16,7 +16,7 @@ import pytest
 from pydantic import BaseModel
 
 from app.engine.runner import _as_step_output_schema
-from app.models.schemas import (
+from app.models.json_schemas import (
     GenerateStoryStepOutput,
     ImageGenerationStepOutput,
     StitchFinalStepOutput,
