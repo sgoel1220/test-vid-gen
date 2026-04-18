@@ -18,13 +18,13 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 from sqlalchemy import select
 
-import app.db as _db
 from app.models.enums import GpuPodStatus, StepStatus, WorkflowStatus
 from app.models.gpu_pod import GpuPod
 from app.models.workflow import Workflow, WorkflowStep
 from app.models.enums import StepName
 from app.services.workflow_service import WorkflowService
 
+from .db_helpers import get_optional_session_maker, optional_session
 from .models import StepOutputMap, WorkflowDef
 from .runner import WorkflowRunner, get_downstream_steps
 
@@ -219,10 +219,9 @@ class WorkflowEngine:
         self, workflow_id: uuid.UUID, step_names: set[str]
     ) -> None:
         """Set the latest WorkflowStep row for each name back to PENDING."""
-        session_maker = _db.async_session_maker
-        if session_maker is None:
-            return
-        async with session_maker() as session:
+        async with optional_session() as session:
+            if session is None:
+                return
             for name_str in step_names:
                 try:
                     name_enum = StepName(name_str)
@@ -246,10 +245,9 @@ class WorkflowEngine:
 
     async def _set_workflow_status_running(self, workflow_id: uuid.UUID) -> None:
         """Transition workflow to RUNNING unless it is already RUNNING or COMPLETED."""
-        session_maker = _db.async_session_maker
-        if session_maker is None:
-            return
-        async with session_maker() as session:
+        async with optional_session() as session:
+            if session is None:
+                return
             result = await session.execute(
                 select(Workflow).where(Workflow.id == workflow_id)
             )
@@ -259,10 +257,9 @@ class WorkflowEngine:
             await session.commit()
 
     async def _mark_workflow_cancelled(self, workflow_id: uuid.UUID) -> None:
-        session_maker = _db.async_session_maker
-        if session_maker is None:
-            return
-        async with session_maker() as session:
+        async with optional_session() as session:
+            if session is None:
+                return
             result = await session.execute(
                 select(Workflow).where(Workflow.id == workflow_id)
             )
@@ -274,7 +271,7 @@ class WorkflowEngine:
 
     async def _terminate_gpu_pods(self, workflow_id: uuid.UUID) -> None:
         """Best-effort: terminate active GPU pods for this workflow."""
-        session_maker = _db.async_session_maker
+        session_maker = get_optional_session_maker()
         if session_maker is None:
             return
         try:

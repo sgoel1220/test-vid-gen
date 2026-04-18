@@ -7,9 +7,9 @@ from typing import cast
 import httpx
 import runpod
 
-from app.models.enums import GpuProvider as GpuProviderName
+from app.models.enums import GpuProvider as GpuProviderName, GpuPodStatus
 
-from .base import GpuPod, GpuPodSpec, GpuProvider, PodStatus
+from .base import GpuPod, GpuPodSpec, GpuProvider
 
 
 class RunPodProvider(GpuProvider):
@@ -31,11 +31,11 @@ class RunPodProvider(GpuProvider):
         desired = str(raw.get("desiredStatus", ""))
 
         if desired == "RUNNING":
-            status = PodStatus.RUNNING
+            status = GpuPodStatus.RUNNING
         elif desired in ("EXITED", "TERMINATED"):
-            status = PodStatus.TERMINATED
+            status = GpuPodStatus.TERMINATED
         else:
-            status = PodStatus.CREATING
+            status = GpuPodStatus.CREATING
 
         # Build endpoint URL from public IP/port mappings
         endpoint_url: str | None = None
@@ -102,7 +102,7 @@ class RunPodProvider(GpuProvider):
 
         # Check for existing pod with same name
         existing = await self._find_pod_by_name(idempotency_key, service_port)
-        if existing and existing.status != PodStatus.TERMINATED:
+        if existing and existing.status != GpuPodStatus.TERMINATED:
             return existing
 
         ports_str = ",".join(f"{p}/http" for p in spec.ports)
@@ -129,7 +129,7 @@ class RunPodProvider(GpuProvider):
         except Exception:
             # On error, check if pod was created by concurrent call
             recovered = await self._find_pod_by_name(idempotency_key, service_port)
-            if recovered and recovered.status != PodStatus.TERMINATED:
+            if recovered and recovered.status != GpuPodStatus.TERMINATED:
                 return recovered
             raise
 
@@ -181,7 +181,7 @@ class RunPodProvider(GpuProvider):
                     async with httpx.AsyncClient(timeout=5.0) as client:
                         r = await client.get(f"{pod.endpoint_url}/health")
                         if r.status_code == 200:
-                            pod.status = PodStatus.READY
+                            pod.status = GpuPodStatus.READY
                             return pod
                 except (httpx.ConnectError, httpx.TimeoutException):
                     pass
@@ -199,7 +199,7 @@ class RunPodProvider(GpuProvider):
         result: list[GpuPod] = []
         for raw in raw_pods:
             pod = self._parse_pod(raw)
-            if pod.status != PodStatus.TERMINATED:
+            if pod.status != GpuPodStatus.TERMINATED:
                 result.append(pod)
         return result
 
@@ -215,7 +215,7 @@ class RunPodProvider(GpuProvider):
         for raw in raw_pods:
             if raw.get("name") == name:
                 pod = self._parse_pod(raw, service_port)
-                if pod.status != PodStatus.TERMINATED:
+                if pod.status != GpuPodStatus.TERMINATED:
                     return pod
         return None
 

@@ -11,19 +11,10 @@ ERROR     – provider reported an error state
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import GpuProvider as GpuProviderName
-
-
-class PodStatus(str, Enum):
-    CREATING = "creating"
-    RUNNING = "running"
-    READY = "ready"
-    TERMINATED = "terminated"
-    ERROR = "error"
+from app.models.enums import GpuProvider as GpuProviderName, GpuPodStatus
 
 
 class GpuPodSpec(BaseModel):
@@ -61,7 +52,7 @@ class GpuPod(BaseModel):
 
     id: str
     provider: GpuProviderName
-    status: PodStatus
+    status: GpuPodStatus
     endpoint_url: str | None
     gpu_type: str | None
     cost_per_hour_cents: int | None

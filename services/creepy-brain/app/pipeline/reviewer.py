@@ -13,6 +13,7 @@ from app.llm.prompts import (
     OUTLINE_REVIEW_SYSTEM,
     OUTLINE_REVIEW_USER,
 )
+from app.pipeline.formatting import format_act_drafts
 from app.pipeline.models import (
     ActDraft,
     ActInlineCheck,
@@ -50,15 +51,10 @@ async def check_act(
     act_num = act_outline.act_number
     log.info("act_reviewer: checking act %d", act_num)
 
-    if prior_acts:
-        parts: list[str] = []
-        for a in prior_acts:
-            parts.append(f"--- Act {a.act_number}: {a.title} ---")
-            parts.append(a.text)
-            parts.append("")
-        prior_text = "\n".join(parts)
-    else:
-        prior_text = "(none — this is the first act)"
+    prior_text = format_act_drafts(
+        prior_acts,
+        empty_text="(none — this is the first act)",
+    )
 
     user_prompt = ACT_CHECK_USER.format(
         bible_json=bible.model_dump_json(indent=2),
@@ -80,12 +76,7 @@ async def review_full_story(
     acts: list[ActDraft],
 ) -> FullStoryCritique:
     """Review the full assembled story and score it."""
-    parts: list[str] = []
-    for act in acts:
-        parts.append(f"--- Act {act.act_number}: {act.title} ---")
-        parts.append(act.text)
-        parts.append("")
-    full_text = "\n".join(parts)
+    full_text = format_act_drafts(acts)
 
     log.info("full_reviewer: reviewing %d words", len(full_text.split()))
     user_prompt = FULL_REVIEW_USER.format(

@@ -2,35 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 
 from app.engine import StepContext
 
-import app.db as _db  # module ref — always reads the live async_session_maker value
 from app.models.enums import StoryStatus
 from app.models.schemas import GenerateStoryStepOutput, WorkflowInputSchema
 from app.pipeline import orchestrator
 from app.services import story_service
+from app.workflows.db_helpers import ensure_db, get_session_maker
 
 log = logging.getLogger(__name__)
-
-# Serializes lazy DB initialization so concurrent step starts don't race.
-_db_init_lock: asyncio.Lock = asyncio.Lock()
-
-
-async def _ensure_db() -> None:
-    """Initialize the DB engine if not already done.
-
-    The workflow step runs inside the FastAPI process.
-    normally calls ``init_db()`` during lifespan startup.  This helper ensures
-    the session maker is ready regardless of which process is executing the
-    step, and it is idempotent after the first call.
-    """
-    async with _db_init_lock:
-        if _db.async_session_maker is None:
-            await _db.init_db()
 
 
 async def execute(input: WorkflowInputSchema, ctx: StepContext) -> GenerateStoryStepOutput:
@@ -45,11 +28,8 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> GenerateStory
     Raises:
         RuntimeError: If the pipeline did not complete successfully.
     """
-    await _ensure_db()
-
-    # _ensure_db() guarantees async_session_maker is initialised.
-    session_maker = _db.async_session_maker
-    assert session_maker is not None
+    await ensure_db()
+    session_maker = get_session_maker()
 
     premise: str = input.premise
 
