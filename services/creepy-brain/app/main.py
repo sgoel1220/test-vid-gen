@@ -36,10 +36,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Start cron scheduler for periodic workflows (recon every 5 min).
     from app.workflows.recon import RECON_CRON
-    from app.workflows.types import EmptyModel
+    from app.workflows.schemas import EmptyWorkflowInput
 
     scheduler = CronScheduler(engine)
-    scheduler.add(RECON_CRON, "ReconOrphanedPods", EmptyModel)
+    scheduler.add(RECON_CRON, "ReconOrphanedPods", EmptyWorkflowInput)
     await scheduler.start()
 
     # Start workflow engine.

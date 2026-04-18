@@ -2,28 +2,17 @@
 
 import asyncio
 
-from pydantic import BaseModel
-
 from app.engine import StepContext, StepDef, WorkflowDef, engine
-from app.workflows.types import EmptyModel
+from app.workflows.schemas import EmptyWorkflowInput
 
 
-class StepOneOutput(BaseModel):
-    message: str
-    value: int
-
-
-class StepTwoOutput(BaseModel):
-    message: str
-
-
-async def _step_one(input: EmptyModel, ctx: StepContext) -> StepOneOutput:
+async def _step_one(input: EmptyWorkflowInput, ctx: StepContext) -> dict[str, object]:
     """First step — simulates work and returns a value."""
     await asyncio.sleep(2)
     return StepOneOutput(message="Step one complete", value=42)
 
 
-async def _step_two(input: EmptyModel, ctx: StepContext) -> StepTwoOutput:
+async def _step_two(input: EmptyWorkflowInput, ctx: StepContext) -> dict[str, object]:
     """Second step — reads step_one output and doubles the value."""
     result = ctx.parent_outputs.get("step_one")
     if result is None:

@@ -19,6 +19,7 @@ from app.llm.prompts import (
 )
 from app.models.enums import StoryStatus
 from app.pipeline import architect, reviewer, writer
+from app.pipeline.formatting import format_act_drafts
 from app.pipeline.models import ActDraft, ArchitectOutput
 from app.services import story_service
 
@@ -117,10 +118,7 @@ async def run_pipeline(
                 log.info("no fix instructions despite low score, accepting")
                 break
 
-            full_text_parts: list[str] = []
-            for a in acts:
-                full_text_parts.append(f"--- Act {a.act_number}: {a.title} ---\n{a.text}\n")
-            full_text = "\n".join(full_text_parts)
+            full_text = format_act_drafts(acts)
 
             for fix in review.fix_instructions:
                 act_idx = fix.act_number - 1

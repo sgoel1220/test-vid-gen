@@ -26,6 +26,7 @@ from app.schemas.workflow import (
     WorkflowResponse,
     WorkflowStepResponse,
 )
+from app.services.http_errors import require_found
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 log = structlog.get_logger()
@@ -46,10 +47,10 @@ async def trigger_test_workflow() -> WorkflowRunResponse:
     if not settings.dev_mode:
         raise HTTPException(status_code=404, detail="Not found")
 
-    from app.workflows.types import EmptyModel
+    from app.workflows.schemas import EmptyWorkflowInput
 
     workflow_id = uuid.uuid4()
-    run_id = await engine.trigger("TestWorkflow", EmptyModel(), workflow_id)
+    run_id = await engine.trigger("TestWorkflow", EmptyWorkflowInput(), workflow_id)
     return WorkflowRunResponse(workflow_run_id=run_id)
 
 
@@ -66,6 +67,23 @@ def _to_response(w: Workflow) -> WorkflowResponse:
         completed_at=w.completed_at,
         error=w.error,
     )
+
+
+async def _get_workflow_or_404(
+    workflow_id: uuid.UUID,
+    db: DbSession,
+    *,
+    include_details: bool = False,
+) -> Workflow:
+    """Fetch a workflow or raise a 404 response."""
+    query = select(Workflow).where(Workflow.id == workflow_id)
+    if include_details:
+        query = query.options(
+            selectinload(Workflow.steps),
+            selectinload(Workflow.chunks),
+        )
+    result = await db.execute(query)
+    return require_found(result.scalar_one_or_none(), "Workflow not found")
 
 
 async def _trigger_and_create(input_data: WorkflowInputSchema, db: DbSession) -> Workflow:
@@ -108,15 +126,7 @@ async def _trigger_and_create(input_data: WorkflowInputSchema, db: DbSession) ->
 @router.post("", response_model=WorkflowResponse, status_code=201)
 async def create_workflow(request: CreateWorkflowRequest, db: DbSession) -> WorkflowResponse:
     """Trigger a new ContentPipeline workflow run."""
-    input_data = WorkflowInputSchema(
-        premise=request.premise,
-        voice_name=request.voice_name,
-        generate_images=request.generate_images,
-        stitch_video=request.stitch_video,
-        max_revisions=request.max_revisions,
-        target_word_count=request.target_word_count,
-    )
-    workflow = await _trigger_and_create(input_data, db)
+    workflow = await _trigger_and_create(request, db)
     return _to_response(workflow)
 
 
@@ -137,14 +147,11 @@ async def list_workflows(
 @router.get("/{workflow_id}", response_model=WorkflowDetailResponse)
 async def get_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowDetailResponse:
     """Get detailed workflow status: steps, chunks, and GPU pods."""
-    result = await db.execute(
-        select(Workflow)
-        .where(Workflow.id == workflow_id)
-        .options(selectinload(Workflow.steps), selectinload(Workflow.chunks))
+    workflow = await _get_workflow_or_404(
+        workflow_id,
+        db,
+        include_details=True,
     )
-    workflow = result.scalar_one_or_none()
-    if workflow is None:
-        raise HTTPException(status_code=404, detail="Workflow not found")
 
     pods_result = await db.execute(
         select(GpuPod).where(GpuPod.workflow_id == workflow_id)
@@ -203,10 +210,7 @@ async def retry_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowRespo
     The engine handles built-in retries for transient step failures. This
     endpoint is for manually retrying after all automatic retries are exhausted.
     """
-    result = await db.execute(select(Workflow).where(Workflow.id == workflow_id))
-    workflow = result.scalar_one_or_none()
-    if workflow is None:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    workflow = await _get_workflow_or_404(workflow_id, db)
     if workflow.status != WorkflowStatus.FAILED:
         raise HTTPException(
             status_code=400,
@@ -220,10 +224,7 @@ async def retry_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowRespo
 @router.delete("/{workflow_id}", status_code=204)
 async def cancel_workflow(workflow_id: uuid.UUID, db: DbSession) -> None:
     """Cancel a running workflow and terminate any active GPU pods."""
-    result = await db.execute(select(Workflow).where(Workflow.id == workflow_id))
-    workflow = result.scalar_one_or_none()
-    if workflow is None:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    workflow = await _get_workflow_or_404(workflow_id, db)
     if workflow.status not in {WorkflowStatus.PENDING, WorkflowStatus.RUNNING}:
         raise HTTPException(
             status_code=400,

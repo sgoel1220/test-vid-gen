@@ -19,22 +19,13 @@ import collections
 import logging
 import uuid
 
-from pydantic import BaseModel
-from sqlalchemy import select
-
-import app.db as _db
 from app.models.enums import StepName, StepStatus
-from app.models.schemas import (
-    GenerateStoryStepOutput,
-    ImageGenerationStepOutput,
-    StepOutputSchema,
-    StitchFinalStepOutput,
-    TtsSynthesisStepOutput,
-)
 from app.models.workflow import WorkflowStep
 from app.services.workflow_service import WorkflowService
+from sqlalchemy import select
 
-from .models import EmptyStepOutput, StepDef, StepContext, StepOutputMap, WorkflowDef
+from .db_helpers import optional_session
+from .models import StepDef, StepContext, WorkflowDef
 
 log = logging.getLogger(__name__)
 
@@ -180,10 +171,9 @@ class WorkflowRunner:
 
     async def _load_completed_steps(self) -> None:
         """Pre-seed _outputs for steps that are already COMPLETED in DB."""
-        session_maker = _db.async_session_maker
-        if session_maker is None:
-            return
-        async with session_maker() as session:
+        async with optional_session() as session:
+            if session is None:
+                return
             result = await session.execute(
                 select(WorkflowStep).where(
                     WorkflowStep.workflow_id == self._workflow_id,
@@ -286,11 +276,10 @@ class WorkflowRunner:
             name_enum = StepName(step_name)
         except ValueError:
             return  # step not tracked in DB (e.g. on_failure steps with custom names)
-        session_maker = _db.async_session_maker
-        if session_maker is None:
-            return
         try:
-            async with session_maker() as session:
+            async with optional_session() as session:
+                if session is None:
+                    return
                 await WorkflowService(session).start_step(self._workflow_id, name_enum)
                 await session.commit()
         except Exception as exc:
@@ -301,16 +290,11 @@ class WorkflowRunner:
             name_enum = StepName(step_name)
         except ValueError:
             return
-        session_maker = _db.async_session_maker
-        if session_maker is None:
-            return
         try:
-            async with session_maker() as session:
-                await WorkflowService(session).complete_step(
-                    self._workflow_id,
-                    name_enum,
-                    output=_as_step_output_schema(output),
-                )
+            async with optional_session() as session:
+                if session is None:
+                    return
+                await WorkflowService(session).complete_step(self._workflow_id, name_enum)
                 await session.commit()
         except Exception as exc:
             log.error("workflow %s: _db_complete_step '%s' failed: %s", self._workflow_id, step_name, exc)
@@ -320,22 +304,20 @@ class WorkflowRunner:
             name_enum = StepName(step_name)
         except ValueError:
             return
-        session_maker = _db.async_session_maker
-        if session_maker is None:
-            return
         try:
-            async with session_maker() as session:
+            async with optional_session() as session:
+                if session is None:
+                    return
                 await WorkflowService(session).fail_step(self._workflow_id, name_enum, error)
                 await session.commit()
         except Exception as exc:
             log.error("workflow %s: _db_fail_step '%s' failed: %s", self._workflow_id, step_name, exc)
 
     async def _fail_workflow(self, error: str) -> None:
-        session_maker = _db.async_session_maker
-        if session_maker is None:
-            return
         try:
-            async with session_maker() as session:
+            async with optional_session() as session:
+                if session is None:
+                    return
                 await WorkflowService(session).fail_workflow(self._workflow_id, error)
                 await session.commit()
         except Exception as exc:

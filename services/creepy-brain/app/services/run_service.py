@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.models.enums import RunStatus
 from app.models.run import Run
 from app.schemas.run import CreateRunRequest, PatchRunRequest
-from app.services.errors import ResourceNotFoundError
+from app.services.http_errors import require_found
 
 
 async def create(session: AsyncSession, req: CreateRunRequest) -> Run:
@@ -37,9 +37,7 @@ async def get(session: AsyncSession, run_id: uuid.UUID) -> Run:
         .options(selectinload(Run.chunks))
     )
     run = result.scalar_one_or_none()
-    if run is None:
-        raise ResourceNotFoundError("Run", run_id)
-    return run
+    return require_found(run, f"Run {run_id} not found")
 
 
 async def list_runs(

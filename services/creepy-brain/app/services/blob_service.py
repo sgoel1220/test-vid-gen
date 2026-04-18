@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import BlobType
 from app.models.workflow import WorkflowBlob
-from app.services.errors import ResourceNotFoundError
+from app.services.http_errors import require_found
 
 
 async def store(
@@ -50,6 +50,4 @@ async def get(session: AsyncSession, blob_id: uuid.UUID) -> WorkflowBlob:
         select(WorkflowBlob).where(WorkflowBlob.id == blob_id)
     )
     blob = result.scalar_one_or_none()
-    if blob is None:
-        raise ResourceNotFoundError("Blob", blob_id)
-    return blob
+    return require_found(blob, f"Blob {blob_id} not found")
