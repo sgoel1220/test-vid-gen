@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "static/dist",
+    "rootDir": "static/src",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+  },
+  "include": ["static/src/**/*.ts"]
+}
