@@ -10,7 +10,7 @@ async function apiFetch<T>(path: string): Promise<T> {
 /** Matches backend WorkflowResponse (list endpoint). */
 export interface Workflow {
   id: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "cancelled" | "paused";
   workflow_type: string;
   current_step: string | null;
   created_at: string;

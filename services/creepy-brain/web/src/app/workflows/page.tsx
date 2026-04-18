@@ -9,8 +9,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 const STATUS_TABS = [
   { value: "all", label: "All" },
   { value: "running", label: "Running" },
+  { value: "paused", label: "Paused" },
   { value: "completed", label: "Completed" },
   { value: "failed", label: "Failed" },
+  { value: "cancelled", label: "Cancelled" },
 ] as const;
 
 type StatusTab = (typeof STATUS_TABS)[number]["value"];

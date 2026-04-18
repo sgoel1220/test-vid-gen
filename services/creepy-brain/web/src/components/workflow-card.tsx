@@ -17,6 +17,8 @@ const STATUS_VARIANTS: Record<
   running: "default",
   completed: "secondary",
   failed: "destructive",
+  cancelled: "outline",
+  paused: "secondary",
 };
 
 function formatRelativeTime(dateStr: string): string {
