@@ -45,7 +45,7 @@ hf_cache/
 
 # Ignore editor/AI tool directories
 .opencode/
-.serena/
+# .serena cache and local config are ignored by .serena/.gitignore
 .claude/*
 !.claude/commands/
 
