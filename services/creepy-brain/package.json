@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "esbuild static/src/main.ts --bundle --outfile=static/dist/app.js --format=esm --target=es2020",
+    "watch": "esbuild static/src/main.ts --bundle --outfile=static/dist/app.js --format=esm --target=es2020 --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.0",
+    "typescript": "^6.0.3"
+  }
+}

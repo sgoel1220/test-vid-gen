@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Creepy Brain Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      line-height: 1.5;
+    }
+    a { color: #7eb8da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Layout */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      padding: 0.75rem 1.5rem;
+      background: #16213e;
+      border-bottom: 1px solid #0f3460;
+    }
+    header h1 { font-size: 1rem; font-weight: 600; white-space: nowrap; }
+    nav { display: flex; gap: 1rem; }
+    nav a {
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      color: #999;
+      font-size: 0.875rem;
+    }
+    nav a.active { color: #fff; background: #0f3460; }
+    nav a:hover { color: #fff; text-decoration: none; }
+    #app { padding: 1rem 1.5rem; max-width: 1100px; }
+
+    /* Components */
+    .toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .back-link { font-size: 0.875rem; }
+    .filter-row { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+    .filter-btn {
+      background: transparent;
+      border: 1px solid #333;
+      color: #999;
+      padding: 0.25rem 0.75rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    .filter-btn.active, .filter-btn:hover { color: #fff; border-color: #7eb8da; }
+    .btn {
+      background: #0f3460;
+      border: 1px solid #1a5276;
+      color: #e0e0e0;
+      padding: 0.3rem 0.8rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    .btn:hover { background: #1a5276; }
+    .btn-danger { background: #6b1d1d; border-color: #8b2020; }
+    .btn-danger:hover { background: #8b2020; }
+
+    /* List rows */
+    .list { display: flex; flex-direction: column; gap: 2px; }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.5rem 0.75rem;
+      background: #16213e;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      color: #e0e0e0;
+      text-decoration: none;
+    }
+    .row:hover { background: #1a2a4a; }
+    a.row:hover { text-decoration: none; }
+    .pod-row { flex-wrap: wrap; }
+
+    /* Badges */
+    .badge {
+      display: inline-block;
+      padding: 0.1rem 0.5rem;
+      border-radius: 3px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge.ok { background: #1b4332; color: #95d5b2; }
+    .badge.active { background: #3d2c00; color: #fbbf24; }
+    .badge.warn { background: #3d3200; color: #d4a017; }
+    .badge.err { background: #4a1515; color: #f87171; }
+    .badge.muted { background: #333; color: #888; }
+
+    /* Text helpers */
+    .mono { font-family: "SF Mono", "Fira Code", "Consolas", monospace; font-size: 0.8rem; }
+    .muted { color: #666; }
+    .text-err { color: #f87171; }
+    .row-id { min-width: 5.5em; }
+    .row-step { color: #aaa; }
+    .row-time { color: #888; margin-left: auto; }
+    .row-error { color: #f87171; font-size: 0.8rem; }
+    .empty { padding: 2rem; text-align: center; color: #666; }
+    .error { padding: 1rem; color: #f87171; }
+    .link { font-size: 0.8rem; }
+
+    /* Sections */
+    .section { margin-bottom: 1.5rem; }
+    .section h2 { font-size: 1.1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; }
+    .section h3 { font-size: 0.95rem; margin-bottom: 0.5rem; color: #aaa; }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 9rem 1fr;
+      gap: 0.25rem 1rem;
+      font-size: 0.85rem;
+    }
+    .meta-grid > span:nth-child(odd) { color: #888; }
+
+    /* Summary row */
+    .summary-row {
+      display: flex;
+      gap: 2rem;
+      padding: 0.75rem 1rem;
+      background: #16213e;
+      border-radius: 4px;
+      margin-bottom: 1rem;
+      font-size: 0.9rem;
+    }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th { text-align: left; padding: 0.4rem 0.5rem; color: #888; border-bottom: 1px solid #333; font-weight: 500; }
+    td { padding: 0.4rem 0.5rem; border-bottom: 1px solid #222; }
+
+    /* Code */
+    .code-block {
+      background: #111;
+      padding: 0.75rem;
+      border-radius: 4px;
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 0.8rem;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Creepy Brain</h1>
+    <nav>
+      <a href="#/workflows">Workflows</a>
+      <a href="#/gpu-pods">GPU Pods</a>
+      <a href="#/settings">Settings</a>
+    </nav>
+  </header>
+  <div id="app"></div>
+  <script type="module" src="/static/dist/app.js"></script>
+</body>
+</html>

@@ -14,12 +14,22 @@ COPY services/creepy-brain/pyproject.toml ./
 # Install Python dependencies
 RUN pip install --no-cache-dir -e .
 
+# Build dashboard frontend
+COPY services/creepy-brain/package.json services/creepy-brain/package-lock.json* ./
+COPY services/creepy-brain/static/src/ ./static/src/
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+    && npm ci --ignore-scripts \
+    && npm run build \
+    && rm -rf node_modules package.json package-lock.json static/src \
+    && apt-get purge -y nodejs npm && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy application code
 COPY services/creepy-brain/app/ ./app/
 COPY services/creepy-brain/alembic/ ./alembic/
 COPY services/creepy-brain/alembic.ini ./
 COPY services/creepy-brain/entrypoint.sh ./
-COPY services/creepy-brain/static/ ./static/
+COPY services/creepy-brain/static/dashboard.html services/creepy-brain/static/index.html services/creepy-brain/static/full_story.wav* ./static/
 
 RUN chmod +x entrypoint.sh
 
