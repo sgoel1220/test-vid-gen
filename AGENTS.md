@@ -229,7 +229,7 @@ When implementing beads (work items tracked in the `.beads/` system), **ALWAYS**
    - **ONLY pick beads with status "open"**
    - **NEVER pick beads with status "in_progress"** - another agent is working on them
 3. **Review documentation** - Get high-level understanding BEFORE implementing:
-   - Read `docs/CONTENT_PIPELINE_ORCHESTRATION.md` for architecture context
+   - Review the Architecture Overview section in this file
    - Review related documentation for the feature area
    - Understand the "why" behind the implementation
    - **ASK QUESTIONS** if anything is unclear - NEVER assume
@@ -311,7 +311,7 @@ chatterbox-tts-lite/
 │       │   ├── main.py              # FastAPI factory + lifespan
 │       │   ├── config.py            # Pydantic Settings
 │       │   ├── db.py                # SQLAlchemy async engine + session
-│       │   ├── engine/              # Custom workflow engine (NOT Hatchet)
+│       │   ├── engine/              # Custom workflow engine
 │       │   │   ├── engine.py        # WorkflowEngine: trigger, retry, pause/resume, cancel
 │       │   │   ├── runner.py        # WorkflowRunner: topo-sort steps, execute DAG
 │       │   │   ├── scheduler.py     # CronScheduler: periodic workflows (recon)
@@ -375,8 +375,6 @@ chatterbox-tts-lite/
 │       └── pyproject.toml
 │
 ├── docs/
-│   ├── CONTENT_PIPELINE_ORCHESTRATION.md  # Architecture design doc
-│   └── IMPLEMENTATION_BEADS.md
 ├── AGENTS.md                        # This file (canonical)
 ├── CLAUDE.md -> AGENTS.md
 └── README.md
@@ -386,7 +384,7 @@ chatterbox-tts-lite/
 
 ### Workflow Engine
 
-The project uses a **custom workflow engine** (NOT Hatchet — the original plan was Hatchet but a custom engine was built instead):
+The project uses a **custom workflow engine** (`app/engine/`):
 
 - `WorkflowEngine` — top-level API: trigger, retry_step, pause, resume, cancel
 - `WorkflowRunner` — executes a DAG of steps with topological ordering, persists step state to DB

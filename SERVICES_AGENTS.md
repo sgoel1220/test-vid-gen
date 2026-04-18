@@ -6,7 +6,7 @@ The canonical repo instructions live in `AGENTS.md`.
 
 - `services/tts-server` is a minimal stateless TTS pod (Chatterbox model, port 8005).
 - `services/image-server` is a minimal stateless image generation pod (SDXL Lightning, port 8006).
-- `services/creepy-brain` owns orchestration, persistence, text processing, audio validation, retry behavior, image generation orchestration, and final stitching. Uses a **custom workflow engine** (not Hatchet).
+- `services/creepy-brain` owns orchestration, persistence, text processing, audio validation, retry behavior, image generation orchestration, and final stitching. Uses a **custom workflow engine** (`app/engine/`).
 
 ## TTS Server
 
