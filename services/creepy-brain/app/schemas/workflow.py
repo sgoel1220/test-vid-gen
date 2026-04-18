@@ -62,8 +62,6 @@ class WorkflowChunkResponse(BaseModel):
     chunk_index: int
     tts_status: ChunkStatus
     tts_duration_sec: Optional[float]
-    image_status: ChunkStatus
-    image_prompt: Optional[str]
 
 
 class GpuPodResponse(BaseModel):

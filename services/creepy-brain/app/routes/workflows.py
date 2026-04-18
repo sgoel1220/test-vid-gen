@@ -14,11 +14,11 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.db import DbSession
-from app.gpu import get_provider
-from app.models.enums import GpuPodStatus, WorkflowStatus, WorkflowType
-from app.models.gpu_pod import GpuPod
+from app.engine import engine
+from app.models.enums import WorkflowStatus, WorkflowType
 from app.models.schemas import WorkflowInputSchema
 from app.models.workflow import Workflow
+from app.models.gpu_pod import GpuPod
 from app.schemas.workflow import (
     CreateWorkflowRequest,
     GpuPodResponse,
@@ -31,8 +31,6 @@ from app.schemas.workflow import (
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 log = structlog.get_logger()
 
-_ACTIVE_POD_STATUSES = [GpuPodStatus.CREATING, GpuPodStatus.RUNNING, GpuPodStatus.READY]
-
 
 # ── dev-only test endpoint ────────────────────────────────────────────────────
 
@@ -40,19 +38,20 @@ class WorkflowRunResponse(BaseModel):
     workflow_run_id: str
 
 
-@router.post("/test", response_model=WorkflowRunResponse)  # type: ignore[untyped-decorator]
+@router.post("/test", response_model=WorkflowRunResponse)
 async def trigger_test_workflow() -> WorkflowRunResponse:
-    """Trigger the test workflow to verify the Hatchet setup works end-to-end.
+    """Trigger the test workflow to verify the engine works end-to-end.
 
     Only available when DEV_MODE=true.
     """
     if not settings.dev_mode:
         raise HTTPException(status_code=404, detail="Not found")
 
-    from app.workflows.test_workflow import test_workflow
+    from app.workflows.test_workflow import EmptyModel
 
-    run_ref = await test_workflow.aio_run_no_wait()
-    return WorkflowRunResponse(workflow_run_id=run_ref.workflow_run_id)
+    workflow_id = uuid.uuid4()
+    run_id = await engine.trigger("TestWorkflow", EmptyModel(), workflow_id)
+    return WorkflowRunResponse(workflow_run_id=run_id)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -71,12 +70,8 @@ def _to_response(w: Workflow) -> WorkflowResponse:
 
 
 async def _trigger_and_create(input_data: WorkflowInputSchema, db: DbSession) -> Workflow:
-    """Trigger a ContentPipeline Hatchet run and create the DB record."""
-    # Import lazily to avoid importing hatchet at module load time.
-    from app.workflows.content_pipeline import content_pipeline  # noqa: PLC0415
-
-    run_ref = await content_pipeline.aio_run_no_wait(input_data)
-    workflow_id = uuid.UUID(run_ref.workflow_run_id)
+    """Create the DB record and trigger a ContentPipeline run via the engine."""
+    workflow_id = uuid.uuid4()
 
     workflow = Workflow(
         id=workflow_id,
@@ -89,20 +84,29 @@ async def _trigger_and_create(input_data: WorkflowInputSchema, db: DbSession) ->
     try:
         await db.commit()
     except Exception:
-        # Hatchet run is already started but DB persistence failed.
-        # Log the orphan run ID so operators can identify and cancel it manually.
         log.exception(
-            "Failed to persist Workflow record after Hatchet run started — orphan run",
-            hatchet_run_id=str(workflow_id),
+            "Failed to persist Workflow record — aborting trigger",
+            workflow_id=str(workflow_id),
         )
         raise
+
+    try:
+        await engine.trigger("ContentPipeline", input_data, workflow_id)
+    except Exception:
+        # DB record committed but engine trigger failed — mark FAILED so it isn't stuck.
+        workflow.status = WorkflowStatus.FAILED
+        workflow.completed_at = datetime.now(timezone.utc)
+        await db.commit()
+        log.exception("engine.trigger failed for workflow", workflow_id=str(workflow_id))
+        raise
+
     await db.refresh(workflow)
     return workflow
 
 
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
-@router.post("", response_model=WorkflowResponse, status_code=201)  # type: ignore[untyped-decorator]
+@router.post("", response_model=WorkflowResponse, status_code=201)
 async def create_workflow(request: CreateWorkflowRequest, db: DbSession) -> WorkflowResponse:
     """Trigger a new ContentPipeline workflow run."""
     input_data = WorkflowInputSchema(
@@ -117,7 +121,7 @@ async def create_workflow(request: CreateWorkflowRequest, db: DbSession) -> Work
     return _to_response(workflow)
 
 
-@router.get("", response_model=list[WorkflowResponse])  # type: ignore[untyped-decorator]
+@router.get("", response_model=list[WorkflowResponse])
 async def list_workflows(
     db: DbSession,
     status: Optional[WorkflowStatus] = None,
@@ -131,7 +135,7 @@ async def list_workflows(
     return [_to_response(w) for w in result.scalars().all()]
 
 
-@router.get("/{workflow_id}", response_model=WorkflowDetailResponse)  # type: ignore[untyped-decorator]
+@router.get("/{workflow_id}", response_model=WorkflowDetailResponse)
 async def get_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowDetailResponse:
     """Get detailed workflow status: steps, chunks, and GPU pods."""
     result = await db.execute(
@@ -175,8 +179,6 @@ async def get_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowDetailR
                 chunk_index=c.chunk_index,
                 tts_status=c.tts_status,
                 tts_duration_sec=c.tts_duration_sec,
-                image_status=c.image_status,
-                image_prompt=c.image_prompt,
             )
             for c in sorted(workflow.chunks, key=lambda c: c.chunk_index)
         ],
@@ -195,13 +197,12 @@ async def get_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowDetailR
     )
 
 
-@router.post("/{workflow_id}/retry", response_model=WorkflowResponse, status_code=201)  # type: ignore[untyped-decorator]
+@router.post("/{workflow_id}/retry", response_model=WorkflowResponse, status_code=201)
 async def retry_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowResponse:
-    """Retry a failed workflow with the same input (creates a new Hatchet run).
+    """Retry a failed workflow with the same input (creates a new engine run).
 
-    Hatchet tasks have built-in retries (e.g. tts_synthesis retries=2),
-    so transient failures are handled automatically. This endpoint is for
-    manually retrying after all automatic retries are exhausted.
+    The engine handles built-in retries for transient step failures. This
+    endpoint is for manually retrying after all automatic retries are exhausted.
     """
     result = await db.execute(select(Workflow).where(Workflow.id == workflow_id))
     workflow = result.scalar_one_or_none()
@@ -217,7 +218,7 @@ async def retry_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowRespo
     return _to_response(new_workflow)
 
 
-@router.delete("/{workflow_id}", status_code=204)  # type: ignore[untyped-decorator]
+@router.delete("/{workflow_id}", status_code=204)
 async def cancel_workflow(workflow_id: uuid.UUID, db: DbSession) -> None:
     """Cancel a running workflow and terminate any active GPU pods."""
     result = await db.execute(select(Workflow).where(Workflow.id == workflow_id))
@@ -230,18 +231,5 @@ async def cancel_workflow(workflow_id: uuid.UUID, db: DbSession) -> None:
             detail=f"Cannot cancel workflow in status: {workflow.status}",
         )
 
-    pods_result = await db.execute(
-        select(GpuPod).where(
-            GpuPod.workflow_id == workflow_id,
-            GpuPod.status.in_(_ACTIVE_POD_STATUSES),
-        )
-    )
-    active_pods = pods_result.scalars().all()
-    if active_pods and settings.runpod_api_key:
-        provider = get_provider(settings.runpod_api_key)
-        for pod in active_pods:
-            await provider.terminate_pod(pod.id)
-
-    workflow.status = WorkflowStatus.CANCELLED
-    workflow.completed_at = datetime.now(timezone.utc)
-    await db.commit()
+    # Delegate cancellation (stops task, terminates GPU pods, marks CANCELLED in DB).
+    await engine.cancel(str(workflow_id))

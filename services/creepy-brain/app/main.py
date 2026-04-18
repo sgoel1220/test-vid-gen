@@ -1,6 +1,5 @@
 """FastAPI application factory for Creepy Brain service"""
 
-import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -15,6 +14,7 @@ import app.metrics as _metrics  # noqa: F401 — registers all metric objects
 
 from app.config import settings
 from app.db import close_db, init_db
+from app.engine import CronScheduler, engine
 from app.logging import configure_logging
 from app.middleware import RequestContextMiddleware
 from app.routes import blobs, health, runs, voices, workflows
@@ -31,17 +31,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await init_db()
     logger.info("database_initialized", database_url=settings.database_url.split('@')[1])
 
-    # Interim task registry — replaced by Hatchet in bead Chatterbox-TTS-Server-104
-    app.state.background_tasks: set[asyncio.Task[None]] = set()  # type: ignore[misc]
+    # Import workflow modules to register definitions with the engine singleton.
+    import app.workflows as _workflows  # noqa: F401
 
-    # Semaphore to cap concurrent story generation runs
-    app.state.generation_semaphore = asyncio.Semaphore(settings.max_concurrent_generations)
+    # Start cron scheduler for periodic workflows (recon every 5 min).
+    from app.workflows.recon import EmptyModel, RECON_CRON
 
-    # Hatchet worker runs as a separate process (see app/workflows/worker.py)
+    scheduler = CronScheduler(engine)
+    scheduler.add(RECON_CRON, "ReconOrphanedPods", EmptyModel)
+    await scheduler.start()
+
+    # Start workflow engine.
+    logger.info("workflow_engine_started")
 
     yield
 
-    # Cleanup on shutdown
+    # Shutdown: stop engine (cancels running workflows) and scheduler.
+    await engine.stop()
+    await scheduler.stop()
+    logger.info("workflow_engine_stopped")
+
+    # Cleanup DB connection pool.
     await close_db()
     logger.info("shutdown", service="creepy-brain")
 
