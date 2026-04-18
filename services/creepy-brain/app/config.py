@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     image_width: int = 1280
     image_height: int = 720
 
+    # Cost tracking settings
+    daily_cost_alert_threshold_cents: int = 1000  # $10
+    workflow_cost_limit_cents: int = 500  # $5
+
     # LLM settings
     llm_provider: Literal["anthropic", "openrouter"] = "openrouter"
     anthropic_api_key: str = ""

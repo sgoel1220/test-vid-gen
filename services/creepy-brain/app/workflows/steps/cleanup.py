@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Optional
 
 from hatchet_sdk import Context
@@ -17,6 +16,7 @@ from app.gpu import get_provider
 from app.models.enums import GpuPodStatus
 from app.models.gpu_pod import GpuPod
 from app.models.schemas import WorkflowInputSchema
+from app.services.cost_service import CostService
 from app.services.workflow_service import get_optional_workflow_id
 
 log = logging.getLogger(__name__)
@@ -84,17 +84,14 @@ async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]
             log.info(
                 "cleanup_gpu_pod: terminated pod %s workflow=%s", pod_id, workflow_id
             )
-            # Record confirmed termination in the database.
+            # Finalize cost and record termination in the database.
             async with session_maker() as session:
-                db_result = await session.execute(
-                    select(GpuPod).where(GpuPod.id == pod_id)
+                total_cost = await CostService(session).finalize_cost(
+                    pod_id, reason="workflow_failure"
                 )
-                db_pod = db_result.scalar_one_or_none()
-                if db_pod is not None:
-                    db_pod.status = GpuPodStatus.TERMINATED
-                    db_pod.terminated_at = datetime.now(timezone.utc)
-                    db_pod.termination_reason = "workflow_failure"
-                    await session.commit()
+            log.info(
+                "cleanup_gpu_pod: pod %s cost_cents=%d", pod_id, total_cost
+            )
         else:
             # Provider returned False — pod may still be running; leave DB row active
             # so the recon cron job (bead lm4) can detect and terminate it.
