@@ -315,10 +315,13 @@ chatterbox-tts-lite/
 │       │   │   ├── engine.py        # WorkflowEngine: trigger, retry, pause/resume, cancel
 │       │   │   ├── runner.py        # WorkflowRunner: topo-sort steps, execute DAG
 │       │   │   ├── scheduler.py     # CronScheduler: periodic workflows (recon)
-│       │   │   └── models.py        # StepDef, WorkflowDef, StepContext
+│       │   │   ├── models.py        # StepDef, WorkflowDef, StepContext
+│       │   │   └── db_helpers.py    # DB utility functions for engine
 │       │   ├── workflows/           # Workflow definitions + step implementations
 │       │   │   ├── content_pipeline.py  # Main pipeline: story → TTS → image → stitch → cleanup
 │       │   │   ├── recon.py         # Orphaned GPU pod cleanup (cron)
+│       │   │   ├── db_helpers.py    # DB utility functions for workflows
+│       │   │   ├── test_workflow.py # Test/dev workflow
 │       │   │   ├── steps/
 │       │   │   │   ├── story.py     # LLM story generation step
 │       │   │   │   ├── tts.py       # Per-chunk TTS synthesis + retry
@@ -350,21 +353,39 @@ chatterbox-tts-lite/
 │       │   │   ├── runpod.py        # RunPod implementation
 │       │   │   └── lifecycle.py     # DB-tracked pod create/wait/terminate
 │       │   ├── models/              # SQLAlchemy ORM models
+│       │   │   ├── base.py          # Base model, mixins
 │       │   │   ├── enums.py         # WorkflowStatus, StepStatus, ChunkStatus, etc.
 │       │   │   ├── workflow.py      # Workflow, WorkflowStep, WorkflowChunk
 │       │   │   ├── story.py         # Story, StoryAct
 │       │   │   ├── run.py           # Run, RunChunk
 │       │   │   ├── voice.py         # Voice
 │       │   │   ├── gpu_pod.py       # GpuPod
-│       │   │   └── json_types.py    # JSON column type helpers
+│       │   │   ├── json_types.py    # JSON column type helpers
+│       │   │   └── json_schemas.py  # JSON schema definitions
 │       │   ├── schemas/             # Pydantic request/response models
-│       │   │   ├── workflow.py, story.py, run.py, voice.py, blob.py, common.py
+│       │   │   ├── workflow.py      # Workflow API schemas
+│       │   │   ├── story.py         # Story API schemas
+│       │   │   ├── run.py           # Run API schemas
+│       │   │   ├── voice.py         # Voice API schemas
+│       │   │   ├── blob.py          # Blob API schemas
+│       │   │   └── common.py        # Shared schemas
 │       │   ├── routes/              # FastAPI route handlers
-│       │   │   ├── workflows.py, stories.py, runs.py, voices.py, blobs.py, costs.py, health.py
+│       │   │   ├── workflows.py     # /api/workflows/*
+│       │   │   ├── stories.py       # /api/stories/*
+│       │   │   ├── runs.py          # /api/runs/*
+│       │   │   ├── voices.py        # /api/voices/*
+│       │   │   ├── blobs.py         # /api/blobs/*
+│       │   │   ├── costs.py         # /api/costs/*
+│       │   │   └── health.py        # /health, /metrics
 │       │   ├── services/            # Business logic layer
-│       │   │   ├── workflow_service.py, story_service.py, run_service.py
-│       │   │   ├── blob_service.py, voice_service.py, cost_service.py
-│       │   │   └── errors.py, http_errors.py
+│       │   │   ├── workflow_service.py
+│       │   │   ├── story_service.py
+│       │   │   ├── run_service.py
+│       │   │   ├── blob_service.py
+│       │   │   ├── voice_service.py
+│       │   │   ├── cost_service.py
+│       │   │   ├── errors.py        # Domain error types
+│       │   │   └── http_errors.py   # HTTP error handlers
 │       │   ├── logging.py           # Structured logging (structlog)
 │       │   ├── metrics.py           # Prometheus metrics
 │       │   ├── middleware.py         # Request middleware
@@ -374,7 +395,6 @@ chatterbox-tts-lite/
 │       ├── Dockerfile
 │       └── pyproject.toml
 │
-├── docs/
 ├── AGENTS.md                        # This file (canonical)
 ├── CLAUDE.md -> AGENTS.md
 └── README.md
@@ -422,8 +442,8 @@ Steps executed in order:
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/health` | Health check |
-| GET | `/ready` | Readiness check (model loaded?) |
-| POST | `/generate` | `{prompt, width, height}` → PNG bytes |
+| GET | `/ready` | Readiness check (200 if loaded, 503 if loading) |
+| POST | `/generate` | `{prompt, width, height}` → PNG bytes. Optional: `negative_prompt`, `steps`, `guidance_scale`, `seed` |
 
 ## creepy-brain Key Modules
 
@@ -471,7 +491,7 @@ cd services/creepy-brain && python3 -m mypy app/ --strict
 
 ## Deploy on RunPod
 
-**NEVER build Docker images locally.** Push to GitHub — GitHub Actions builds and pushes images on push to `main` or tags.
+**NEVER build Docker images locally.** Push to GitHub — GitHub Actions builds and pushes images on push to `main`, `docker-release`, tags, and PRs.
 
 ### Images
 GitHub Container Registry images (built by CI):

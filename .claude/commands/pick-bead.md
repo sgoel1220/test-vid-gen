@@ -34,7 +34,7 @@ mcp__beads__claim(issue_id="<id>")
 ## Step 3 — Review context
 
 1. Call `mcp__beads__show(issue_id="<id>")` for full details.
-2. Read any referenced docs (e.g. `docs/CONTENT_PIPELINE_ORCHESTRATION.md`).
+2. Review the Architecture Overview section in `AGENTS.md`.
 3. If anything is unclear or ambiguous, **STOP and ask the user** before writing code.
 
 ---
