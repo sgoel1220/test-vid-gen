@@ -7,54 +7,22 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.models.enums import StoryStatus
 from app.models.story import Story
-from app.services.story_service import StoryService
+from app.schemas.story import (
+    ActResponse,
+    GenerateStoryRequest,
+    GenerateStoryResponse,
+    StoryListItem,
+    StoryResponse,
+)
+from app.services import story_service
 
 log = structlog.get_logger()
 
 router = APIRouter(prefix="/api/stories", tags=["stories"])
-
-
-# ---------------------------------------------------------------------------
-# Request / Response schemas
-# ---------------------------------------------------------------------------
-
-
-class GenerateStoryRequest(BaseModel):
-    premise: str = Field(..., min_length=10, description="Story premise or idea")
-
-
-class GenerateStoryResponse(BaseModel):
-    story_id: uuid.UUID
-    status: StoryStatus
-
-
-class ActResponse(BaseModel):
-    act_number: int
-    title: str | None
-    word_count: int | None
-
-
-class StoryResponse(BaseModel):
-    id: uuid.UUID
-    title: str | None
-    premise: str
-    status: StoryStatus
-    word_count: int | None
-    acts: list[ActResponse]
-
-
-class StoryListItem(BaseModel):
-    id: uuid.UUID
-    title: str | None
-    premise: str
-    status: StoryStatus
-    word_count: int | None
 
 
 # ---------------------------------------------------------------------------
@@ -97,8 +65,7 @@ async def generate_story(
     """
     from app.pipeline import orchestrator
 
-    svc = StoryService(session)
-    story = await svc.create(body.premise)
+    story = await story_service.create(session, body.premise)
     await session.commit()  # route owns the transaction boundary
 
     semaphore: asyncio.Semaphore = request.app.state.generation_semaphore
@@ -118,7 +85,7 @@ async def generate_story(
             if async_session_maker is not None:
                 try:
                     async with async_session_maker() as fail_session:
-                        await StoryService(fail_session).fail_story(story.id)
+                        await story_service.fail_story(fail_session, story.id)
                         await fail_session.commit()
                 except Exception:
                     log.exception("pipeline_fail_status_update_failed", story_id=str(story.id))
@@ -139,8 +106,7 @@ async def get_story(
     session: AsyncSession = Depends(get_session),
 ) -> StoryResponse:
     """Get story detail including acts."""
-    svc = StoryService(session)
-    story = await svc.get(story_id)
+    story = await story_service.get(session, story_id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
     return _story_to_response(story)
@@ -153,8 +119,7 @@ async def list_stories(
     session: AsyncSession = Depends(get_session),
 ) -> list[StoryListItem]:
     """List stories ordered by creation time descending."""
-    svc = StoryService(session)
-    stories = await svc.list_stories(limit=limit, offset=offset)
+    stories = await story_service.list_stories(session, limit=limit, offset=offset)
     return [
         StoryListItem(
             id=s.id,

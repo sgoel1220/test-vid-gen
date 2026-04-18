@@ -12,7 +12,7 @@ import app.db as _db  # module ref — always reads the live async_session_maker
 from app.models.enums import StoryStatus
 from app.models.schemas import GenerateStoryStepOutput, WorkflowInputSchema
 from app.pipeline import orchestrator
-from app.services.story_service import StoryService
+from app.services import story_service
 
 log = logging.getLogger(__name__)
 
@@ -63,8 +63,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> GenerateStory
         log.warning("story step: could not parse workflow_run_id=%r as UUID", ctx.workflow_run_id)
 
     async with session_maker() as session:
-        svc = StoryService(session)
-        story = await svc.create(premise=premise, workflow_id=workflow_uuid)
+        story = await story_service.create(session, premise=premise, workflow_id=workflow_uuid)
         await session.commit()
         story_id: uuid.UUID = story.id
 
@@ -82,8 +81,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> GenerateStory
     # Require COMPLETED -- any other terminal state (FAILED, PENDING, etc.)
     # means the pipeline did not finish successfully.
     async with session_maker() as session:
-        svc = StoryService(session)
-        completed_story = await svc.get(story_id)
+        completed_story = await story_service.get(session, story_id)
 
     if completed_story is None:
         raise RuntimeError(f"Story {story_id} not found after pipeline run")

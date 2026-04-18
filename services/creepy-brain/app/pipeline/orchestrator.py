@@ -20,7 +20,7 @@ from app.llm.prompts import (
 from app.models.enums import StoryStatus
 from app.pipeline import architect, reviewer, writer
 from app.pipeline.models import ActDraft, ArchitectOutput
-from app.services.story_service import StoryService
+from app.services import story_service
 
 log = logging.getLogger(__name__)
 
@@ -39,10 +39,8 @@ async def run_pipeline(
     Persists progress to Postgres at each stage. Catches all exceptions
     and marks the story as failed if anything goes wrong.
     """
-    svc = StoryService(session)
-
     try:
-        await svc.update_status(story_id, StoryStatus.GENERATING)
+        await story_service.update_status(session, story_id, StoryStatus.GENERATING)
         await session.commit()
 
         # ── Step 1: Architect ────────────────────────────────────────
@@ -50,7 +48,7 @@ async def run_pipeline(
         bible = arch_output.bible
         outline = arch_output.outline
 
-        await svc.update_bible_and_outline(story_id, bible=bible, outline=outline)
+        await story_service.update_bible_and_outline(session, story_id, bible=bible, outline=outline)
         await session.commit()
 
         # ── Step 2: Outline review (max 2 loops) ────────────────────
@@ -74,7 +72,7 @@ async def run_pipeline(
             bible = fix_result.bible
             outline = fix_result.outline
 
-            await svc.update_bible_and_outline(story_id, bible=bible, outline=outline)
+            await story_service.update_bible_and_outline(session, story_id, bible=bible, outline=outline)
             await session.commit()
 
         # ── Step 3: Write acts + inline checks ──────────────────────
@@ -92,7 +90,8 @@ async def run_pipeline(
 
             acts.append(draft)
 
-            await svc.upsert_act(
+            await story_service.upsert_act(
+                session,
                 story_id,
                 act_number=draft.act_number,
                 title=draft.title,
@@ -102,7 +101,7 @@ async def run_pipeline(
             await session.commit()
 
         # ── Step 4: Full story review loop ───────────────────────────
-        await svc.update_status(story_id, StoryStatus.REVIEWING)
+        await story_service.update_status(session, story_id, StoryStatus.REVIEWING)
         await session.commit()
 
         for review_loop in range(MAX_REVIEW_LOOPS):
@@ -150,7 +149,8 @@ async def run_pipeline(
                     text=new_text,
                     word_count=len(new_text.split()),
                 )
-                await svc.upsert_act(
+                await story_service.upsert_act(
+                    session,
                     story_id,
                     act_number=fix.act_number,
                     title=act_outline.title,
@@ -162,14 +162,14 @@ async def run_pipeline(
         # ── Done ─────────────────────────────────────────────────────
         total_words = sum(a.word_count for a in acts)
         full_text = "\n\n".join(a.text for a in acts)
-        await svc.complete_story(story_id, full_text=full_text, word_count=total_words)
+        await story_service.complete_story(session, story_id, full_text=full_text, word_count=total_words)
         await session.commit()
         log.info("pipeline complete for story %s", story_id)
 
     except Exception:
         log.exception("pipeline failed for story %s", story_id)
         try:
-            await svc.fail_story(story_id)
+            await story_service.fail_story(session, story_id)
             await session.commit()
         except Exception:
             log.exception("failed to mark story %s as failed", story_id)

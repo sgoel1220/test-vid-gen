@@ -43,7 +43,7 @@ from app.gpu.lifecycle import terminate_and_finalize
 from app.models.enums import BlobType, GpuProvider as GpuProviderEnum
 from app.models.schemas import GenerateStoryStepOutput, WorkflowInputSchema
 from app.services import blob_service
-from app.services.story_service import StoryService
+from app.services import story_service as _story_service
 from app.services.cost_service import CostService
 from app.services.workflow_service import WorkflowService, get_optional_workflow_id
 from app.text.chunking import chunk_text_by_sentences
@@ -129,7 +129,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
         "DB not initialized — call init_db() before starting"
     )
     async with _session_maker() as _session:
-        _story = await StoryService(_session).get(story_id_for_text)
+        _story = await _story_service.get(_session, story_id_for_text)
 
     if _story is None:
         raise ValueError(f"Story {story_id_for_text} not found in database")
