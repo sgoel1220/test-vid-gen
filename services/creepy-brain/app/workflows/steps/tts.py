@@ -32,8 +32,9 @@ import uuid
 from typing import Any
 
 import httpx
-from hatchet_sdk import Context
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.engine import StepContext
 
 import app.db as _db
 from app.audio.validation import validate_chunk_audio
@@ -83,7 +84,7 @@ class TtsStepOutput(BaseModel):
     chunks: list[TtsChunkResult] = Field(description="Per-chunk results")
 
 
-async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]:
+async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, object]:
     """Synthesize audio for the story via a TTS GPU pod.
 
     Args:
@@ -94,12 +95,9 @@ async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]
         dict with keys: pod_id, chunk_count, total_duration_sec, chunks
     """
     # --- 1. Get story_id from parent step output, then fetch full_text from DB ---
-    # ctx._data.parents is a dict[str, Any] keyed by task name; accessing it
-    # directly avoids a circular import with content_pipeline.py.
     # full_text is intentionally NOT serialized into the step output to avoid
-    # passing large text through Hatchet; we read it directly from Postgres.
-    parents: dict[str, Any] = ctx._data.parents
-    story_output: dict[str, Any] = parents.get("generate_story", {})
+    # passing large text through the engine; we read it directly from Postgres.
+    story_output: dict[str, Any] = ctx.parent_outputs.get("generate_story", {})
     story_id_raw: uuid.UUID | str | None = story_output.get("story_id")
 
     if not story_id_raw:

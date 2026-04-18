@@ -6,8 +6,9 @@ import logging
 import uuid
 from typing import Optional
 
-from hatchet_sdk import Context
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.engine import StepContext
 from sqlalchemy import select
 
 from app.config import settings
@@ -51,7 +52,7 @@ class SkippedStepOutput(BaseModel):
     reason: str
 
 
-async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]:
+async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, object]:
     """Terminate active GPU pods when the ContentPipeline workflow fails.
 
     This is registered as the ``on_failure`` hook for ContentPipeline, so Hatchet

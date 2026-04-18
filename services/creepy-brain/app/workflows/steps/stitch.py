@@ -16,8 +16,9 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 import structlog
-from hatchet_sdk import Context
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.engine import StepContext
 
 import app.db as _db  # module ref — always reads the live async_session_maker value
 from app.audio.encoding import encode_wav_to_mp3
@@ -46,7 +47,7 @@ class StitchStepOutput(BaseModel):
     total_duration_sec: float = Field(ge=0, description="Total audio duration in seconds")
 
 
-async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]:
+async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, object]:
     """Stitch audio chunks and optionally create video with images.
 
     Args:
@@ -74,8 +75,7 @@ async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]
     log.info("stitch_final started workflow_id=%s", workflow_run_id)
 
     # Get parent step outputs
-    parents: dict[str, Any] = ctx._data.parents
-    image_output: dict[str, Any] = parents.get("image_generation", {})
+    image_output: dict[str, Any] = ctx.parent_outputs.get("image_generation", {})
 
     # --- 1. Fetch WAV chunk blobs from DB ---
     session_maker = _db.async_session_maker

@@ -1,6 +1,6 @@
-"""Recon cron workflow: find and terminate orphaned GPU pods.
+"""Recon workflow: find and terminate orphaned GPU pods.
 
-Runs every 5 minutes via Hatchet cron trigger. A pod is orphaned if:
+Runs every 5 minutes via CronScheduler. A pod is orphaned if:
 1. Running > 2 hours (hard limit regardless of workflow status)
 2. Associated workflow is completed/failed/cancelled
 3. Running > 30 minutes with no associated workflow
@@ -11,19 +11,17 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-from hatchet_sdk import Context
-from hatchet_sdk.runnables.types import EmptyModel
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.db as _db
 from app.config import settings
+from app.engine import StepContext, StepDef, WorkflowDef, engine
 from app.gpu import GpuProvider, get_provider
 from app.models.enums import GpuPodStatus, WorkflowStatus
 from app.models.gpu_pod import GpuPod
 from app.models.workflow import Workflow
-
-from . import WORKFLOWS, hatchet
 
 log = logging.getLogger(__name__)
 
@@ -31,16 +29,17 @@ _HARD_LIMIT = timedelta(hours=2)
 _NO_WORKFLOW_LIMIT = timedelta(minutes=30)
 _TERMINAL_STATUSES = {WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED}
 
-recon_workflow = hatchet.workflow(
-    name="ReconOrphanedPods",
-    on_crons=["*/5 * * * *"],
-)
+# Cron expression for the scheduler (*/5 * * * * = every 5 minutes)
+RECON_CRON = "*/5 * * * *"
 
 
-@recon_workflow.task(
-    execution_timeout=timedelta(minutes=2),
-)
-async def recon_orphaned_pods(input: EmptyModel, ctx: Context) -> dict[str, object]:
+class EmptyModel(BaseModel):
+    pass
+
+
+async def _recon_orphaned_pods(
+    input: EmptyModel, ctx: StepContext
+) -> dict[str, object]:
     """Find and terminate orphaned GPU pods.
 
     Two-phase sweep:
@@ -86,7 +85,6 @@ async def recon_orphaned_pods(input: EmptyModel, ctx: Context) -> dict[str, obje
         terminated += await _terminate_pod(provider, pod.id, reason, now, session_maker)
 
     # ── Phase 2: Provider sweep ─────────────────────────────────────────
-    # List all live pods from RunPod and check for any we don't track.
     try:
         live_pods = await provider.list_active_pods()
     except Exception:
@@ -96,10 +94,8 @@ async def recon_orphaned_pods(input: EmptyModel, ctx: Context) -> dict[str, obje
     untracked = 0
     for live_pod in live_pods:
         if live_pod.id in db_pod_ids:
-            continue  # Already checked in phase 1
+            continue
 
-        # Pod exists in provider but not tracked as active in our DB.
-        # Check if it has a DB row at all (could be marked terminated already).
         async with session_maker() as session:
             db_result = await session.execute(
                 select(GpuPod).where(GpuPod.id == live_pod.id)
@@ -107,20 +103,17 @@ async def recon_orphaned_pods(input: EmptyModel, ctx: Context) -> dict[str, obje
             db_pod = db_result.scalar_one_or_none()
 
         if db_pod is not None and db_pod.status in (GpuPodStatus.TERMINATED, GpuPodStatus.ERROR):
-            # DB says terminated but still running in provider — kill it
             reason = "provider_still_running_after_db_terminated"
         elif db_pod is None:
-            # Completely untracked pod — not in our DB at all
             age_min = (
                 (now - live_pod.created_at).total_seconds() / 60
                 if live_pod.created_at is not None
                 else float("inf")
             )
             if age_min < 10:
-                continue  # Give brand-new pods time to register
+                continue
             reason = f"untracked_pod (age={age_min:.0f}m)"
         else:
-            # DB row exists and is active — was already handled in phase 1
             continue
 
         untracked += 1
@@ -137,7 +130,6 @@ async def recon_orphaned_pods(input: EmptyModel, ctx: Context) -> dict[str, obje
         "provider_untracked": untracked,
         "terminated": terminated,
     }
-
 
 
 async def _terminate_pod(
@@ -172,12 +164,10 @@ async def _terminate_pod(
 def _check_orphaned(pod: GpuPod, now: datetime) -> str | None:
     """Return a reason string if the pod is orphaned, else None."""
     age = now - pod.created_at
-    # Rule 1: Hard limit — 2 hours
     if age > _HARD_LIMIT:
         hours = age.total_seconds() / 3600
         return f"hard_limit_exceeded (age={hours:.1f}h)"
 
-    # Rule 3: No workflow and running > 30 min
     if pod.workflow_id is None and age > _NO_WORKFLOW_LIMIT:
         minutes = age.total_seconds() / 60
         return f"no_workflow (age={minutes:.0f}m)"
@@ -195,4 +185,19 @@ async def _ensure_db() -> None:
             await _db.init_db()
 
 
-WORKFLOWS.append(recon_workflow)
+# ---------------------------------------------------------------------------
+# Workflow definition
+# ---------------------------------------------------------------------------
+
+recon_workflow_def = WorkflowDef(
+    name="ReconOrphanedPods",
+    steps=[
+        StepDef(
+            name="recon_orphaned_pods",
+            fn=_recon_orphaned_pods,
+            timeout_sec=120,
+        ),
+    ],
+)
+
+engine.register(recon_workflow_def)

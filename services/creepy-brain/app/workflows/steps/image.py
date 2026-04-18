@@ -28,8 +28,9 @@ import logging
 import uuid
 
 import httpx
-from hatchet_sdk import Context
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.engine import StepContext
 
 import app.db as _db
 from app.config import settings
@@ -149,7 +150,7 @@ def _scene_from_db(db_scene: WorkflowScene, chunk_indices: list[int]) -> SceneIm
 
 
 async def execute(
-    input: WorkflowInputSchema, ctx: Context
+    input: WorkflowInputSchema, ctx: StepContext
 ) -> dict[str, object]:
     """Generate images for each scene using an image GPU pod.
 

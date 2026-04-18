@@ -6,7 +6,7 @@ import asyncio
 import logging
 import uuid
 
-from hatchet_sdk import Context
+from app.engine import StepContext
 
 import app.db as _db  # module ref — always reads the live async_session_maker value
 from app.models.enums import StoryStatus
@@ -33,7 +33,7 @@ async def _ensure_db() -> None:
             await _db.init_db()
 
 
-async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]:
+async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, object]:
     """Generate a story from the workflow premise using the LLM pipeline.
 
     1. Ensures the database is initialised (safe to call from the worker process).

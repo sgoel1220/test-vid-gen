@@ -1,31 +1,37 @@
-"""Simple two-step test workflow for verifying the Hatchet setup works end-to-end."""
+"""Simple two-step test workflow for verifying the engine works end-to-end."""
 
 import asyncio
-from datetime import timedelta
 
-from hatchet_sdk import Context, EmptyModel
+from pydantic import BaseModel
 
-from . import hatchet, WORKFLOWS
-
-test_workflow = hatchet.workflow(name="TestWorkflow")
+from app.engine import StepContext, StepDef, WorkflowDef, engine
 
 
-@test_workflow.task(execution_timeout=timedelta(minutes=1))  # type: ignore[untyped-decorator]  # hatchet_sdk has no type stubs
-async def step_one(input: EmptyModel, ctx: Context) -> dict[str, object]:
+class EmptyModel(BaseModel):
+    pass
+
+
+async def _step_one(input: EmptyModel, ctx: StepContext) -> dict[str, object]:
     """First step — simulates work and returns a value."""
     await asyncio.sleep(2)
     return {"message": "Step one complete", "value": 42}
 
 
-@test_workflow.task(execution_timeout=timedelta(minutes=1), parents=[step_one])  # type: ignore[untyped-decorator]  # hatchet_sdk has no type stubs
-async def step_two(input: EmptyModel, ctx: Context) -> dict[str, object]:
+async def _step_two(input: EmptyModel, ctx: StepContext) -> dict[str, object]:
     """Second step — reads step_one output and doubles the value."""
-    result: dict[str, object] = ctx.task_output(step_one)
-    raw_value = result["value"]
+    result = ctx.parent_outputs.get("step_one", {})
+    raw_value = result.get("value")
     assert isinstance(raw_value, int)
     value: int = raw_value
     return {"message": f"Step two complete, doubled: {value * 2}"}
 
 
-# Register this workflow with the worker
-WORKFLOWS.append(test_workflow)
+test_workflow_def = WorkflowDef(
+    name="TestWorkflow",
+    steps=[
+        StepDef(name="step_one", fn=_step_one, timeout_sec=60),
+        StepDef(name="step_two", fn=_step_two, parents=["step_one"], timeout_sec=60),
+    ],
+)
+
+engine.register(test_workflow_def)
