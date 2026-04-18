@@ -98,19 +98,24 @@ def _split_into_sentences(text: str) -> list[str]:
     return [s for s in result if s]
 
 
-def _segment_text(full_text: str) -> list[tuple[str | None, str]]:
+def _segment_text(full_text: str) -> list[str]:
+    """Split full_text into ordered segments preserving non-verbal cues.
+
+    Non-verbal cues (e.g. ``(laughs)``) are kept as single segments;
+    the surrounding prose is split by sentence boundaries.
+    """
     if not full_text or full_text.isspace():
         return []
-    segments: list[tuple[str | None, str]] = []
+    segments: list[str] = []
     for part in _NON_VERBAL_CUE.split(full_text):
         if not part or part.isspace():
             continue
         if _NON_VERBAL_CUE.fullmatch(part):
-            segments.append((None, part.strip()))
+            segments.append(part.strip())
         else:
-            segments.extend((None, s) for s in _split_into_sentences(part.strip()) if s)
+            segments.extend(s for s in _split_into_sentences(part.strip()) if s)
     if not segments and full_text.strip():
-        segments.append((None, full_text.strip()))
+        segments.append(full_text.strip())
     return segments
 
 
@@ -137,7 +142,7 @@ def chunk_text_by_sentences(full_text: str, chunk_size: int = 1000) -> list[str]
     current: list[str] = []
     cur_len = 0
 
-    for _, seg in segments:
+    for seg in segments:
         seg_len = len(seg)
         if not current:
             current.append(seg)
