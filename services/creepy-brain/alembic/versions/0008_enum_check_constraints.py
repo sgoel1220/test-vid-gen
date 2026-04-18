@@ -48,7 +48,7 @@ _ENUM_CHECKS: list[tuple[str, str, str, list[str]]] = [
         "workflows",
         "ck_workflows_status",
         "status",
-        ["pending", "running", "completed", "failed", "cancelled"],
+        ["pending", "running", "completed", "failed", "cancelled", "paused"],
     ),
     (
         "workflows",
@@ -60,7 +60,7 @@ _ENUM_CHECKS: list[tuple[str, str, str, list[str]]] = [
         "workflows",
         "ck_workflows_current_step",
         "current_step",
-        ["generate_story", "tts_synthesis", "image_generation", "stitch_final"],
+        ["generate_story", "tts_synthesis", "image_generation", "stitch_final", "cleanup_gpu_pod"],
     ),
     # workflow_steps
     (
@@ -73,7 +73,7 @@ _ENUM_CHECKS: list[tuple[str, str, str, list[str]]] = [
         "workflow_steps",
         "ck_workflow_steps_step_name",
         "step_name",
-        ["generate_story", "tts_synthesis", "image_generation", "stitch_final"],
+        ["generate_story", "tts_synthesis", "image_generation", "stitch_final", "cleanup_gpu_pod"],
     ),
     # workflow_chunks
     (
@@ -155,6 +155,14 @@ def _enum_check_expr(column: str, values: list[str]) -> str:
 
 
 def upgrade() -> None:
+    # Normalize existing data: uppercase enum values → lowercase to match
+    # Python Enum .value definitions (e.g. WorkflowStatus.RUNNING = "running").
+    for table, _name, column, _values in _ENUM_CHECKS:
+        op.execute(
+            f"UPDATE {table} SET {column} = LOWER({column}) "
+            f"WHERE {column} IS NOT NULL AND {column} != LOWER({column})"
+        )
+
     for table, name, column, values in _ENUM_CHECKS:
         op.create_check_constraint(
             name,

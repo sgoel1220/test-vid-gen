@@ -24,7 +24,7 @@ from sqlalchemy import select
 
 import app.db as _db
 from app.models.enums import StepName, StepStatus
-from app.models.schemas import (
+from app.models.json_schemas import (
     GenerateStoryStepOutput,
     ImageGenerationStepOutput,
     StepOutputSchema,
