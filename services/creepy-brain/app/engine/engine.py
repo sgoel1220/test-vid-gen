@@ -18,10 +18,9 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from app.models.enums import GpuPodStatus, StepStatus, WorkflowStatus
+from app.models.enums import GpuPodStatus, StepName, StepStatus, WorkflowStatus, WorkflowType
 from app.models.gpu_pod import GpuPod
 from app.models.workflow import Workflow, WorkflowStep
-from app.models.enums import StepName
 from app.services.workflow_service import WorkflowService
 
 from .db_helpers import get_optional_session_maker, optional_session
@@ -29,6 +28,19 @@ from .models import WorkflowDef
 from .runner import WorkflowRunner, get_downstream_steps
 
 log = logging.getLogger(__name__)
+
+# Map WorkflowType enum → registered workflow definition name.
+_WORKFLOW_TYPE_NAMES: dict[WorkflowType, str] = {
+    WorkflowType.CONTENT_PIPELINE: "ContentPipeline",
+}
+
+
+def _workflow_type_to_name(wf_type: WorkflowType) -> str:
+    """Convert a WorkflowType enum to a registered workflow name."""
+    name = _WORKFLOW_TYPE_NAMES.get(wf_type)
+    if name is None:
+        raise KeyError(f"No workflow name mapping for type '{wf_type}'")
+    return name
 
 
 class WorkflowEngine:
@@ -161,6 +173,100 @@ class WorkflowEngine:
         log.info("engine: retrying step '%s' for workflow %s", step_name, run_id)
 
     # ------------------------------------------------------------------
+    # Pause
+    # ------------------------------------------------------------------
+
+    async def pause(self, workflow_run_id: str) -> None:
+        """Pause a running workflow: cancel task, terminate GPU pods, set PAUSED.
+
+        Unlike cancel, the workflow can be resumed later via resume_from_db().
+        """
+        run_id = workflow_run_id
+
+        # Cancel the asyncio task (don't mark CANCELLED — we want PAUSED).
+        await self._cancel_task(run_id, mark_cancelled_in_db=False)
+
+        # Terminate GPU pods to stop billing.
+        try:
+            await self._terminate_gpu_pods(uuid.UUID(run_id))
+        except (ValueError, Exception) as exc:
+            log.error("engine: pause GPU pod termination failed for %s: %s", run_id, exc)
+
+        # Set workflow status to PAUSED.
+        try:
+            await self._set_workflow_status(uuid.UUID(run_id), WorkflowStatus.PAUSED)
+        except Exception as exc:
+            log.error("engine: pause failed to set PAUSED status for %s: %s", run_id, exc)
+
+        log.info("engine: paused workflow %s", run_id)
+
+    # ------------------------------------------------------------------
+    # Resume from DB (cold-start)
+    # ------------------------------------------------------------------
+
+    async def resume_from_db(self, workflow_id: uuid.UUID) -> str:
+        """Resume a workflow from DB state (cold-start after crash or pause).
+
+        Loads workflow input from DB, creates a new WorkflowRunner which
+        auto-skips completed steps via _load_completed_steps() in run().
+
+        Args:
+            workflow_id: Primary key of the Workflow DB row.
+
+        Returns:
+            workflow_run_id as string.
+
+        Raises:
+            RuntimeError: If workflow not found or has no input_json.
+            KeyError: If workflow type not registered.
+        """
+        run_id = str(workflow_id)
+
+        # Don't resume if already running.
+        if run_id in self._tasks and not self._tasks[run_id].done():
+            raise RuntimeError(f"Workflow {run_id} is already running")
+
+        # Load workflow from DB.
+        async with optional_session() as session:
+            if session is None:
+                raise RuntimeError("Database not available for resume")
+            result = await session.execute(
+                select(Workflow).where(Workflow.id == workflow_id)
+            )
+            wf = result.scalar_one_or_none()
+
+        if wf is None:
+            raise RuntimeError(f"Workflow {workflow_id} not found in database")
+        if wf.input_json is None:
+            raise RuntimeError(f"Workflow {workflow_id} has no input_json")
+
+        # Look up workflow definition by type.
+        wf_name = _workflow_type_to_name(wf.workflow_type)
+        if wf_name not in self._registry:
+            raise KeyError(f"No workflow registered with name '{wf_name}'")
+
+        wf_def = self._registry[wf_name]
+        input_obj = wf.input_json  # Already a Pydantic model (stored as JSON)
+
+        # Set status to RUNNING.
+        try:
+            await self._set_workflow_status(workflow_id, WorkflowStatus.RUNNING)
+        except Exception as exc:
+            log.error("engine: resume failed to set RUNNING status for %s: %s", run_id, exc)
+
+        # Create runner — _load_completed_steps() in run() auto-skips done steps.
+        runner = WorkflowRunner(wf_def, input_obj, workflow_id)
+        self._runners[run_id] = runner
+
+        task = asyncio.create_task(
+            self._run_and_cleanup(runner, run_id),
+            name=f"workflow-{run_id}-resume",
+        )
+        self._tasks[run_id] = task
+        log.info("engine: resumed workflow %s from DB", run_id)
+        return run_id
+
+    # ------------------------------------------------------------------
     # Cancel
     # ------------------------------------------------------------------
 
@@ -267,6 +373,21 @@ class WorkflowEngine:
             if wf is not None:
                 wf.status = WorkflowStatus.CANCELLED
                 wf.completed_at = datetime.now(timezone.utc)
+            await session.commit()
+
+    async def _set_workflow_status(
+        self, workflow_id: uuid.UUID, status: WorkflowStatus
+    ) -> None:
+        """Set workflow to an arbitrary status."""
+        async with optional_session() as session:
+            if session is None:
+                return
+            result = await session.execute(
+                select(Workflow).where(Workflow.id == workflow_id)
+            )
+            wf = result.scalar_one_or_none()
+            if wf is not None:
+                wf.status = status
             await session.commit()
 
     async def _terminate_gpu_pods(self, workflow_id: uuid.UUID) -> None:

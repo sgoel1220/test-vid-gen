@@ -14,9 +14,9 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.db import DbSession
 from app.engine import engine
-from app.models.enums import WorkflowStatus, WorkflowType
+from app.models.enums import StepName, StepStatus, WorkflowStatus, WorkflowType
 from app.models.json_schemas import WorkflowInputSchema
-from app.models.workflow import Workflow
+from app.models.workflow import Workflow, WorkflowStep
 from app.models.gpu_pod import GpuPod
 from app.schemas.workflow import (
     CreateWorkflowRequest,
@@ -225,7 +225,7 @@ async def retry_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowRespo
 async def cancel_workflow(workflow_id: uuid.UUID, db: DbSession) -> None:
     """Cancel a running workflow and terminate any active GPU pods."""
     workflow = await _get_workflow_or_404(workflow_id, db)
-    if workflow.status not in {WorkflowStatus.PENDING, WorkflowStatus.RUNNING}:
+    if workflow.status not in {WorkflowStatus.PENDING, WorkflowStatus.RUNNING, WorkflowStatus.PAUSED}:
         raise HTTPException(
             status_code=400,
             detail=f"Cannot cancel workflow in status: {workflow.status}",
@@ -233,3 +233,120 @@ async def cancel_workflow(workflow_id: uuid.UUID, db: DbSession) -> None:
 
     # Delegate cancellation (stops task, terminates GPU pods, marks CANCELLED in DB).
     await engine.cancel(str(workflow_id))
+
+
+# ── Pydantic request models ──────────────────────────────────────────────────
+
+class RetryStepRequest(BaseModel):
+    """Request body for retrying a specific step."""
+
+    step_name: StepName
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+# Pipeline step order — used to find the first incomplete step for resume.
+_PIPELINE_ORDER: list[StepName] = [
+    StepName.GENERATE_STORY,
+    StepName.TTS_SYNTHESIS,
+    StepName.IMAGE_GENERATION,
+    StepName.STITCH_FINAL,
+]
+
+
+async def _find_resume_step(workflow_id: uuid.UUID, db: DbSession) -> StepName:
+    """Walk pipeline order and return the first non-COMPLETED step.
+
+    Raises:
+        HTTPException: If all steps are already completed.
+    """
+    result = await db.execute(
+        select(WorkflowStep).where(WorkflowStep.workflow_id == workflow_id)
+    )
+    steps = result.scalars().all()
+    done_statuses = {StepStatus.COMPLETED, StepStatus.SKIPPED}
+    completed: set[StepName] = {
+        s.step_name for s in steps if s.status in done_statuses
+    }
+
+    for step_name in _PIPELINE_ORDER:
+        if step_name not in completed:
+            return step_name
+
+    raise HTTPException(
+        status_code=400,
+        detail="All steps already completed — nothing to resume",
+    )
+
+
+# ── step-level retry, pause, resume endpoints ────────────────────────────────
+
+@router.post("/{workflow_id}/retry-step", response_model=WorkflowResponse)
+async def retry_step(
+    workflow_id: uuid.UUID,
+    body: RetryStepRequest,
+    db: DbSession,
+) -> WorkflowResponse:
+    """Retry a specific step (and all downstream steps).
+
+    Only allowed when the workflow is FAILED or CANCELLED.
+    """
+    workflow = await _get_workflow_or_404(workflow_id, db)
+    if workflow.status not in {WorkflowStatus.FAILED, WorkflowStatus.CANCELLED}:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Can only retry-step on FAILED or CANCELLED workflows "
+                f"(current: {workflow.status})"
+            ),
+        )
+
+    await engine.retry_step(str(workflow_id), body.step_name.value)
+    await db.refresh(workflow)
+    return _to_response(workflow)
+
+
+@router.post("/{workflow_id}/pause", status_code=204)
+async def pause_workflow(workflow_id: uuid.UUID, db: DbSession) -> None:
+    """Pause a running workflow.
+
+    Cancels the in-progress task and terminates GPU pods to stop billing.
+    The workflow can be resumed later via POST /{id}/resume.
+    """
+    workflow = await _get_workflow_or_404(workflow_id, db)
+    if workflow.status != WorkflowStatus.RUNNING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can only pause RUNNING workflows (current: {workflow.status})",
+        )
+
+    await engine.pause(str(workflow_id))
+
+
+@router.post("/{workflow_id}/resume", response_model=WorkflowResponse)
+async def resume_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowResponse:
+    """Resume a paused or failed workflow.
+
+    If the engine has a runner in memory, retries from the first incomplete step.
+    Otherwise, performs a cold-start resume from DB state.
+    """
+    workflow = await _get_workflow_or_404(workflow_id, db)
+    if workflow.status not in {WorkflowStatus.PAUSED, WorkflowStatus.FAILED}:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Can only resume PAUSED or FAILED workflows "
+                f"(current: {workflow.status})"
+            ),
+        )
+
+    # Try in-memory retry first (runner still around from this process).
+    if str(workflow_id) in engine._runners:
+        resume_step = await _find_resume_step(workflow_id, db)
+        await engine.retry_step(str(workflow_id), resume_step.value)
+    else:
+        # Cold-start: load from DB.
+        await engine.resume_from_db(workflow_id)
+
+    await db.refresh(workflow)
+    return _to_response(workflow)
