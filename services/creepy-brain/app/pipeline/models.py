@@ -12,7 +12,7 @@ from pydantic import BaseModel
 class Frozen(BaseModel):
     """Immutable base model for pipeline data."""
 
-    model_config = {"frozen": True, "extra": "forbid"}
+    model_config = {"frozen": True, "extra": "ignore"}
 
 
 # ---------------------------------------------------------------------------

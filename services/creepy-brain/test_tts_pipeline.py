@@ -110,7 +110,7 @@ async def main() -> None:
     # Step 4: Wait for ready
     print("\n[4/5] Waiting for pod to be ready...")
     try:
-        pod = await provider.wait_for_ready(pod.id, timeout_sec=600)  # 10 minutes for cold start
+        pod = await provider.wait_for_ready(pod.id, timeout_sec=720)  # 12 minutes for cold start
         print(f"  Pod ready at: {pod.endpoint_url}")
     except TimeoutError:
         print("  ERROR: Pod did not become ready in time")

@@ -54,7 +54,7 @@ _SYNTHESIZE_PATH = "/synthesize"
 # Synthesis parameters (timeouts and retries only - TTS params come from config)
 _MAX_CHUNK_RETRIES = 2       # up to 3 total attempts per chunk
 _MAX_REQUEUE_ROUNDS = 2      # additional retry rounds for failed chunks
-_POD_TIMEOUT_SEC = 300       # 5 minutes to wait for pod ready
+_POD_TIMEOUT_SEC = 720       # 12 minutes to wait for pod ready
 _SYNTHESIZE_TIMEOUT_SEC = 120
 
 

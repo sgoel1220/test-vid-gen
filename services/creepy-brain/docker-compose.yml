@@ -17,6 +17,8 @@ services:
       - POSTGRES_PASSWORD=dev_password
       - POSTGRES_DB=creepy_brain
       # - JSON_LOGS=true  # Set to false for pretty dev logs, true for production JSON
+      - HATCHET_CLIENT_TLS_STRATEGY=none
+      - HATCHET_CLIENT_SERVER_URL=http://hatchet-engine:8888
       # ANTHROPIC_API_KEY and LLM_MODEL are loaded from .env (copy .env.example → .env)
       # HATCHET_CLIENT_TOKEN is loaded from .env (create token in Hatchet dashboard)
     depends_on:
@@ -42,6 +44,8 @@ services:
       - POSTGRES_USER=creepy_brain
       - POSTGRES_PASSWORD=dev_password
       - POSTGRES_DB=creepy_brain
+      - HATCHET_CLIENT_TLS_STRATEGY=none
+      - HATCHET_CLIENT_SERVER_URL=http://hatchet-engine:8888
       # HATCHET_CLIENT_TOKEN is loaded from .env (create token in Hatchet dashboard)
     depends_on:
       postgres:
@@ -74,6 +78,9 @@ services:
       SERVER_AUTH_COOKIE_SECRETS: "devtokensecret16 devtokensecret32"
       SERVER_AUTH_COOKIE_DOMAIN: localhost
       SERVER_GRPC_BROADCAST_ADDRESS: "hatchet-engine:7070"
+      SERVER_GRPC_BIND_ADDRESS: "0.0.0.0"
+      SERVER_GRPC_PORT: "7070"
+      SERVER_GRPC_INSECURE: "t"
       SERVER_URL: "http://localhost:8888"
     ports:
       - "8888:8888"  # Dashboard UI

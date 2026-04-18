@@ -51,7 +51,7 @@ from app.text.scene_grouping import Scene, group_chunks_into_scenes
 log = logging.getLogger(__name__)
 
 _GENERATE_PATH = "/generate"
-_POD_TIMEOUT_SEC = 300  # 5 minutes to wait for pod ready
+_POD_TIMEOUT_SEC = 720  # 12 minutes to wait for pod ready
 _GENERATE_TIMEOUT_SEC = 180  # 3 minutes per image generation
 
 # PNG magic bytes

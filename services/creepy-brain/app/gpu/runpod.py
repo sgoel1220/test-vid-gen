@@ -128,7 +128,7 @@ class RunPodProvider(GpuProvider):
             return False
 
     async def wait_for_ready(
-        self, pod_id: str, timeout_sec: int = 300, service_port: int | None = None
+        self, pod_id: str, timeout_sec: int = 720, service_port: int | None = None
     ) -> GpuPod:
         """Wait for pod to be ready (health check passes).
 

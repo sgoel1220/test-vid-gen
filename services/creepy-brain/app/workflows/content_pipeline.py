@@ -138,6 +138,7 @@ async def generate_story(input: WorkflowInputSchema, ctx: Context) -> dict[str, 
 
 @content_pipeline.task(  # type: ignore[untyped-decorator]  # hatchet_sdk has no type stubs
     execution_timeout=timedelta(minutes=30),
+    retries=2,
     parents=[generate_story],
 )
 async def tts_synthesis(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]:

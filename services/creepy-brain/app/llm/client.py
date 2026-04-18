@@ -151,15 +151,31 @@ async def generate_structured(
     response_model: Type[T],
 ) -> T:
     """Call the LLM and parse the response into a Pydantic model."""
+    schema_str = str(response_model.model_json_schema())
     json_instruction = (
         "\n\nIMPORTANT: You MUST respond with ONLY a valid JSON object. "
-        "No preamble, no explanation, no markdown fences. Just raw JSON."
+        "No preamble, no explanation, no markdown fences. Just raw JSON.\n\n"
+        f"The JSON MUST conform to this schema:\n{schema_str}"
     )
-    raw = await _call_with_retry(
-        system + json_instruction,
-        [{"role": "user", "content": user}],
-    )
-    return response_model.model_validate_json(_extract_json(raw))
+    full_system = system + json_instruction
+    messages = [{"role": "user", "content": user}]
+
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        raw = await _call_with_retry(full_system, messages)
+        extracted = _extract_json(raw)
+        try:
+            return response_model.model_validate_json(extracted)
+        except Exception as exc:
+            last_exc = exc
+            log.error(
+                "structured parse failed for %s (attempt %d), raw (first 2000): %s",
+                response_model.__name__,
+                attempt + 1,
+                raw[:2000],
+            )
+    assert last_exc is not None
+    raise last_exc
 
 
 async def generate_text(system: str, user: str) -> str:

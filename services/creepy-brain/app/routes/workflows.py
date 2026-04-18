@@ -197,7 +197,12 @@ async def get_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowDetailR
 
 @router.post("/{workflow_id}/retry", response_model=WorkflowResponse, status_code=201)  # type: ignore[untyped-decorator]
 async def retry_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowResponse:
-    """Retry a failed workflow with the same input (creates a new Hatchet run)."""
+    """Retry a failed workflow with the same input (creates a new Hatchet run).
+
+    Hatchet tasks have built-in retries (e.g. tts_synthesis retries=2),
+    so transient failures are handled automatically. This endpoint is for
+    manually retrying after all automatic retries are exhausted.
+    """
     result = await db.execute(select(Workflow).where(Workflow.id == workflow_id))
     workflow = result.scalar_one_or_none()
     if workflow is None:
