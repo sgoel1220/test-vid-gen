@@ -1,4 +1,4 @@
-"""Pydantic schemas for JSONB fields in SQLAlchemy models."""
+"""Pydantic models for JSONB fields in SQLAlchemy models."""
 
 from __future__ import annotations
 
@@ -7,6 +7,15 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
+from app.validation_limits import (
+    ACT_TARGET_WORD_COUNT_MAX,
+    ACT_TARGET_WORD_COUNT_MIN,
+    MAX_REVISIONS_MAX,
+    MAX_REVISIONS_MIN,
+    WORKFLOW_TARGET_WORD_COUNT_MAX,
+    WORKFLOW_TARGET_WORD_COUNT_MIN,
+)
+
 
 # Workflow Input/Output Schemas
 class WorkflowInputSchema(BaseModel):
@@ -14,11 +23,24 @@ class WorkflowInputSchema(BaseModel):
 
     premise: str = Field(..., description="Story premise or prompt")
     voice_name: str = Field(..., description="Voice to use for TTS")
-    generate_images: bool = Field(default=False, description="Whether to generate scene images via GPU pod")
-    stitch_video: bool = Field(default=False, description="Whether to stitch final video (not yet implemented, bead ea6)")
-    max_revisions: int = Field(default=3, description="Max story revision attempts")
-    target_word_count: int = Field(default=5000, description="Target word count for story")
-
+    generate_images: bool = Field(
+        default=False, description="Whether to generate scene images via GPU pod"
+    )
+    stitch_video: bool = Field(
+        default=False, description="Whether to stitch final video (not yet implemented, bead ea6)"
+    )
+    max_revisions: int = Field(
+        default=3,
+        ge=MAX_REVISIONS_MIN,
+        le=MAX_REVISIONS_MAX,
+        description="Max story revision attempts",
+    )
+    target_word_count: int = Field(
+        default=5000,
+        ge=WORKFLOW_TARGET_WORD_COUNT_MIN,
+        le=WORKFLOW_TARGET_WORD_COUNT_MAX,
+        description="Target word count for story",
+    )
 
 
 class WorkflowResultSchema(BaseModel):
@@ -40,8 +62,12 @@ class GenerateStoryStepInput(BaseModel):
 
     step_type: Literal["generate_story"] = "generate_story"
     premise: str
-    max_revisions: int = 3
-    target_word_count: int = 5000
+    max_revisions: int = Field(default=3, ge=MAX_REVISIONS_MIN, le=MAX_REVISIONS_MAX)
+    target_word_count: int = Field(
+        default=5000,
+        ge=WORKFLOW_TARGET_WORD_COUNT_MIN,
+        le=WORKFLOW_TARGET_WORD_COUNT_MAX,
+    )
 
 
 class TtsSynthesisStepInput(BaseModel):
@@ -135,7 +161,7 @@ class StoryActOutline(BaseModel):
     act_number: int
     title: str
     summary: str
-    target_word_count: int
+    target_word_count: int = Field(ge=ACT_TARGET_WORD_COUNT_MIN, le=ACT_TARGET_WORD_COUNT_MAX)
     key_events: list[str]
 
 
@@ -144,7 +170,10 @@ class StoryOutlineSchema(BaseModel):
 
     title: str
     total_acts: int
-    total_target_words: int
+    total_target_words: int = Field(
+        ge=WORKFLOW_TARGET_WORD_COUNT_MIN,
+        le=WORKFLOW_TARGET_WORD_COUNT_MAX,
+    )
     acts: list[StoryActOutline]
     themes: list[str]
     setting: str

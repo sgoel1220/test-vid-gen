@@ -41,8 +41,8 @@ from app.gpu.lifecycle import (
     wait_for_recorded_ready,
 )
 from app.llm.image_prompts import generate_scene_image_prompt
-from app.models.enums import BlobType, ChunkStatus
-from app.models.schemas import WorkflowInputSchema
+from app.models.enums import BlobType, ChunkStatus, GpuProvider as GpuProviderEnum
+from app.models.json_schemas import WorkflowInputSchema
 from app.models.workflow import WorkflowScene
 from app.services import blob_service
 from app.services.workflow_service import (
@@ -78,9 +78,7 @@ def _validate_png_response(resp: httpx.Response) -> bytes:
     # Check content type
     content_type = resp.headers.get("content-type", "")
     if "image/png" not in content_type:
-        raise ValueError(
-            f"Expected image/png content type, got: {content_type}"
-        )
+        raise ValueError(f"Expected image/png content type, got: {content_type}")
 
     # Check we have content
     png_bytes: bytes = resp.content
@@ -152,9 +150,7 @@ def _scene_from_db(db_scene: WorkflowScene, chunk_indices: list[int]) -> SceneIm
     )
 
 
-async def execute(
-    input: WorkflowInputSchema, ctx: StepContext
-) -> ImageStepOutput | SkippedStepOutput:
+async def execute(input: WorkflowInputSchema, ctx: StepContext) -> dict[str, object]:
     """Generate images for each scene using an image GPU pod.
 
     Pipeline:
@@ -214,9 +210,7 @@ async def execute(
     )
 
     # Build lookup for existing scenes (resume support)
-    existing_scene_map: dict[int, WorkflowScene] = {
-        s.scene_index: s for s in existing_scenes
-    }
+    existing_scene_map: dict[int, WorkflowScene] = {s.scene_index: s for s in existing_scenes}
 
     # --- 4. Check for completed scenes (resume) and pending scenes ---
     resumed_results: list[SceneImageResult] = []
@@ -224,7 +218,11 @@ async def execute(
 
     for scene in scenes:
         db_scene = existing_scene_map.get(scene.scene_index)
-        if db_scene is not None and db_scene.image_status == ChunkStatus.COMPLETED and db_scene.image_blob_id:
+        if (
+            db_scene is not None
+            and db_scene.image_status == ChunkStatus.COMPLETED
+            and db_scene.image_blob_id
+        ):
             # Scene already completed
             resumed_results.append(_scene_from_db(db_scene, scene.chunk_indices))
         else:
@@ -267,6 +265,19 @@ async def execute(
         workflow_id=workflow_id_uuid,
         label="image",
     )
+    log.info("image pod created pod_id=%s provider=%s", pod.id, pod.provider)
+
+    # Persist pod to DB for cost tracking
+    session_maker = get_session_maker()
+    async with session_maker() as session:
+        cost_svc = CostService(session)
+        await cost_svc.record_pod(
+            pod_id=pod.id,
+            provider=GpuProviderEnum(pod.provider),
+            workflow_id=workflow_id_uuid,
+            gpu_type=pod.gpu_type,
+            cost_per_hour_cents=pod.cost_per_hour_cents,
+        )
 
     # --- 7. Wait for pod ready, then generate images ---
     try:
@@ -278,6 +289,13 @@ async def execute(
             label="image",
             service_port=settings.image_server_port,
         )
+        if pod.endpoint_url is None:
+            raise RuntimeError(f"pod {pod.id} ready but has no endpoint_url")
+        log.info("image pod ready endpoint=%s", pod.endpoint_url)
+
+        # Mark pod ready for cost tracking (start billing clock)
+        async with session_maker() as session:
+            await CostService(session).mark_ready(pod.id, pod.endpoint_url)
 
         new_results = await _generate_images_from_prompts(
             endpoint_url=endpoint_url,
@@ -292,9 +310,7 @@ async def execute(
         except Exception as term_exc:
             log.error("failed to terminate image pod %s: %s", pod.id, term_exc)
 
-    scene_results = sorted(
-        resumed_results + new_results, key=lambda r: r.scene_index
-    )
+    scene_results = sorted(resumed_results + new_results, key=lambda r: r.scene_index)
     output = ImageStepOutput(
         scenes=scene_results,
         pod_id=pod.id,
@@ -331,6 +347,8 @@ async def _generate_and_save_prompts(
         List of ScenePrompt with prompts ready for image generation.
     """
     scene_prompts: list[ScenePrompt] = []
+
+    session_maker = get_session_maker()
 
     for scene in scenes:
         # Check if scene already has a prompt (partial resume)
@@ -413,9 +431,9 @@ async def _generate_images_from_prompts(
     """
     scene_results: list[SceneImageResult] = []
 
-    async with httpx.AsyncClient(
-        base_url=endpoint_url, timeout=_GENERATE_TIMEOUT_SEC
-    ) as client:
+    session_maker = get_session_maker()
+
+    async with httpx.AsyncClient(base_url=endpoint_url, timeout=_GENERATE_TIMEOUT_SEC) as client:
         for sp in scene_prompts:
             # POST /generate → PNG bytes
             resp = await client.post(

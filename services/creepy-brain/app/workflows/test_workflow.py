@@ -14,11 +14,12 @@ async def _step_one(input: EmptyWorkflowInput, ctx: StepContext) -> dict[str, ob
 
 async def _step_two(input: EmptyWorkflowInput, ctx: StepContext) -> dict[str, object]:
     """Second step — reads step_one output and doubles the value."""
-    result = ctx.parent_outputs.get("step_one")
-    if result is None:
-        raise ValueError("step_one output missing")
-    step_one = StepOneOutput.model_validate(result)
-    return StepTwoOutput(message=f"Step two complete, doubled: {step_one.value * 2}")
+    result = ctx.parent_outputs.get("step_one", {})
+    raw_value = result.get("value")
+    if not isinstance(raw_value, int):
+        raise ValueError("step_one output value must be an int")
+    value: int = raw_value
+    return {"message": f"Step two complete, doubled: {value * 2}"}
 
 
 test_workflow_def = WorkflowDef(

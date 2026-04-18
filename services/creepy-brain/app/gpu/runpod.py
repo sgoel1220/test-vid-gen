@@ -1,6 +1,7 @@
 """RunPod GPU provider implementation using the official RunPod SDK."""
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import cast
 
@@ -10,6 +11,80 @@ import runpod
 from app.models.enums import GpuPodStatus
 
 from .base import GpuPod, GpuPodSpec, GpuProvider
+
+log = logging.getLogger(__name__)
+
+
+def _as_raw_pod(raw: object) -> dict[str, object]:
+    """Validate a RunPod SDK pod payload."""
+    if not isinstance(raw, dict):
+        raise TypeError(f"Expected RunPod pod payload to be a dict, got {type(raw).__name__}")
+    return cast(dict[str, object], raw)
+
+
+def _as_raw_pod_list(raw: object) -> list[dict[str, object]]:
+    """Validate a RunPod SDK pod list payload."""
+    if not isinstance(raw, list):
+        raise TypeError(f"Expected RunPod pod list to be a list, got {type(raw).__name__}")
+    pods: list[dict[str, object]] = []
+    for item in raw:
+        pods.append(_as_raw_pod(item))
+    return pods
+
+
+def _port_endpoint(port: dict[str, object]) -> str | None:
+    """Build an HTTP endpoint from a public RunPod runtime port record."""
+    if port.get("isIpPublic") is not True:
+        return None
+
+    ip = port.get("ip")
+    public_port = port.get("publicPort")
+    if not isinstance(ip, str) or public_port is None:
+        return None
+
+    try:
+        public_port_int = int(str(public_port))
+    except ValueError:
+        return None
+
+    return f"http://{ip}:{public_port_int}"
+
+
+def _private_port(port: dict[str, object]) -> int | None:
+    """Extract the private service port from a RunPod runtime port record."""
+    private_port = port.get("privatePort")
+    if private_port is None:
+        return None
+    try:
+        return int(str(private_port))
+    except ValueError:
+        return None
+
+
+def _select_endpoint(
+    runtime: object,
+    service_port: int | None,
+) -> str | None:
+    """Select the externally reachable endpoint for a pod service."""
+    if not isinstance(runtime, dict):
+        return None
+
+    raw_ports = runtime.get("ports")
+    if not isinstance(raw_ports, list):
+        return None
+
+    ports = [_as_raw_pod(raw_port) for raw_port in raw_ports]
+    if service_port is not None:
+        for port in ports:
+            if _private_port(port) == service_port:
+                return _port_endpoint(port)
+        return None
+
+    for port in ports:
+        endpoint = _port_endpoint(port)
+        if endpoint is not None:
+            return endpoint
+    return None
 
 
 class RunPodProvider(GpuProvider):
@@ -37,39 +112,14 @@ class RunPodProvider(GpuProvider):
         else:
             status = GpuPodStatus.CREATING
 
-        # Build endpoint URL from public IP/port mappings
-        endpoint_url: str | None = None
-        runtime = raw.get("runtime")
-        if isinstance(runtime, dict):
-            ports: list[dict[str, object]] = []
-            raw_ports = runtime.get("ports")
-            if isinstance(raw_ports, list):
-                ports = [p for p in raw_ports if isinstance(p, dict)]
+        endpoint_url = _select_endpoint(raw.get("runtime"), service_port)
 
-            if service_port is not None:
-                for p in ports:
-                    if p.get("privatePort") == service_port and p.get("isIpPublic"):
-                        ip = str(p.get("ip", ""))
-                        pub = p.get("publicPort")
-                        if ip and pub is not None:
-                            endpoint_url = f"http://{ip}:{pub}"
-                            break
-            else:
-                for p in ports:
-                    if p.get("isIpPublic"):
-                        ip = str(p.get("ip", ""))
-                        pub = p.get("publicPort")
-                        if ip and pub is not None:
-                            endpoint_url = f"http://{ip}:{pub}"
-                            break
-
-        machine = raw.get("machine")
-        if machine is None:
-            gpu_type: str | None = None
-            cost_cents: int | None = None
-        elif isinstance(machine, dict):
+        machine = raw.get("machine") or {}
+        if not isinstance(machine, dict):
+            raise TypeError("Expected 'machine' to be a dict")
+        if machine:
             gpu_type = str(machine.get("gpuDisplayName", "")) or None
-            cost_raw = machine.get("costPerGpu") or machine.get("costPerHr")
+            cost_raw = machine.get("costPerHr") or machine.get("costPerGpu")
             cost_cents = int(float(cost_raw) * 100) if cost_raw else None
         else:
             raise TypeError(
@@ -108,23 +158,20 @@ class RunPodProvider(GpuProvider):
         ports_str = ",".join(f"{p}/http" for p in spec.ports)
         env_dict = spec.env or {}
 
-        def _create() -> dict[str, object]:
-            return cast(
-                dict[str, object],
-                runpod.create_pod(
-                    name=idempotency_key,
-                    image_name=spec.image,
-                    gpu_type_id=spec.gpu_type,
-                    cloud_type=spec.cloud_type,
-                    container_disk_in_gb=spec.disk_size_gb,
-                    volume_in_gb=spec.volume_gb,
-                    ports=ports_str,
-                    env=env_dict,
-                ),
+        def _create() -> object:
+            return runpod.create_pod(
+                name=idempotency_key,
+                image_name=spec.image,
+                gpu_type_id=spec.gpu_type,
+                cloud_type=spec.cloud_type,
+                container_disk_in_gb=spec.disk_size_gb,
+                volume_in_gb=spec.volume_gb,
+                ports=ports_str,
+                env=env_dict,
             )
 
         try:
-            raw = await asyncio.to_thread(_create)
+            raw = _as_raw_pod(await asyncio.to_thread(_create))
             return self._parse_pod(raw, service_port)
         except Exception:
             # On error, check if pod was created by concurrent call
@@ -133,20 +180,19 @@ class RunPodProvider(GpuProvider):
                 return recovered
             raise
 
-    async def get_pod(
-        self, pod_id: str, service_port: int | None = None
-    ) -> GpuPod | None:
+    async def get_pod(self, pod_id: str, service_port: int | None = None) -> GpuPod | None:
         """Get pod status by ID."""
 
-        def _get() -> dict[str, object]:
-            return cast(dict[str, object], runpod.get_pod(pod_id))
+        def _get() -> object:
+            return runpod.get_pod(pod_id)
 
         try:
             raw = await asyncio.to_thread(_get)
             if not raw:
                 return None
-            return self._parse_pod(raw, service_port)
+            return self._parse_pod(_as_raw_pod(raw), service_port)
         except Exception:
+            log.exception("runpod get_pod failed pod_id=%s", pod_id)
             return None
 
     async def terminate_pod(self, pod_id: str) -> bool:
@@ -159,6 +205,7 @@ class RunPodProvider(GpuProvider):
             await asyncio.to_thread(_terminate)
             return True
         except Exception:
+            log.exception("runpod terminate_pod failed pod_id=%s", pod_id)
             return False
 
     async def wait_for_ready(
@@ -192,10 +239,10 @@ class RunPodProvider(GpuProvider):
     async def list_active_pods(self) -> list[GpuPod]:
         """List all active (non-terminated) pods."""
 
-        def _list() -> list[dict[str, object]]:
-            return cast(list[dict[str, object]], runpod.get_pods())
+        def _list() -> object:
+            return runpod.get_pods()
 
-        raw_pods = await asyncio.to_thread(_list)
+        raw_pods = _as_raw_pod_list(await asyncio.to_thread(_list))
         result: list[GpuPod] = []
         for raw in raw_pods:
             pod = self._parse_pod(raw)
@@ -203,15 +250,13 @@ class RunPodProvider(GpuProvider):
                 result.append(pod)
         return result
 
-    async def _find_pod_by_name(
-        self, name: str, service_port: int | None = None
-    ) -> GpuPod | None:
+    async def _find_pod_by_name(self, name: str, service_port: int | None = None) -> GpuPod | None:
         """Find a pod by name using a single get_pods() call."""
 
-        def _list() -> list[dict[str, object]]:
-            return cast(list[dict[str, object]], runpod.get_pods())
+        def _list() -> object:
+            return runpod.get_pods()
 
-        raw_pods = await asyncio.to_thread(_list)
+        raw_pods = _as_raw_pod_list(await asyncio.to_thread(_list))
         for raw in raw_pods:
             if raw.get("name") == name:
                 pod = self._parse_pod(raw, service_port)

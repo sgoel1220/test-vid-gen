@@ -1,0 +1,16 @@
+"""Shared validation bounds for workflow and story-generation models."""
+
+MAX_REVISIONS_MIN: int = 0
+MAX_REVISIONS_MAX: int = 10
+
+WORKFLOW_TARGET_WORD_COUNT_MIN: int = 500
+WORKFLOW_TARGET_WORD_COUNT_MAX: int = 50_000
+
+ACT_TARGET_WORD_COUNT_MIN: int = 100
+ACT_TARGET_WORD_COUNT_MAX: int = 20_000
+
+TENSION_LEVEL_MIN: int = 1
+TENSION_LEVEL_MAX: int = 10
+
+DIMENSION_SCORE_MIN: float = 0.0
+DIMENSION_SCORE_MAX: float = 10.0

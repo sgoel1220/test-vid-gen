@@ -19,7 +19,7 @@ from app.models.enums import (
     WorkflowType,
 )
 from app.models.json_types import PydanticType
-from app.models.schemas import (
+from app.models.json_schemas import (
     StepInputSchema,
     StepOutputSchema,
     WorkflowInputSchema,

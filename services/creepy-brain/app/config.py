@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     postgres_host: str = "postgres"
     postgres_port: int = 5432
     postgres_user: str = "creepy_brain"
-    postgres_password: str = "dev_password"
+    postgres_password: str = Field(default="", repr=False)
     postgres_db: str = "creepy_brain"
     db_echo: bool = False
 
@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         """Construct async postgres connection URL"""
+        if not self.postgres_password:
+            raise RuntimeError("POSTGRES_PASSWORD must be set")
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"

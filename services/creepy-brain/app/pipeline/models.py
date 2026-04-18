@@ -6,7 +6,16 @@ They are NOT SQLAlchemy ORM models.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.validation_limits import (
+    ACT_TARGET_WORD_COUNT_MAX,
+    ACT_TARGET_WORD_COUNT_MIN,
+    DIMENSION_SCORE_MAX,
+    DIMENSION_SCORE_MIN,
+    TENSION_LEVEL_MAX,
+    TENSION_LEVEL_MIN,
+)
 
 
 class Frozen(BaseModel):
@@ -84,20 +93,20 @@ class Beat(Frozen):
 class ActOutline(Frozen):
     act_number: int
     title: str
-    target_word_count: int
+    target_word_count: int = Field(ge=ACT_TARGET_WORD_COUNT_MIN, le=ACT_TARGET_WORD_COUNT_MAX)
     beats: list[Beat]
     act_hook: str
     act_cliffhanger: str
     subplots_active: list[str]
-    tension_level: int
+    tension_level: int = Field(ge=TENSION_LEVEL_MIN, le=TENSION_LEVEL_MAX)
 
 
 class TensionCurve(Frozen):
-    act_1: int
-    act_2: int
-    act_3: int
-    act_4: int
-    act_5: int
+    act_1: int = Field(ge=TENSION_LEVEL_MIN, le=TENSION_LEVEL_MAX)
+    act_2: int = Field(ge=TENSION_LEVEL_MIN, le=TENSION_LEVEL_MAX)
+    act_3: int = Field(ge=TENSION_LEVEL_MIN, le=TENSION_LEVEL_MAX)
+    act_4: int = Field(ge=TENSION_LEVEL_MIN, le=TENSION_LEVEL_MAX)
+    act_5: int = Field(ge=TENSION_LEVEL_MIN, le=TENSION_LEVEL_MAX)
 
 
 class FiveActOutline(Frozen):
@@ -144,13 +153,13 @@ class OutlineCritique(Frozen):
 
 
 class DimensionScore(Frozen):
-    subplot_completion: float
-    foreshadowing_payoff: float
-    character_consistency: float
-    pacing: float
-    ending_impact: float
-    audio_rhythm: float = 8.0
-    overall_score: float
+    subplot_completion: float = Field(ge=DIMENSION_SCORE_MIN, le=DIMENSION_SCORE_MAX)
+    foreshadowing_payoff: float = Field(ge=DIMENSION_SCORE_MIN, le=DIMENSION_SCORE_MAX)
+    character_consistency: float = Field(ge=DIMENSION_SCORE_MIN, le=DIMENSION_SCORE_MAX)
+    pacing: float = Field(ge=DIMENSION_SCORE_MIN, le=DIMENSION_SCORE_MAX)
+    ending_impact: float = Field(ge=DIMENSION_SCORE_MIN, le=DIMENSION_SCORE_MAX)
+    audio_rhythm: float = Field(default=8.0, ge=DIMENSION_SCORE_MIN, le=DIMENSION_SCORE_MAX)
+    overall_score: float = Field(ge=DIMENSION_SCORE_MIN, le=DIMENSION_SCORE_MAX)
 
 
 class FixInstruction(Frozen):

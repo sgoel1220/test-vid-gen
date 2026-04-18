@@ -27,7 +27,6 @@ async def ensure_db() -> None:
 def get_session_maker() -> async_sessionmaker[AsyncSession]:
     """Return the active session maker, raising if DB was not initialized."""
     maker = _db.async_session_maker
-    assert maker is not None, (
-        "DB not initialized — call ensure_db() before starting"
-    )
+    if maker is None:
+        raise RuntimeError("DB not initialized — call ensure_db() before starting")
     return maker

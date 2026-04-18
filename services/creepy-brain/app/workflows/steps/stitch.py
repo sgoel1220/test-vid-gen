@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.engine import SkippedStepOutput, StepContext
 
 from app.audio.encoding import encode_wav_to_mp3
-from app.models.enums import BlobType, ChunkStatus
-from app.models.schemas import WorkflowInputSchema
+from app.models.enums import BlobType
+from app.models.json_schemas import WorkflowInputSchema
 from app.services import blob_service
 from app.services.workflow_service import ChunkForImageStep, get_optional_workflow_id
 from app.workflows.db_helpers import get_session_maker
@@ -120,9 +120,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
         for chunk in chunk_data:
             blob_id_str = chunk.blob_id
             if not blob_id_str:
-                raise ValueError(
-                    f"Chunk {chunk.index} has no blob_id; TTS may have failed"
-                )
+                raise ValueError(f"Chunk {chunk.index} has no blob_id; TTS may have failed")
 
             blob = await blob_service.get(session, uuid.UUID(blob_id_str))
             audio, chunk_sr = sf.read(io.BytesIO(blob.data), dtype="float32")
@@ -220,6 +218,8 @@ async def _create_video(
     Returns:
         UUID of the saved video blob.
     """
+    session_maker = get_session_maker()
+
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -244,14 +244,22 @@ async def _create_video(
         cmd = [
             "ffmpeg",
             "-y",
-            "-framerate", _FRAMERATE,
-            "-pattern_type", "glob",
-            "-i", str(tmpdir_path / "image_*.png"),
-            "-i", str(mp3_path),
-            "-c:v", "libx264",
-            "-pix_fmt", "yuv420p",
-            "-vf", f"scale={_VIDEO_SCALE}:force_original_aspect_ratio=decrease,pad={_VIDEO_SCALE}:(ow-iw)/2:(oh-ih)/2",
-            "-c:a", "copy",
+            "-framerate",
+            _FRAMERATE,
+            "-pattern_type",
+            "glob",
+            "-i",
+            str(tmpdir_path / "image_*.png"),
+            "-i",
+            str(mp3_path),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-vf",
+            f"scale={_VIDEO_SCALE}:force_original_aspect_ratio=decrease,pad={_VIDEO_SCALE}:(ow-iw)/2:(oh-ih)/2",
+            "-c:a",
+            "copy",
             "-shortest",
             str(video_path),
         ]

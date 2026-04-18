@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.enums import StoryStatus
-from app.models.schemas import StoryActOutline, StoryOutlineSchema
+from app.models.json_schemas import StoryActOutline, StoryOutlineSchema
 from app.models.story import Story, StoryAct
 from app.pipeline.models import FiveActOutline, StoryBible
 

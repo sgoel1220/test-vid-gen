@@ -152,7 +152,7 @@ class CronScheduler:
         import app.db as _db
         from app.models.enums import WorkflowStatus, WorkflowType
         from app.models.workflow import Workflow
-        from app.models.schemas import WorkflowInputSchema
+        from app.models.json_schemas import WorkflowInputSchema
 
         session_maker = _db.async_session_maker
         if session_maker is None:

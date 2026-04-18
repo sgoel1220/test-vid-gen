@@ -16,7 +16,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import ChunkStatus, StepName, StepStatus, WorkflowStatus
-from app.models.schemas import StepOutputSchema, WorkflowResultSchema
+from app.models.json_schemas import WorkflowResultSchema
 from app.models.workflow import Workflow, WorkflowChunk, WorkflowScene, WorkflowStep
 
 

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import BaseModel
 from app.models.enums import StoryStatus
 from app.models.json_types import PydanticType
-from app.models.schemas import StoryOutlineSchema
+from app.models.json_schemas import StoryOutlineSchema
 
 
 class Story(BaseModel):

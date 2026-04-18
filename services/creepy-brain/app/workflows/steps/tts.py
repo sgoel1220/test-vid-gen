@@ -39,13 +39,9 @@ from app.engine import StepContext
 from app.audio.validation import validate_chunk_audio
 from app.config import settings
 from app.gpu import GpuPodSpec, get_provider
-from app.gpu.lifecycle import (
-    create_recorded_pod,
-    terminate_and_finalize,
-    wait_for_recorded_ready,
-)
-from app.models.enums import BlobType
-from app.models.schemas import WorkflowInputSchema
+from app.gpu.lifecycle import terminate_and_finalize
+from app.models.enums import BlobType, GpuProvider as GpuProviderEnum
+from app.models.json_schemas import WorkflowInputSchema
 from app.services import blob_service
 from app.services.story_service import StoryService
 from app.services.workflow_service import WorkflowService, get_optional_workflow_id
@@ -58,8 +54,8 @@ log = logging.getLogger(__name__)
 _SYNTHESIZE_PATH = "/synthesize"
 
 # Synthesis parameters (timeouts and retries only - TTS params come from config)
-_MAX_CHUNK_RETRIES = 2       # up to 3 total attempts per chunk
-_MAX_REQUEUE_ROUNDS = 2      # additional retry rounds for failed chunks
+_MAX_CHUNK_RETRIES = 2  # up to 3 total attempts per chunk
+_MAX_REQUEUE_ROUNDS = 2  # additional retry rounds for failed chunks
 _SYNTHESIZE_TIMEOUT_SEC = 120
 
 
@@ -124,12 +120,16 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
     if story_output is None:
         raise ValueError("generate_story step did not produce story_id")
 
-    story_result = GenerateStoryStepOutput.model_validate(story_output)
-    story_id_for_text: uuid.UUID = story_result.story_id
+    # Parent output may be a plain dict (JSON path, story_id
+    # is a str) or preserve the native Python type (story_id is uuid.UUID).
+    # Accept both to guard against the internal _data.parents shape changing.
+    story_id_for_text: uuid.UUID = (
+        story_id_raw if isinstance(story_id_raw, uuid.UUID) else uuid.UUID(str(story_id_raw))
+    )
     story_id_str: str = str(story_id_for_text)
 
-    session_maker = get_session_maker()
-    async with session_maker() as _session:
+    _session_maker = get_session_maker()
+    async with _session_maker() as _session:
         _story = await StoryService(_session).get(story_id_for_text)
 
     if _story is None:
@@ -145,7 +145,10 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
 
     log.info(
         "tts_synthesis started workflow_id=%s story_id=%s voice=%s text_len=%d",
-        workflow_run_id, story_id_str, voice_name, len(full_text),
+        workflow_run_id,
+        story_id_str,
+        voice_name,
+        len(full_text),
     )
 
     # --- 2. Normalize full text (LLM call, cached in-process by text hash) ---
@@ -173,13 +176,14 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
     # --- 5. Wait for pod ready, then synthesize all chunks ---
     # Pod is terminated in the finally block regardless of success or failure.
     try:
-        pod, endpoint_url = await wait_for_recorded_ready(
-            provider,
-            session_maker,
-            pod.id,
-            timeout_sec=settings.pod_ready_timeout_sec,
-            label="tts",
-        )
+        pod = await provider.wait_for_ready(pod.id, timeout_sec=settings.pod_ready_timeout_sec)
+        if pod.endpoint_url is None:
+            raise RuntimeError(f"pod {pod.id} ready but has no endpoint_url")
+        log.info("tts pod ready endpoint=%s", pod.endpoint_url)
+
+        # Mark pod ready for cost tracking (start billing clock)
+        async with _session_maker() as session:
+            await CostService(session).mark_ready(pod.id, pod.endpoint_url)
 
         chunk_results, total_duration_sec = await _synthesize_all_chunks(
             endpoint_url=endpoint_url,
@@ -196,7 +200,9 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
 
     log.info(
         "tts_synthesis complete chunks=%d total_dur=%.1fs pod=%s",
-        len(all_chunks_result.chunk_results), all_chunks_result.total_duration_sec, pod.id,
+        len(chunk_results),
+        total_duration_sec,
+        pod.id,
     )
 
     return TtsStepOutput(
@@ -257,7 +263,8 @@ async def _synthesize_all_chunks(
             if requeue_round > 0:
                 log.info(
                     "requeue round %d: retrying %d failed chunk(s)",
-                    requeue_round, len(pending),
+                    requeue_round,
+                    len(pending),
                 )
 
             # Seed offset ensures each round uses fresh seeds
@@ -275,6 +282,7 @@ async def _synthesize_all_chunks(
                 )
 
                 # Persist blob and update chunk progress row
+                session_maker = get_session_maker()
                 async with session_maker() as session:
                     blob = await blob_service.store(
                         session=session,
@@ -311,29 +319,33 @@ async def _synthesize_all_chunks(
 
                 total_duration_sec += synthesis_result.duration_sec
 
-                if synthesis_result.validation_passed:
-                    chunk_results.append(TtsChunkResult(
-                        index=idx,
-                        text=chunk_text,
-                        blob_id=str(blob.id),
-                        duration_sec=synthesis_result.duration_sec,
-                        attempts_used=synthesis_result.attempts_used,
-                        validation_passed=True,
-                    ))
+                if validation_passed:
+                    chunk_results.append(
+                        TtsChunkResult(
+                            index=idx,
+                            text=chunk_text,
+                            blob_id=str(blob.id),
+                            duration_sec=duration_sec,
+                            attempts_used=attempts_used,
+                            validation_passed=True,
+                        )
+                    )
                     log.info(
                         "chunk %d/%d done blob_id=%s dur=%.1fs attempts=%d validated=True",
                         idx + 1,
                         len(chunks),
                         blob.id,
-                        synthesis_result.duration_sec,
-                        synthesis_result.attempts_used,
+                        duration_sec,
+                        attempts_used,
                     )
                 else:
                     # Enqueue for next round (or record final failure below)
                     failed.append((idx, chunk_text))
                     log.warning(
                         "chunk %d/%d failed round %d — will %s",
-                        idx + 1, len(chunks), requeue_round,
+                        idx + 1,
+                        len(chunks),
+                        requeue_round,
                         "requeue" if requeue_round < _MAX_REQUEUE_ROUNDS else "save as FAILED",
                     )
 
@@ -341,17 +353,21 @@ async def _synthesize_all_chunks(
 
         # Any chunks still in pending after all rounds are final failures
         for idx, chunk_text in pending:
-            chunk_results.append(TtsChunkResult(
-                index=idx,
-                text=chunk_text,
-                blob_id="",  # last blob was already persisted in the loop
-                duration_sec=0.0,
-                attempts_used=(_MAX_CHUNK_RETRIES + 1) * (_MAX_REQUEUE_ROUNDS + 1),
-                validation_passed=False,
-            ))
+            chunk_results.append(
+                TtsChunkResult(
+                    index=idx,
+                    text=chunk_text,
+                    blob_id="",  # last blob was already persisted in the loop
+                    duration_sec=0.0,
+                    attempts_used=(_MAX_CHUNK_RETRIES + 1) * (_MAX_REQUEUE_ROUNDS + 1),
+                    validation_passed=False,
+                )
+            )
             log.error(
                 "chunk %d/%d: exhausted all %d requeue round(s); marked FAILED",
-                idx + 1, len(chunks), _MAX_REQUEUE_ROUNDS + 1,
+                idx + 1,
+                len(chunks),
+                _MAX_REQUEUE_ROUNDS + 1,
             )
 
     return TtsAllChunksResult(
@@ -425,7 +441,9 @@ async def _synthesize_with_retry(
         if validation.passed:
             log.debug(
                 "chunk %d passed on attempt %d (dur=%.1fs)",
-                chunk_index, attempt + 1, validation.duration_sec,
+                chunk_index,
+                attempt + 1,
+                validation.duration_sec,
             )
             return ChunkSynthesisResult(
                 wav_bytes=candidate,
@@ -436,13 +454,16 @@ async def _synthesize_with_retry(
 
         log.warning(
             "chunk %d validation failed attempt %d: %s",
-            chunk_index, attempt + 1, validation.failure_reason,
+            chunk_index,
+            attempt + 1,
+            validation.failure_reason,
         )
 
     # All attempts exhausted — return best-effort audio flagged as not validated
     log.error(
         "chunk %d: all %d attempt(s) failed validation; saving best-effort audio as FAILED",
-        chunk_index, max_retries + 1,
+        chunk_index,
+        max_retries + 1,
     )
     return ChunkSynthesisResult(
         wav_bytes=best_wav,

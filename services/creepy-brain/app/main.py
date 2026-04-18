@@ -15,6 +15,7 @@ import app.metrics as _metrics  # noqa: F401 — registers all metric objects
 from app.config import settings
 from app.db import close_db, init_db
 from app.engine import CronScheduler, engine
+from app.llm.client import close_llm_provider
 from app.logging import configure_logging
 from app.middleware import RequestContextMiddleware
 from app.routes import blobs, health, runs, voices, workflows
@@ -29,7 +30,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Initialize database connection pool
     await init_db()
-    logger.info("database_initialized", database_url=settings.database_url.split('@')[1])
+    logger.info("database_initialized", database_url=settings.database_url.split("@")[1])
 
     # Import workflow modules to register definitions with the engine singleton.
     import app.workflows as _workflows  # noqa: F401
@@ -51,6 +52,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await engine.stop()
     await scheduler.stop()
     logger.info("workflow_engine_stopped")
+
+    # Cleanup outbound LLM clients.
+    await close_llm_provider()
 
     # Cleanup DB connection pool.
     await close_db()
@@ -88,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(stories_router)
 
     from app.routes.costs import router as costs_router
+
     app.include_router(costs_router)
 
     # Mount static files for serving audio and UI

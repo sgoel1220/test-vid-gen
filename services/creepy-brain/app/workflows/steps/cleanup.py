@@ -15,7 +15,7 @@ from app.gpu import get_provider
 from app.gpu.lifecycle import terminate_and_finalize
 from app.models.enums import GpuPodStatus
 from app.models.gpu_pod import GpuPod
-from app.models.schemas import WorkflowInputSchema
+from app.models.json_schemas import WorkflowInputSchema
 from app.services.workflow_service import get_optional_workflow_id
 
 from app.workflows.db_helpers import ensure_db, get_session_maker

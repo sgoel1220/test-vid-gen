@@ -15,7 +15,7 @@ from app.config import settings
 from app.db import DbSession
 from app.engine import engine
 from app.models.enums import WorkflowStatus, WorkflowType
-from app.models.schemas import WorkflowInputSchema
+from app.models.json_schemas import WorkflowInputSchema
 from app.models.workflow import Workflow
 from app.models.gpu_pod import GpuPod
 from app.schemas.workflow import (
