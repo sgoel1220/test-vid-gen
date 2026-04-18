@@ -28,7 +28,13 @@ class WorkflowCost(BaseModel):
 
 
 class CostService:
-    """Tracks GPU pod costs."""
+    """Tracks GPU pod costs.
+
+    NOTE: This service commits its own transactions (self-committing).
+    This is an intentional deviation from the flush-only convention used
+    by other services, because cost mutations must be durable even if the
+    caller's outer transaction rolls back (e.g. pod terminated but step fails).
+    """
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session

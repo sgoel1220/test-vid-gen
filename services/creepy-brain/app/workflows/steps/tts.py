@@ -33,11 +33,13 @@ from typing import Any
 
 import httpx
 from hatchet_sdk import Context
+from pydantic import BaseModel, ConfigDict, Field
 
 import app.db as _db
 from app.audio.validation import validate_chunk_audio
 from app.config import settings
 from app.gpu import GpuPodSpec, get_provider
+from app.gpu.lifecycle import terminate_and_finalize
 from app.models.enums import BlobType, GpuProvider as GpuProviderEnum
 from app.models.schemas import WorkflowInputSchema
 from app.services import blob_service
@@ -54,8 +56,31 @@ _SYNTHESIZE_PATH = "/synthesize"
 # Synthesis parameters (timeouts and retries only - TTS params come from config)
 _MAX_CHUNK_RETRIES = 2       # up to 3 total attempts per chunk
 _MAX_REQUEUE_ROUNDS = 2      # additional retry rounds for failed chunks
-_POD_TIMEOUT_SEC = 720       # 12 minutes to wait for pod ready
 _SYNTHESIZE_TIMEOUT_SEC = 120
+
+
+class TtsChunkResult(BaseModel):
+    """Result of synthesizing a single text chunk."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(ge=0, description="Zero-based chunk position")
+    text: str = Field(description="Original chunk text")
+    blob_id: str = Field(description="UUID of the saved WAV blob (empty on failure)")
+    duration_sec: float = Field(ge=0, description="Audio duration in seconds")
+    attempts_used: int = Field(ge=1, description="Number of synthesis attempts")
+    validation_passed: bool = Field(description="Whether chunk passed audio validation")
+
+
+class TtsStepOutput(BaseModel):
+    """Output of the tts_synthesis step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pod_id: str = Field(description="GPU pod ID used for synthesis")
+    chunk_count: int = Field(ge=0, description="Number of chunks synthesized")
+    total_duration_sec: float = Field(ge=0, description="Total audio duration")
+    chunks: list[TtsChunkResult] = Field(description="Per-chunk results")
 
 
 async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]:
@@ -146,7 +171,7 @@ async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]
     # --- 5. Wait for pod ready, then synthesize all chunks ---
     # Pod is terminated in the finally block regardless of success or failure.
     try:
-        pod = await provider.wait_for_ready(pod.id, timeout_sec=_POD_TIMEOUT_SEC)
+        pod = await provider.wait_for_ready(pod.id, timeout_sec=settings.pod_ready_timeout_sec)
         assert pod.endpoint_url is not None, f"pod {pod.id} ready but has no endpoint_url"
         log.info("tts pod ready endpoint=%s", pod.endpoint_url)
 
@@ -162,11 +187,7 @@ async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]
         )
     finally:
         try:
-            await provider.terminate_pod(pod.id)
-            # Finalize cost on termination
-            async with _session_maker() as session:
-                total_cost = await CostService(session).finalize_cost(pod.id)
-            log.info("tts pod terminated pod_id=%s cost_cents=%d", pod.id, total_cost)
+            await terminate_and_finalize(provider, pod.id, _session_maker)
         except Exception as term_exc:
             log.error("failed to terminate tts pod %s: %s", pod.id, term_exc)
 
@@ -175,12 +196,12 @@ async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]
         len(chunk_results), total_duration_sec, pod.id,
     )
 
-    return {
-        "pod_id": pod.id,
-        "chunk_count": len(chunk_results),
-        "total_duration_sec": total_duration_sec,
-        "chunks": chunk_results,
-    }
+    return TtsStepOutput(
+        pod_id=pod.id,
+        chunk_count=len(chunk_results),
+        total_duration_sec=total_duration_sec,
+        chunks=chunk_results,
+    ).model_dump()
 
 
 async def _synthesize_all_chunks(
@@ -188,7 +209,7 @@ async def _synthesize_all_chunks(
     chunks: list[str],
     voice_name: str,
     workflow_run_id: str,
-) -> tuple[list[dict[str, object]], float]:
+) -> tuple[list[TtsChunkResult], float]:
     """Synthesize all chunks sequentially and persist each result to Postgres.
 
     Failed chunks are re-queued for additional retry rounds (up to
@@ -215,7 +236,7 @@ async def _synthesize_all_chunks(
             workflow_run_id,
         )
 
-    chunk_results: list[dict[str, object]] = []
+    chunk_results: list[TtsChunkResult] = []
     total_duration_sec: float = 0.0
 
     # Build initial queue: list of (chunk_index, chunk_text)
@@ -292,14 +313,14 @@ async def _synthesize_all_chunks(
                 total_duration_sec += duration_sec
 
                 if validation_passed:
-                    chunk_results.append({
-                        "index": idx,
-                        "text": chunk_text,
-                        "blob_id": str(blob.id),
-                        "duration_sec": duration_sec,
-                        "attempts_used": attempts_used,
-                        "validation_passed": True,
-                    })
+                    chunk_results.append(TtsChunkResult(
+                        index=idx,
+                        text=chunk_text,
+                        blob_id=str(blob.id),
+                        duration_sec=duration_sec,
+                        attempts_used=attempts_used,
+                        validation_passed=True,
+                    ))
                     log.info(
                         "chunk %d/%d done blob_id=%s dur=%.1fs attempts=%d validated=True",
                         idx + 1, len(chunks), blob.id, duration_sec, attempts_used,
@@ -317,14 +338,14 @@ async def _synthesize_all_chunks(
 
         # Any chunks still in pending after all rounds are final failures
         for idx, chunk_text in pending:
-            chunk_results.append({
-                "index": idx,
-                "text": chunk_text,
-                "blob_id": "",  # last blob was already persisted in the loop
-                "duration_sec": 0.0,
-                "attempts_used": (_MAX_CHUNK_RETRIES + 1) * (_MAX_REQUEUE_ROUNDS + 1),
-                "validation_passed": False,
-            })
+            chunk_results.append(TtsChunkResult(
+                index=idx,
+                text=chunk_text,
+                blob_id="",  # last blob was already persisted in the loop
+                duration_sec=0.0,
+                attempts_used=(_MAX_CHUNK_RETRIES + 1) * (_MAX_REQUEUE_ROUNDS + 1),
+                validation_passed=False,
+            ))
             log.error(
                 "chunk %d/%d: exhausted all %d requeue round(s); marked FAILED",
                 idx + 1, len(chunks), _MAX_REQUEUE_ROUNDS + 1,

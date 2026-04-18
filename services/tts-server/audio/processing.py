@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torchaudio
 
+from enums import ValidationFailure
 from models import ChunkValidationResult
 
 logger = logging.getLogger(__name__)
@@ -208,10 +209,10 @@ def validate_chunk_audio(
     min_voiced_ratio: float = 0.05,
 ) -> ChunkValidationResult:
     """Validate a synthesised audio chunk; returns a typed result."""
-    failures: List[str] = []
+    failures: List[ValidationFailure] = []
 
     if audio_array is None or audio_array.size == 0:
-        failures.append("empty")
+        failures.append(ValidationFailure.EMPTY)
         return ChunkValidationResult(
             passed=False, duration_sec=0.0, rms_energy=0.0,
             peak_amplitude=0.0, voiced_ratio=0.0, failures=failures,
@@ -220,17 +221,17 @@ def validate_chunk_audio(
     arr = audio_array.astype(np.float32, copy=False)
     duration_sec = round(float(len(arr)) / float(sample_rate), 4)
     if duration_sec < min_duration_sec:
-        failures.append("duration_too_short")
+        failures.append(ValidationFailure.DURATION_TOO_SHORT)
     if duration_sec > max_duration_sec:
-        failures.append("duration_too_long")
+        failures.append(ValidationFailure.DURATION_TOO_LONG)
 
     rms = round(float(np.sqrt(np.mean(arr**2))), 8)
     if rms < min_rms_energy:
-        failures.append("silent_rms")
+        failures.append(ValidationFailure.SILENT_RMS)
 
     peak = round(float(np.abs(arr).max()), 8)
     if peak < min_peak_amplitude:
-        failures.append("silent_peak")
+        failures.append(ValidationFailure.SILENT_PEAK)
 
     frame_len = min(512, len(arr))
     hop = frame_len // 2 or 1
@@ -242,7 +243,7 @@ def validate_chunk_audio(
     )
     voiced_ratio = round(float(active) / float(n_frames), 4)
     if voiced_ratio < min_voiced_ratio:
-        failures.append("low_voiced_ratio")
+        failures.append(ValidationFailure.LOW_VOICED_RATIO)
 
     return ChunkValidationResult(
         passed=len(failures) == 0,

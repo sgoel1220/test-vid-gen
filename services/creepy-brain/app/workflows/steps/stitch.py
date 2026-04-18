@@ -24,9 +24,13 @@ from app.audio.encoding import encode_wav_to_mp3
 from app.models.enums import BlobType
 from app.models.schemas import WorkflowInputSchema
 from app.services import blob_service
-from app.services.workflow_service import get_optional_workflow_id
+from app.services.workflow_service import ChunkForImageStep, get_optional_workflow_id
 
 log = structlog.get_logger(__name__)
+
+# ffmpeg video constants
+_FRAMERATE = "1/5"  # 5 seconds per image
+_VIDEO_SCALE = "1280:720"  # output dimensions (W:H)
 
 
 class StitchStepOutput(BaseModel):
@@ -91,13 +95,13 @@ async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]
         )
 
     # --- Quality gate: skip non-completed chunks ---
-    valid_chunks: list[dict[str, object]] = []
+    valid_chunks: list[ChunkForImageStep] = []
     for chunk in chunk_data:
-        if chunk.get("tts_status") != "completed":
+        if chunk.tts_status != "completed":
             log.warning(
                 "stitch_final: skipping chunk %s (tts_status=%s)",
-                chunk.get("index"),
-                chunk.get("tts_status"),
+                chunk.index,
+                chunk.tts_status,
             )
         else:
             valid_chunks.append(chunk)
@@ -117,10 +121,10 @@ async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]
 
     async with session_maker() as session:
         for chunk in chunk_data:
-            blob_id_str = chunk.get("blob_id")
+            blob_id_str = chunk.blob_id
             if not blob_id_str:
                 raise ValueError(
-                    f"Chunk {chunk.get('index')} has no blob_id; TTS may have failed"
+                    f"Chunk {chunk.index} has no blob_id; TTS may have failed"
                 )
 
             blob = await blob_service.get(session, uuid.UUID(blob_id_str))
@@ -134,7 +138,7 @@ async def execute(input: WorkflowInputSchema, ctx: Context) -> dict[str, object]
                     "Sample rate mismatch: expected %d, got %d for chunk %d",
                     sample_rate,
                     chunk_sr,
-                    chunk.get("index"),
+                    chunk.index,
                 )
 
     if sample_rate is None:
@@ -240,13 +244,13 @@ async def _create_video(
         cmd = [
             "ffmpeg",
             "-y",
-            "-framerate", "1/5",  # 5 seconds per image
+            "-framerate", _FRAMERATE,
             "-pattern_type", "glob",
             "-i", str(tmpdir_path / "image_*.png"),
             "-i", str(mp3_path),
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
-            "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+            "-vf", f"scale={_VIDEO_SCALE}:force_original_aspect_ratio=decrease,pad={_VIDEO_SCALE}:(ow-iw)/2:(oh-ih)/2",
             "-c:a", "copy",
             "-shortest",
             str(video_path),

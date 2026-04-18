@@ -36,3 +36,19 @@ class ImageStyle(str, Enum):
     PSYCHOLOGICAL = "psychological"
     FOLK_HORROR = "folk_horror"
     BODY_HORROR = "body_horror"
+
+
+class ModelState(str, Enum):
+    NOT_LOADED = "not_loaded"
+    LOADING = "loading"
+    READY = "ready"
+    ERROR = "error"
+
+
+class ValidationFailure(str, Enum):
+    EMPTY = "empty"
+    DURATION_TOO_SHORT = "duration_too_short"
+    DURATION_TOO_LONG = "duration_too_long"
+    SILENT_RMS = "silent_rms"
+    SILENT_PEAK = "silent_peak"
+    LOW_VOICED_RATIO = "low_voiced_ratio"

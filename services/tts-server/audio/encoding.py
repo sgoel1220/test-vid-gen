@@ -137,6 +137,17 @@ ENCODERS: dict[AudioFormat, AudioEncoder] = {
     AudioFormat.MP3: Mp3Encoder(),
 }
 
+WAV_MEDIA_TYPE = "audio/wav"
+
+
+def encode_to_wav_bytes(wav_tensor: torch.Tensor, sample_rate: int) -> bytes:
+    """Convert a synthesis tensor to WAV bytes (PCM-16)."""
+    audio_np: np.ndarray = wav_tensor.squeeze().cpu().numpy()
+    audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
+    buf = io.BytesIO()
+    sf.write(buf, audio_int16, sample_rate, format="wav", subtype="PCM_16")
+    return buf.getvalue()
+
 
 # ---------------------------------------------------------------------------
 # Public API

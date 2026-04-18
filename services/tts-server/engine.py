@@ -5,6 +5,7 @@ import gc
 import logging
 import random
 import threading
+from dataclasses import dataclass, field
 import numpy as np
 import torch
 from typing import Any, Optional, Tuple
@@ -40,7 +41,7 @@ except ImportError:
 # Import the singleton config_manager
 from config import config_manager
 from config import get_tts_cpu_num_threads, get_tts_cpu_num_interop_threads
-from enums import DeviceType, ModelType
+from enums import DeviceType, ModelState, ModelType
 from models import ModelInfo
 
 logger = logging.getLogger(__name__)
@@ -91,45 +92,47 @@ TURBO_PARALINGUISTIC_TAGS = [
 ]
 
 
-# --- Global Module Variables ---
-chatterbox_model: Optional[ChatterboxTTS] = None
-model_loaded: bool = False
-model_device: Optional[DeviceType] = None  # Stores the resolved device
+@dataclass
+class _EngineState:
+    """Single source of truth for all mutable engine state."""
 
-# Track which model type is loaded
-loaded_model_type: Optional[ModelType] = None
-loaded_model_class_name: Optional[str] = None  # "ChatterboxTTS" or "ChatterboxTurboTTS"
-cpu_interop_threads_configured: bool = False
-model_loading: bool = False
-model_load_error: Optional[str] = None
-model_state_lock = threading.Lock()
-model_load_thread: Optional[threading.Thread] = None
+    model: Optional[ChatterboxTTS] = None
+    loaded: bool = False
+    device: Optional[DeviceType] = None
+    model_type: Optional[ModelType] = None
+    model_class_name: Optional[str] = None
+    cpu_interop_threads_configured: bool = False
+    loading: bool = False
+    load_error: Optional[str] = None
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    load_thread: Optional[threading.Thread] = None
+
+    def get_state(self) -> ModelState:
+        """Return current model state under the assumption the lock is held."""
+        if self.loading:
+            return ModelState.LOADING
+        if self.loaded:
+            return ModelState.READY
+        if self.load_error:
+            return ModelState.ERROR
+        return ModelState.NOT_LOADED
 
 
-def _get_model_state() -> str:
-    if model_loading:
-        return "loading"
-    if model_loaded:
-        return "ready"
-    if model_load_error:
-        return "error"
-    return "not_loaded"
+_engine = _EngineState()
 
 
 def configure_cpu_threading() -> Tuple[int, int]:
     """Configures PyTorch to use the requested CPU thread counts."""
-    global cpu_interop_threads_configured
-
     num_threads, interop_threads = resolve_cpu_thread_settings(
         get_tts_cpu_num_threads(),
         get_tts_cpu_num_interop_threads(),
     )
 
-    cpu_interop_threads_configured = apply_torch_cpu_thread_settings(
+    _engine.cpu_interop_threads_configured = apply_torch_cpu_thread_settings(
         torch,
         num_threads,
         interop_threads,
-        cpu_interop_threads_configured,
+        _engine.cpu_interop_threads_configured,
         logger,
     )
 
@@ -259,15 +262,15 @@ def get_model_info() -> ModelInfo:
     Returns information about the currently loaded model.
     Used by the API to expose model details to the UI.
     """
-    with model_state_lock:
-        model_state = _get_model_state()
-        loaded = model_loaded
-        loading = model_loading
-        load_error = model_load_error
-        current_model = chatterbox_model
-        current_model_type = loaded_model_type
-        current_model_class_name = loaded_model_class_name
-        current_device = model_device
+    with _engine.lock:
+        model_state = _engine.get_state()
+        loaded = _engine.loaded
+        loading = _engine.loading
+        load_error = _engine.load_error
+        current_model = _engine.model
+        current_model_type = _engine.model_type
+        current_model_class_name = _engine.model_class_name
+        current_device = _engine.device
 
     return ModelInfo(
         state=model_state,
@@ -294,8 +297,8 @@ def get_model_info() -> ModelInfo:
 
 
 def is_model_ready() -> bool:
-    with model_state_lock:
-        return model_loaded and chatterbox_model is not None
+    with _engine.lock:
+        return _engine.loaded and _engine.model is not None
 
 
 def _load_model_impl(mark_loading_started: bool) -> bool:
@@ -303,25 +306,22 @@ def _load_model_impl(mark_loading_started: bool) -> bool:
     Loads the TTS model.
     This version directly attempts to load from the Hugging Face repository (or its cache)
     using `from_pretrained`, bypassing the local `paths.model_cache` directory.
-    Updates global variables `chatterbox_model`, `model_loaded`, and `model_device`.
+    Updates `_engine` state fields.
 
     Returns:
         bool: True if the model was loaded successfully, False otherwise.
     """
-    global chatterbox_model, model_loaded, model_device, model_loading, model_load_error
-    global loaded_model_type, loaded_model_class_name
-
     try:
         if not mark_loading_started:
-            with model_state_lock:
-                if model_loaded and chatterbox_model is not None:
+            with _engine.lock:
+                if _engine.loaded and _engine.model is not None:
                     logger.info("TTS model is already loaded.")
                     return True
-                if model_loading:
+                if _engine.loading:
                     logger.info("TTS model load already in progress.")
                     return False
-                model_loading = True
-                model_load_error = None
+                _engine.loading = True
+                _engine.load_error = None
 
         # Determine processing device with robust CUDA detection and intelligent fallback
         device_setting = config_manager.get_string("tts_engine.device", DeviceType.AUTO)
@@ -378,8 +378,8 @@ def _load_model_impl(mark_loading_started: bool) -> bool:
                 resolved_device_str = DeviceType.CPU
             logger.info(f"Auto-detection resolved to: {resolved_device_str}")
 
-        with model_state_lock:
-            model_device = resolved_device_str
+        with _engine.lock:
+            _engine.device = resolved_device_str
         logger.info(f"Final device selection: {resolved_device_str}")
 
         if resolved_device_str == DeviceType.CPU:
@@ -415,35 +415,35 @@ def _load_model_impl(mark_loading_started: bool) -> bool:
                 f"Failed to load model due to import error: {e_import}",
                 exc_info=True,
             )
-            with model_state_lock:
-                chatterbox_model = None
-                model_loaded = False
-                model_loading = False
-                model_load_error = str(e_import)
-                loaded_model_type = None
-                loaded_model_class_name = None
+            with _engine.lock:
+                _engine.model = None
+                _engine.loaded = False
+                _engine.loading = False
+                _engine.load_error = str(e_import)
+                _engine.model_type = None
+                _engine.model_class_name = None
             return False
         except Exception as e_hf:
             logger.error(
                 f"Failed to load model using from_pretrained: {e_hf}",
                 exc_info=True,
             )
-            with model_state_lock:
-                chatterbox_model = None
-                model_loaded = False
-                model_loading = False
-                model_load_error = str(e_hf)
-                loaded_model_type = None
-                loaded_model_class_name = None
+            with _engine.lock:
+                _engine.model = None
+                _engine.loaded = False
+                _engine.loading = False
+                _engine.load_error = str(e_hf)
+                _engine.model_type = None
+                _engine.model_class_name = None
             return False
 
-        with model_state_lock:
-            chatterbox_model = loaded_model
-            loaded_model_type = model_type
-            loaded_model_class_name = model_class.__name__
-            model_loaded = True
-            model_loading = False
-            model_load_error = None
+        with _engine.lock:
+            _engine.model = loaded_model
+            _engine.model_type = model_type
+            _engine.model_class_name = model_class.__name__
+            _engine.loaded = True
+            _engine.loading = False
+            _engine.load_error = None
 
         if loaded_model:
             logger.info(
@@ -451,17 +451,17 @@ def _load_model_impl(mark_loading_started: bool) -> bool:
             )
         else:
             logger.error(
-                "Model loading sequence completed, but chatterbox_model is None. This indicates an unexpected issue."
+                "Model loading sequence completed, but model is None. This indicates an unexpected issue."
             )
-            with model_state_lock:
-                chatterbox_model = None
-                model_loaded = False
-                model_loading = False
-                model_load_error = (
+            with _engine.lock:
+                _engine.model = None
+                _engine.loaded = False
+                _engine.loading = False
+                _engine.load_error = (
                     "Model loading completed without an instantiated model."
                 )
-                loaded_model_type = None
-                loaded_model_class_name = None
+                _engine.model_type = None
+                _engine.model_class_name = None
             return False
 
         return True
@@ -470,13 +470,13 @@ def _load_model_impl(mark_loading_started: bool) -> bool:
         logger.error(
             f"An unexpected error occurred during model loading: {e}", exc_info=True
         )
-        with model_state_lock:
-            chatterbox_model = None
-            model_loaded = False
-            model_loading = False
-            model_load_error = str(e)
-            loaded_model_type = None
-            loaded_model_class_name = None
+        with _engine.lock:
+            _engine.model = None
+            _engine.loaded = False
+            _engine.loading = False
+            _engine.load_error = str(e)
+            _engine.model_type = None
+            _engine.model_class_name = None
         return False
 
 
@@ -485,26 +485,24 @@ def load_model() -> bool:
 
 
 def start_background_model_load() -> bool:
-    global model_loading, model_load_error, model_load_thread
-
-    with model_state_lock:
-        if model_loaded and chatterbox_model is not None:
+    with _engine.lock:
+        if _engine.loaded and _engine.model is not None:
             logger.info("TTS model is already loaded.")
             return False
-        if model_loading and model_load_thread and model_load_thread.is_alive():
+        if _engine.loading and _engine.load_thread and _engine.load_thread.is_alive():
             logger.info("TTS model background load already in progress.")
             return False
 
-        model_loading = True
-        model_load_error = None
+        _engine.loading = True
+        _engine.load_error = None
 
-        model_load_thread = threading.Thread(
+        _engine.load_thread = threading.Thread(
             target=_load_model_impl,
             args=(True,),
             name="chatterbox-model-loader",
             daemon=True,
         )
-        model_load_thread.start()
+        _engine.load_thread.start()
         return True
 
 
@@ -534,12 +532,10 @@ def synthesize(
         A tuple containing the audio waveform (torch.Tensor) and the sample rate (int),
         or (None, None) if synthesis fails.
     """
-    global chatterbox_model
-
-    with model_state_lock:
-        model = chatterbox_model
-        model_type = loaded_model_type
-        is_loaded = model_loaded
+    with _engine.lock:
+        model = _engine.model
+        model_type = _engine.model_type
+        is_loaded = _engine.loaded
 
     if not is_loaded or model is None:
         logger.error("TTS model is not loaded. Cannot synthesize audio.")
@@ -597,31 +593,21 @@ def unload_model() -> bool:
     Returns:
         bool: True if the model was unloaded successfully, False otherwise.
     """
-    global \
-        chatterbox_model, \
-        model_loaded, \
-        model_loading, \
-        model_load_error, \
-        model_device, \
-        loaded_model_type, \
-        loaded_model_class_name
-
     logger.info("Initiating model unload sequence...")
 
     # 1. Unload existing model
-    if chatterbox_model is not None:
+    if _engine.model is not None:
         logger.info("Unloading TTS model from memory...")
-        del chatterbox_model
-        chatterbox_model = None
+        _engine.model = None
 
     # 2. Reset state flags
-    with model_state_lock:
-        model_loaded = False
-        model_loading = False
-        model_load_error = None
-        model_device = None
-        loaded_model_type = None
-        loaded_model_class_name = None
+    with _engine.lock:
+        _engine.loaded = False
+        _engine.loading = False
+        _engine.load_error = None
+        _engine.device = None
+        _engine.model_type = None
+        _engine.model_class_name = None
 
     # 3. Force Python Garbage Collection (aggressive — models must swap in/out)
     gc.collect()
@@ -659,31 +645,21 @@ def reload_model() -> bool:
     Returns:
         bool: True if the new model loaded successfully, False otherwise.
     """
-    global \
-        chatterbox_model, \
-        model_loaded, \
-        model_loading, \
-        model_load_error, \
-        model_device, \
-        loaded_model_type, \
-        loaded_model_class_name
-
     logger.info("Initiating model hot-swap/reload sequence...")
 
     # 1. Unload existing model
-    if chatterbox_model is not None:
+    if _engine.model is not None:
         logger.info("Unloading existing TTS model from memory...")
-        del chatterbox_model
-        chatterbox_model = None
+        _engine.model = None
 
     # 2. Reset state flags
-    with model_state_lock:
-        model_loaded = False
-        model_loading = False
-        model_load_error = None
-        model_device = None
-        loaded_model_type = None
-        loaded_model_class_name = None
+    with _engine.lock:
+        _engine.loaded = False
+        _engine.loading = False
+        _engine.load_error = None
+        _engine.device = None
+        _engine.model_type = None
+        _engine.model_class_name = None
 
     # 3. Force Python Garbage Collection
     gc.collect()

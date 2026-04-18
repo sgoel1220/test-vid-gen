@@ -16,6 +16,21 @@ logger = logging.getLogger(__name__)
 ALLOWED_AUDIO_EXTENSIONS = (".wav", ".mp3")
 
 
+def validate_voice_path(voice: str, ref_base: Path) -> Path:
+    """Resolve *voice* relative to *ref_base* and reject path traversal.
+
+    Returns the resolved path on success.
+    Raises ``ValueError`` for traversal attempts and ``FileNotFoundError``
+    when the file does not exist.
+    """
+    ref_path = (ref_base / voice).resolve()
+    if not str(ref_path).startswith(str(ref_base.resolve()) + "/"):
+        raise ValueError("Invalid voice filename.")
+    if not ref_path.is_file():
+        raise FileNotFoundError(f"Voice '{voice}' not found.")
+    return ref_path
+
+
 # ---------------------------------------------------------------------------
 # Reference audio
 # ---------------------------------------------------------------------------

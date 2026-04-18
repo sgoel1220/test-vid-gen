@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 import shutil
 import uuid
-from pathlib import Path
 from typing import Tuple
 
-import numpy as np
-import soundfile as sf
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response
 
+from audio.encoding import encode_to_wav_bytes, WAV_MEDIA_TYPE
+
 import engine
 from config import config_manager, get_output_path, get_reference_audio_path
-from files import get_valid_reference_files, validate_reference_audio, ALLOWED_AUDIO_EXTENSIONS
+from files import get_valid_reference_files, validate_reference_audio, validate_voice_path, ALLOWED_AUDIO_EXTENSIONS
 from job_store import job_store
 from models import (
     ChunkPreviewRequest,
@@ -37,8 +35,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_ALLOWED_UPLOAD_EXT = (".wav", ".mp3")
-
 
 # ---------------------------------------------------------------------------
 # Reference audio upload helpers
@@ -48,7 +44,7 @@ def _resolve_upload_filename(filename: str | None) -> str:
     if not filename:
         raise ValueError("File received with no filename.")
     safe = sanitize_filename(filename)
-    if not safe.lower().endswith(_ALLOWED_UPLOAD_EXT):
+    if not safe.lower().endswith(ALLOWED_AUDIO_EXTENSIONS):
         raise ValueError("Invalid file type. Only .wav and .mp3 are allowed.")
     return safe
 
@@ -145,12 +141,12 @@ async def get_job(job_id: str) -> LiteCloneJobStatusResponse:
 @router.post("/synthesize")
 async def synthesize_endpoint(request: SynthesizeRequest) -> Response:
     """Stateless single-shot TTS synthesis. Returns raw WAV bytes."""
-    ref_base = get_reference_audio_path(ensure_absolute=True).resolve()
-    ref_path = (ref_base / request.voice).resolve()
-    if not str(ref_path).startswith(str(ref_base) + "/"):
-        raise HTTPException(status_code=400, detail="Invalid voice filename.")
-    if not ref_path.is_file():
-        raise HTTPException(status_code=404, detail=f"Voice '{request.voice}' not found.")
+    try:
+        ref_path = validate_voice_path(request.voice, get_reference_audio_path(ensure_absolute=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     loop = asyncio.get_running_loop()
     wav_tensor, sample_rate = await loop.run_in_executor(
@@ -165,8 +161,4 @@ async def synthesize_endpoint(request: SynthesizeRequest) -> Response:
     if wav_tensor is None or sample_rate is None:
         raise HTTPException(status_code=500, detail="Synthesis failed.")
 
-    audio_np: np.ndarray = wav_tensor.squeeze().numpy()
-    audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
-    buf = io.BytesIO()
-    sf.write(buf, audio_int16, sample_rate, format="wav", subtype="PCM_16")
-    return Response(content=buf.getvalue(), media_type="audio/wav")
+    return Response(content=encode_to_wav_bytes(wav_tensor, sample_rate), media_type=WAV_MEDIA_TYPE)

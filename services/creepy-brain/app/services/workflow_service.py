@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -386,18 +387,30 @@ class WorkflowService:
         return wf
 
 
+class ChunkForImageStep(BaseModel):
+    """Chunk data needed by image_generation and stitch_final steps."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(ge=0, description="Zero-based chunk position")
+    text: str = Field(description="Chunk text content")
+    blob_id: str | None = Field(description="UUID of the WAV blob (None if TTS failed)")
+    tts_status: str = Field(description="Chunk TTS status value")
+    scene_id: str | None = Field(description="UUID of the linked scene (None if unlinked)")
+
+
 async def get_chunks_for_image_step(
     session: AsyncSession,
     workflow_id: uuid.UUID,
-) -> list[dict[str, object]]:
-    """Return chunk data needed by the image_generation step.
+) -> list[ChunkForImageStep]:
+    """Return chunk data needed by the image_generation and stitch_final steps.
 
     Args:
         session: Active SQLAlchemy async session.
         workflow_id: The workflow whose chunks to fetch.
 
     Returns:
-        List of dicts with ``index``, ``text``, ``blob_id``, and ``scene_id`` keys.
+        List of ChunkForImageStep models ordered by chunk_index.
     """
     result = await session.execute(
         select(WorkflowChunk)
@@ -406,13 +419,13 @@ async def get_chunks_for_image_step(
     )
     chunks = result.scalars().all()
     return [
-        {
-            "index": c.chunk_index,
-            "text": c.chunk_text,
-            "blob_id": str(c.tts_audio_blob_id) if c.tts_audio_blob_id else None,
-            "tts_status": c.tts_status.value,
-            "scene_id": str(c.scene_id) if c.scene_id else None,
-        }
+        ChunkForImageStep(
+            index=c.chunk_index,
+            text=c.chunk_text,
+            blob_id=str(c.tts_audio_blob_id) if c.tts_audio_blob_id else None,
+            tts_status=c.tts_status.value,
+            scene_id=str(c.scene_id) if c.scene_id else None,
+        )
         for c in chunks
     ]
 

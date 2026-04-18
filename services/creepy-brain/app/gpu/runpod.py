@@ -171,15 +171,16 @@ class RunPodProvider(GpuProvider):
     async def _find_pod_by_name(
         self, name: str, service_port: int | None = None
     ) -> GpuPod | None:
-        """Find a pod by name."""
-        pods = await self.list_active_pods()
-        for pod in pods:
-            # Get full pod info to check name
-            full_pod = await self.get_pod(pod.id)
-            if full_pod:
-                raw = await asyncio.to_thread(lambda: runpod.get_pod(pod.id))
-                if raw and raw.get("name") == name:
-                    return self._parse_pod(raw, service_port)
+        """Find a pod by name using a single get_pods() call."""
+        def _list() -> list[dict[str, object]]:
+            return runpod.get_pods()
+
+        raw_pods = await asyncio.to_thread(_list)
+        for raw in raw_pods:
+            if raw.get("name") == name:
+                pod = self._parse_pod(raw, service_port)
+                if pod.status != PodStatus.TERMINATED:
+                    return pod
         return None
 
     async def aclose(self) -> None:

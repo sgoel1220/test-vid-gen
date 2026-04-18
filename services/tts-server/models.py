@@ -4,11 +4,11 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from enums import AudioFormat, JobStatus, ModelType
+from enums import AudioFormat, JobStatus, ModelState, ModelType, ValidationFailure
 
 
 class LiteCloneTTSRequest(BaseModel):
-    text: str = Field(..., min_length=1, description="Text to be synthesized.")
+    text: str = Field(..., min_length=1, max_length=50000, description="Text to be synthesized.")
     reference_audio_filename: str = Field(
         ..., description="Filename inside reference_audio/ used for cloning."
     )
@@ -101,7 +101,7 @@ class ChunkValidationResult(BaseModel):
     rms_energy: float
     peak_amplitude: float
     voiced_ratio: float
-    failures: List[str]
+    failures: List[ValidationFailure]
 
 
 class SavedAudioArtifact(BaseModel):
@@ -191,7 +191,7 @@ class SynthesizeRequest(BaseModel):
 
 
 class ModelInfo(BaseModel):
-    state: str  # "not_loaded" | "loading" | "ready" | "error"
+    state: ModelState
     loaded: bool
     loading: bool
     load_error: Optional[str]

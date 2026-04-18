@@ -34,6 +34,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import app.db as _db
 from app.config import settings
 from app.gpu import GpuPodSpec, get_provider
+from app.gpu.lifecycle import terminate_and_finalize
 from app.llm.image_prompts import generate_scene_image_prompt
 from app.models.enums import BlobType, ChunkStatus, GpuProvider as GpuProviderEnum
 from app.models.schemas import WorkflowInputSchema
@@ -41,6 +42,7 @@ from app.models.workflow import WorkflowScene
 from app.services import blob_service
 from app.services.cost_service import CostService
 from app.services.workflow_service import (
+    ChunkForImageStep,
     WorkflowService,
     get_chunks_for_image_step,
     get_optional_workflow_id,
@@ -51,7 +53,6 @@ from app.text.scene_grouping import Scene, group_chunks_into_scenes
 log = logging.getLogger(__name__)
 
 _GENERATE_PATH = "/generate"
-_POD_TIMEOUT_SEC = 720  # 12 minutes to wait for pod ready
 _GENERATE_TIMEOUT_SEC = 180  # 3 minutes per image generation
 
 # PNG magic bytes
@@ -198,7 +199,7 @@ async def execute(
             "tts_synthesis step may not have completed"
         )
 
-    chunk_texts: list[str] = [str(c["text"]) for c in chunk_data]
+    chunk_texts: list[str] = [c.text for c in chunk_data]
     log.info("image_generation: %d chunks to group into scenes", len(chunk_texts))
 
     # --- 3. Group chunks into scenes ---
@@ -279,7 +280,7 @@ async def execute(
     try:
         pod = await provider.wait_for_ready(
             pod.id,
-            timeout_sec=_POD_TIMEOUT_SEC,
+            timeout_sec=settings.pod_ready_timeout_sec,
             service_port=settings.image_server_port,
         )
         assert pod.endpoint_url is not None, f"pod {pod.id} ready but has no endpoint_url"
@@ -297,11 +298,7 @@ async def execute(
     finally:
         # --- 8. Terminate image pod ---
         try:
-            await provider.terminate_pod(pod.id)
-            # Finalize cost on termination
-            async with session_maker() as session:
-                total_cost = await CostService(session).finalize_cost(pod.id)
-            log.info("image pod terminated pod_id=%s cost_cents=%d", pod.id, total_cost)
+            await terminate_and_finalize(provider, pod.id, session_maker)
         except Exception as term_exc:
             log.error("failed to terminate image pod %s: %s", pod.id, term_exc)
 

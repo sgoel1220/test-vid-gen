@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
-import soundfile as sf
 import torch
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+
+from audio.encoding import encode_to_wav_bytes, WAV_MEDIA_TYPE
+from files import validate_voice_path
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -151,11 +151,12 @@ async def ready() -> dict[str, bool]:
 async def synthesize(request: SynthesizeRequest) -> Response:
     """Stateless single-shot TTS synthesis. Returns raw WAV bytes."""
     # Validate voice file exists
-    ref_path = (REFERENCE_AUDIO_PATH / request.voice).resolve()
-    if not str(ref_path).startswith(str(REFERENCE_AUDIO_PATH.resolve()) + "/"):
-        raise HTTPException(status_code=400, detail="Invalid voice filename.")
-    if not ref_path.is_file():
-        raise HTTPException(status_code=404, detail=f"Voice '{request.voice}' not found.")
+    try:
+        ref_path = validate_voice_path(request.voice, REFERENCE_AUDIO_PATH)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     # Ensure model is loaded
     model = await _ensure_model_loaded()
@@ -181,13 +182,7 @@ async def synthesize(request: SynthesizeRequest) -> Response:
     if wav_tensor is None:
         raise HTTPException(status_code=500, detail="Synthesis failed.")
 
-    # Convert to WAV bytes
-    audio_np: np.ndarray = wav_tensor.squeeze().cpu().numpy()
-    audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
-    buf = io.BytesIO()
-    sf.write(buf, audio_int16, sample_rate, format="wav", subtype="PCM_16")
-
-    return Response(content=buf.getvalue(), media_type="audio/wav")
+    return Response(content=encode_to_wav_bytes(wav_tensor, sample_rate), media_type=WAV_MEDIA_TYPE)
 
 
 @app.on_event("startup")

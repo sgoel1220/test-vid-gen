@@ -237,7 +237,7 @@ async def execute_lite_clone_run(
     request: LiteCloneTTSRequest,
     progress_callback: Optional[Callable[..., None]] = None,
 ) -> LiteCloneRunResponse:
-    if not engine.model_loaded:
+    if not engine.is_model_ready():
         raise HTTPException(status_code=503, detail="TTS model is not loaded.")
 
     settings = resolve_lite_clone_settings(request)
