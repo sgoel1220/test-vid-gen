@@ -26,6 +26,7 @@ class StepName(str, Enum):
     TTS_SYNTHESIS = "tts_synthesis"
     IMAGE_GENERATION = "image_generation"
     STITCH_FINAL = "stitch_final"
+    CLEANUP_GPU_POD = "cleanup_gpu_pod"
 
 
 class StepStatus(str, Enum):

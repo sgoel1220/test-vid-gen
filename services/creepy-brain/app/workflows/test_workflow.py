@@ -5,10 +5,7 @@ import asyncio
 from pydantic import BaseModel
 
 from app.engine import StepContext, StepDef, WorkflowDef, engine
-
-
-class EmptyModel(BaseModel):
-    pass
+from app.workflows.types import EmptyModel
 
 
 class StepOneOutput(BaseModel):

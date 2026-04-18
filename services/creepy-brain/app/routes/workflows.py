@@ -46,7 +46,7 @@ async def trigger_test_workflow() -> WorkflowRunResponse:
     if not settings.dev_mode:
         raise HTTPException(status_code=404, detail="Not found")
 
-    from app.workflows.test_workflow import EmptyModel
+    from app.workflows.types import EmptyModel
 
     workflow_id = uuid.uuid4()
     run_id = await engine.trigger("TestWorkflow", EmptyModel(), workflow_id)
