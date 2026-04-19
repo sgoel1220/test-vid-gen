@@ -20,7 +20,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from importlib import import_module
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, get_args
 
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -67,12 +67,9 @@ if not TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-_STEP_OUTPUT_TYPES: tuple[type[BaseModel], ...] = (
-    GenerateStoryStepOutput,
-    TtsSynthesisStepOutput,
-    ImageGenerationStepOutput,
-    StitchFinalStepOutput,
-)
+# Derived from the discriminated union so adding a type to StepOutputSchema
+# in json_schemas.py automatically updates this tuple — no third registration point.
+_STEP_OUTPUT_TYPES: tuple[type[BaseModel], ...] = get_args(get_args(StepOutputSchema)[0])
 
 
 class WorkflowDagPlanner:
@@ -489,6 +486,14 @@ class WorkflowRunner:
             await self._run_on_failure_steps(failure_error)
             await self._fail_workflow(failure_error)
         else:
+            if self._def.on_complete is not None:
+                try:
+                    await self._def.on_complete(
+                        str(self._workflow_id),
+                        self._run_state.get_outputs(),
+                    )
+                except Exception as exc:
+                    log.error("workflow %s: on_complete hook failed: %s", self._workflow_id, exc)
             log.info("workflow %s: all steps completed", self._workflow_id)
             # Caller (engine) marks workflow COMPLETED after result assembly.
 

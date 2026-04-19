@@ -24,7 +24,7 @@ from app.engine import SkippedStepOutput, StepContext
 
 from app.audio.encoding import encode_wav_to_mp3
 from app.models.enums import BlobType, ChunkStatus
-from app.models.json_schemas import WorkflowInputSchema
+from app.models.json_schemas import ImageGenerationStepOutput, WorkflowInputSchema
 from app.models.workflow import WorkflowBlob
 from app.services import blob_service
 from app.services.workflow_service import (
@@ -85,7 +85,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
     log.info("stitch_final started workflow_id=%s", workflow_run_id)
 
     # Get parent step outputs
-    image_output = ctx.parent_outputs.get("image_generation")
+    image_output = ctx.get_parent_output("image_generation", ImageGenerationStepOutput)
 
     session_maker = get_session_maker()
 
@@ -106,7 +106,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
     existing_video_id: uuid.UUID | None = existing_blobs.get(BlobType.FINAL_VIDEO)
 
     # If both exist (or audio exists and no video needed), return early
-    needs_video = image_output is not None and not isinstance(image_output, SkippedStepOutput)
+    needs_video = image_output is not None
     if existing_audio_id is not None:
         if not needs_video or existing_video_id is not None:
             log.info(

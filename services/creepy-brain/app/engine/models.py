@@ -7,13 +7,14 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
 # Any is deliberate here: each workflow can define its own validated input model.
 StepFn = Callable[[Any, "StepContext"], Awaitable[BaseModel]]
 StepOutputMap = dict[str, BaseModel]
+OnCompleteHook = Callable[[str, StepOutputMap], Awaitable[None]]
 
 
 class SkippedStepOutput(BaseModel):
@@ -31,6 +32,9 @@ class EmptyStepOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+_T = TypeVar("_T", bound=BaseModel)
+
+
 class StepContext(BaseModel):
     """Runtime context passed to each step function."""
 
@@ -41,6 +45,13 @@ class StepContext(BaseModel):
         default_factory=dict,
         description="Keyed by step name, contains each completed parent step output model",
     )
+
+    def get_parent_output(self, step_name: str, output_type: type[_T]) -> _T | None:
+        """Retrieve a parent step's output, validated against `output_type`."""
+        raw = self.parent_outputs.get(step_name)
+        if not isinstance(raw, output_type):
+            return None
+        return raw
 
 
 class StepDef(BaseModel):
@@ -81,3 +92,7 @@ class WorkflowDef(BaseModel):
 
     name: str = Field(description="Unique workflow name for registry lookup")
     steps: list[StepDef] = Field(description="All steps (including on_failure steps)")
+    on_complete: OnCompleteHook | None = Field(
+        default=None,
+        description="Called with (workflow_run_id, all_outputs) after all steps succeed.",
+    )

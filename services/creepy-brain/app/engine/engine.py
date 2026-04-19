@@ -95,7 +95,23 @@ class WorkflowEngine:
         return asyncio.create_task(coro, name=name)
 
     def register(self, workflow_def: WorkflowDef) -> None:
-        """Register a workflow definition. Must be called before trigger()."""
+        """Register a workflow definition. Must be called before trigger().
+
+        Raises ValueError if a non-on_failure step name is missing from the
+        StepName enum, surfacing the omission at import time rather than
+        silently at runtime.
+        """
+        StepName = getattr(import_module("app.models.enums"), "StepName")
+        for step in workflow_def.steps:
+            if not step.is_on_failure:
+                try:
+                    StepName(step.name)
+                except ValueError:
+                    raise ValueError(
+                        f"Workflow '{workflow_def.name}': step '{step.name}' is not in "
+                        f"StepName enum. Add it to app/models/enums.py and create a DB "
+                        f"migration, or mark is_on_failure=True to skip DB tracking."
+                    )
         self._definition_registry.register(workflow_def)
 
     async def trigger(
