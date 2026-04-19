@@ -5,7 +5,8 @@ from typing import AsyncIterator
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 import structlog
@@ -19,6 +20,7 @@ from app.llm.client import close_llm_provider
 from app.logging import configure_logging
 from app.middleware import RequestContextMiddleware
 from app.routes import blobs, health, runs, voices, workflows
+from app.services.errors import ResourceNotFoundError
 
 logger = structlog.get_logger()
 
@@ -32,8 +34,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await init_db()
     logger.info("database_initialized", database_url=settings.database_url.split("@")[1])
 
-    # Import workflow modules to register definitions with the engine singleton.
-    import app.workflows as _workflows  # noqa: F401
+    # Register all workflow definitions with the engine singleton.
+    from app.workflows import register_workflows
+    register_workflows()
 
     # Start cron scheduler for periodic workflows (recon every 5 min).
     from app.workflows.recon import RECON_CRON
@@ -73,6 +76,10 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    @app.exception_handler(ResourceNotFoundError)
+    async def _not_found_handler(request: Request, exc: ResourceNotFoundError) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
 
     # Add request context middleware
     app.add_middleware(RequestContextMiddleware)

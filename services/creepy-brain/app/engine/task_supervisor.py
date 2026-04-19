@@ -108,6 +108,10 @@ class WorkflowTaskSupervisor:
             await runner.run()
         except PauseAfterStep as exc:
             log.info("engine: auto-pausing workflow %s after step '%s'", run_id, exc.step_name)
+            # Remove ourselves from the task registry before calling pause so that
+            # the cancel_task callback inside pause finds nothing and skips task
+            # cancellation — a task cannot safely cancel and await itself.
+            self.tasks.pop(run_id, None)
             await self._pause_workflow(run_id)
         except asyncio.CancelledError:
             log.info("engine: workflow %s task cancelled", run_id)

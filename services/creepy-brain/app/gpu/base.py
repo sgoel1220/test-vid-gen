@@ -9,8 +9,8 @@ TERMINATED – pod has exited or been terminated
 ERROR     – provider reported an error state
 """
 
-from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -71,57 +71,10 @@ class GpuPod(BaseModel):
     created_at: datetime | None
 
 
-class GpuProvider(ABC):
-    @abstractmethod
-    async def create_pod(
-        self,
-        spec: GpuPodSpec,
-        idempotency_key: str,
-    ) -> GpuPod:
-        """Create a new GPU pod. Idempotency key ensures same pod returned if called twice."""
-
-    @abstractmethod
-    async def get_pod(
-        self, pod_id: str, service_port: int | None = None
-    ) -> GpuPod | None:
-        """Get pod status by ID.
-
-        Args:
-            pod_id: The pod ID to get.
-            service_port: The service port for endpoint URL construction.
-        """
-
-    @abstractmethod
-    async def resume_pod(
-        self, pod_id: str, gpu_count: int = 1, service_port: int | None = None
-    ) -> GpuPod:
-        """Resume a stopped pod.
-
-        Args:
-            pod_id: The pod ID to resume.
-            gpu_count: Number of GPUs to allocate.
-            service_port: The service port for endpoint URL construction.
-        """
-
-    @abstractmethod
-    async def terminate_pod(self, pod_id: str) -> bool:
-        """Terminate a pod. Returns True if terminated."""
-
-    @abstractmethod
-    async def wait_for_ready(
-        self,
-        pod_id: str,
-        timeout_sec: int = 720,
-        service_port: int | None = None,
-    ) -> GpuPod:
-        """Wait for pod to be ready (health check passes).
-
-        Args:
-            pod_id: The pod ID to wait for.
-            timeout_sec: Maximum time to wait for the pod to become ready.
-            service_port: The service port for endpoint URL construction.
-        """
-
-    @abstractmethod
-    async def list_active_pods(self) -> list[GpuPod]:
-        """List all active (non-terminated) pods. Used for recon."""
+class GpuProvider(Protocol):
+    async def create_pod(self, spec: GpuPodSpec, idempotency_key: str) -> GpuPod: ...
+    async def get_pod(self, pod_id: str, service_port: int | None = None) -> GpuPod | None: ...
+    async def resume_pod(self, pod_id: str, gpu_count: int = 1, service_port: int | None = None) -> GpuPod: ...
+    async def terminate_pod(self, pod_id: str) -> bool: ...
+    async def wait_for_ready(self, pod_id: str, timeout_sec: int = 720, service_port: int | None = None) -> GpuPod: ...
+    async def list_active_pods(self) -> list[GpuPod]: ...

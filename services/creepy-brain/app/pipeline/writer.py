@@ -25,6 +25,26 @@ def _format_beats(act_outline: ActOutline) -> str:
     )
 
 
+async def _generate_act_draft(
+    system: str,
+    user_prompt: str,
+    act_outline: ActOutline,
+    label: str,
+) -> ActDraft:
+    """Generate text via LLM and return a typed ActDraft."""
+    act_num = act_outline.act_number
+    text = await client.generate_text(system=system, user=user_prompt)
+    text = text.strip()
+    word_count = len(text.split())
+    log.info("writer: act %d %s done, %d words", act_num, label, word_count)
+    return ActDraft(
+        act_number=act_num,
+        title=act_outline.title,
+        text=text,
+        word_count=word_count,
+    )
+
+
 async def write_act(
     bible: StoryBible,
     outline: FiveActOutline,
@@ -33,32 +53,19 @@ async def write_act(
     target_word_count: int,
 ) -> ActDraft:
     """Generate prose for a single act."""
-    act_num = act_outline.act_number
-    log.info("writer: writing act %d", act_num)
-
+    log.info("writer: writing act %d", act_outline.act_number)
     user_prompt = WRITER_USER.format(
         bible_json=bible.model_dump_json(indent=2),
         outline_json=outline.model_dump_json(indent=2),
         prior_acts=format_act_drafts(prior_acts, empty_text=_FIRST_ACT_EMPTY_TEXT),
-        act_number=act_num,
+        act_number=act_outline.act_number,
         act_title=act_outline.title,
         target_word_count=target_word_count,
         beats=_format_beats(act_outline),
         act_hook=act_outline.act_hook,
         act_cliffhanger=act_outline.act_cliffhanger,
     )
-
-    text = await client.generate_text(system=WRITER_SYSTEM, user=user_prompt)
-    text = text.strip()
-    word_count = len(text.split())
-    log.info("writer: act %d done, %d words", act_num, word_count)
-
-    return ActDraft(
-        act_number=act_num,
-        title=act_outline.title,
-        text=text,
-        word_count=word_count,
-    )
+    return await _generate_act_draft(WRITER_SYSTEM, user_prompt, act_outline, "write")
 
 
 async def rewrite_act(
@@ -70,14 +77,12 @@ async def rewrite_act(
     target_word_count: int,
 ) -> ActDraft:
     """Rewrite an act that failed inline check."""
-    act_num = act_outline.act_number
-    log.info("writer: rewriting act %d", act_num)
-
+    log.info("writer: rewriting act %d", act_outline.act_number)
     user_prompt = ACT_REWRITE_USER.format(
         bible_json=bible.model_dump_json(indent=2),
         outline_json=outline.model_dump_json(indent=2),
         prior_acts=format_act_drafts(prior_acts, empty_text=_FIRST_ACT_EMPTY_TEXT),
-        act_number=act_num,
+        act_number=act_outline.act_number,
         act_title=act_outline.title,
         target_word_count=target_word_count,
         beats=_format_beats(act_outline),
@@ -85,15 +90,4 @@ async def rewrite_act(
         act_cliffhanger=act_outline.act_cliffhanger,
         check_notes=check_notes,
     )
-
-    text = await client.generate_text(system=ACT_REWRITE_SYSTEM, user=user_prompt)
-    text = text.strip()
-    word_count = len(text.split())
-    log.info("writer: act %d rewrite done, %d words", act_num, word_count)
-
-    return ActDraft(
-        act_number=act_num,
-        title=act_outline.title,
-        text=text,
-        word_count=word_count,
-    )
+    return await _generate_act_draft(ACT_REWRITE_SYSTEM, user_prompt, act_outline, "rewrite")

@@ -10,7 +10,7 @@ import runpod
 
 from app.models.enums import GpuProvider as GpuProviderName, GpuPodStatus
 
-from .base import GpuPod, GpuPodSpec, GpuProvider
+from .base import GpuPod, GpuPodSpec
 
 log = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ def _select_endpoint(
     return None
 
 
-class RunPodProvider(GpuProvider):
+class RunPodProvider:
     """GPU provider backed by the RunPod SDK."""
 
     def __init__(self, api_key: str) -> None:

@@ -99,20 +99,12 @@ class WorkflowStateRepository:
                     step.completed_at = None
             await session.commit()
 
-    async def set_workflow_status_running(self, workflow_id: uuid.UUID) -> None:
-        """Transition workflow to RUNNING unless it is already COMPLETED."""
-        Workflow = _workflow_model()
-        async with self._optional_session_factory() as session:
-            if session is None:
-                return
-            result = await session.execute(select(Workflow).where(Workflow.id == workflow_id))
-            wf = result.scalar_one_or_none()
-            if wf is not None and wf.status != WorkflowStatus.COMPLETED:
-                wf.status = WorkflowStatus.RUNNING
-            await session.commit()
-
-    async def mark_workflow_cancelled(self, workflow_id: uuid.UUID) -> None:
-        """Mark a workflow CANCELLED and set completed_at."""
+    async def _update_workflow(
+        self,
+        workflow_id: uuid.UUID,
+        update_fn: Callable[[Any], None],
+    ) -> None:
+        """Fetch a workflow row and apply *update_fn* to it, then commit."""
         Workflow = _workflow_model()
         async with self._optional_session_factory() as session:
             if session is None:
@@ -120,9 +112,22 @@ class WorkflowStateRepository:
             result = await session.execute(select(Workflow).where(Workflow.id == workflow_id))
             wf = result.scalar_one_or_none()
             if wf is not None:
-                wf.status = WorkflowStatus.CANCELLED
-                wf.completed_at = datetime.now(timezone.utc)
+                update_fn(wf)
             await session.commit()
+
+    async def set_workflow_status_running(self, workflow_id: uuid.UUID) -> None:
+        """Transition workflow to RUNNING unless it is already COMPLETED."""
+        def _update(wf: Any) -> None:
+            if wf.status != WorkflowStatus.COMPLETED:
+                wf.status = WorkflowStatus.RUNNING
+        await self._update_workflow(workflow_id, _update)
+
+    async def mark_workflow_cancelled(self, workflow_id: uuid.UUID) -> None:
+        """Mark a workflow CANCELLED and set completed_at."""
+        def _update(wf: Any) -> None:
+            wf.status = WorkflowStatus.CANCELLED
+            wf.completed_at = datetime.now(timezone.utc)
+        await self._update_workflow(workflow_id, _update)
 
     async def set_workflow_status(
         self,
@@ -130,12 +135,4 @@ class WorkflowStateRepository:
         status: WorkflowStatus,
     ) -> None:
         """Set workflow to an arbitrary status."""
-        Workflow = _workflow_model()
-        async with self._optional_session_factory() as session:
-            if session is None:
-                return
-            result = await session.execute(select(Workflow).where(Workflow.id == workflow_id))
-            wf = result.scalar_one_or_none()
-            if wf is not None:
-                wf.status = status
-            await session.commit()
+        await self._update_workflow(workflow_id, lambda wf: setattr(wf, "status", status))

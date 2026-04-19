@@ -124,9 +124,10 @@ class CronScheduler:
     async def _fire(self, entry: CronEntry) -> None:
         """Trigger a workflow run for a cron entry."""
         workflow_id = uuid.uuid4()
+        workflow_input = entry.input_factory()
         try:
             # Create the Workflow DB row first; abort if it fails.
-            await self._create_workflow_row(entry, workflow_id)
+            await self._create_workflow_row(entry, workflow_id, workflow_input)
         except Exception as exc:
             log.error(
                 "scheduler: failed to create DB row for '%s', skipping trigger: %s",
@@ -135,7 +136,7 @@ class CronScheduler:
             return
 
         try:
-            await self._engine.trigger(entry.workflow_name, entry.input_factory(), workflow_id)
+            await self._engine.trigger(entry.workflow_name, workflow_input, workflow_id)
             log.info(
                 "scheduler: triggered '%s' workflow_id=%s",
                 entry.workflow_name, workflow_id,
@@ -145,7 +146,9 @@ class CronScheduler:
                 "scheduler: failed to trigger '%s': %s", entry.workflow_name, exc
             )
 
-    async def _create_workflow_row(self, entry: CronEntry, workflow_id: uuid.UUID) -> None:
+    async def _create_workflow_row(
+        self, entry: CronEntry, workflow_id: uuid.UUID, input_obj: BaseModel
+    ) -> None:
         """Create the Workflow DB row before triggering the engine.
 
         Raises on failure so _fire can abort the trigger.
@@ -163,7 +166,6 @@ class CronScheduler:
             import_module("app.models.json_schemas"),
             "WorkflowInputSchema",
         )
-        input_obj = entry.input_factory()
         # Only create a typed Workflow row for known input schemas.
         if not isinstance(input_obj, WorkflowInputSchema):
             log.debug(
