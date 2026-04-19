@@ -136,6 +136,10 @@ class WorkflowEngine:
             set_workflow_status=self._set_workflow_status,
         )
 
+    def has_runner(self, workflow_run_id: str) -> bool:
+        """Return True if an in-memory runner exists for this workflow."""
+        return self._task_supervisor.runners.get(workflow_run_id) is not None
+
     async def cancel(self, workflow_run_id: str) -> None:
         """Cancel a running workflow."""
         await self._resource_controller.cancel(

@@ -107,3 +107,10 @@ class WorkflowDetailResponse(WorkflowResponse):
     chunks: list[WorkflowChunkResponse]
     scenes: list[WorkflowSceneResponse]
     gpu_pods: list[GpuPodResponse]
+
+
+class EncodeMp3Response(BaseModel):
+    """Result of a POST /encode-mp3 operation."""
+
+    encoded: int
+    skipped: int

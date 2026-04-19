@@ -10,6 +10,8 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.workflow_lifecycle_service import PIPELINE_STEP_ORDER
+
 _enums: Any = import_module("app.models.enums")
 _workflow_models: Any = import_module("app.models.workflow")
 StepName: Any = _enums.StepName
@@ -19,15 +21,6 @@ Workflow: Any = _workflow_models.Workflow
 WorkflowChunk: Any = _workflow_models.WorkflowChunk
 WorkflowScene: Any = _workflow_models.WorkflowScene
 WorkflowStep: Any = _workflow_models.WorkflowStep
-
-
-_FORK_STEP_ORDER: list[StepName] = [
-    StepName.GENERATE_STORY,
-    StepName.TTS_SYNTHESIS,
-    StepName.IMAGE_GENERATION,
-    StepName.STITCH_FINAL,
-]
-
 
 class WorkflowForkService:
     """Create workflow forks from existing workflow state."""
@@ -49,12 +42,12 @@ class WorkflowForkService:
             raise ValueError(f"Source workflow not found: {source_id}")
 
         try:
-            fork_idx = _FORK_STEP_ORDER.index(from_step)
+            fork_idx = PIPELINE_STEP_ORDER.index(from_step)
         except ValueError:
-            valid = [s.value for s in _FORK_STEP_ORDER]
+            valid = [s.value for s in PIPELINE_STEP_ORDER]
             raise ValueError(f"Invalid from_step '{from_step.value}'. Valid: {valid}")
 
-        predecessor_names = _FORK_STEP_ORDER[:fork_idx]
+        predecessor_names = PIPELINE_STEP_ORDER[:fork_idx]
 
         src_steps_result = await self._session.execute(
             select(WorkflowStep)
@@ -97,8 +90,8 @@ class WorkflowForkService:
 
         await self._session.flush()
 
-        needs_chunks = fork_idx >= _FORK_STEP_ORDER.index(StepName.IMAGE_GENERATION)
-        needs_scenes = fork_idx >= _FORK_STEP_ORDER.index(StepName.STITCH_FINAL)
+        needs_chunks = fork_idx >= PIPELINE_STEP_ORDER.index(StepName.IMAGE_GENERATION)
+        needs_scenes = fork_idx >= PIPELINE_STEP_ORDER.index(StepName.STITCH_FINAL)
 
         if needs_chunks:
             chunks_result = await self._session.execute(
@@ -162,3 +155,37 @@ async def fork_workflow(
 ) -> Workflow:
     """Create a new workflow forked from *source_id* starting at *from_step*."""
     return await WorkflowForkService(session).fork_workflow(source_id, from_step)
+
+
+async def fork_and_trigger(
+    db: AsyncSession,
+    source_id: uuid.UUID,
+    from_step: StepName,
+    engine: Any,
+) -> Workflow:
+    """Fork a workflow and immediately trigger execution of the new workflow.
+
+    Commits the fork DB state before triggering. If the engine trigger fails,
+    marks the new workflow as FAILED and commits, then re-raises.
+    """
+    import structlog as _structlog
+
+    _log = _structlog.get_logger()
+    new_wf = await fork_workflow(db, source_id, from_step)
+    await db.commit()
+
+    try:
+        await engine.trigger("ContentPipeline", new_wf.input_json, new_wf.id)
+    except Exception:
+        new_wf.status = WorkflowStatus.FAILED
+        await db.commit()
+        _log.exception("fork: engine.trigger failed", workflow_id=str(new_wf.id))
+        raise
+
+    _log.info(
+        "fork: created workflow_id=%s from source=%s from_step=%s",
+        new_wf.id,
+        source_id,
+        from_step.value,
+    )
+    return new_wf

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, HTTPException
@@ -14,13 +13,13 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.db import DbSession
 from app.engine import engine
-from app.models.enums import StepName, StepStatus, WorkflowStatus, WorkflowType
-from app.models.json_schemas import WorkflowInputSchema
+from app.models.enums import StepName, WorkflowStatus, WorkflowType
 from app.models.workflow import Workflow, WorkflowScene, WorkflowStep
 from app.models.gpu_pod import GpuPod
 from app.log_buffer import log_buffer
 from app.schemas.workflow import (
     CreateWorkflowRequest,
+    EncodeMp3Response,
     GpuPodResponse,
     WorkflowChunkResponse,
     WorkflowDetailResponse,
@@ -30,7 +29,13 @@ from app.schemas.workflow import (
     WorkflowStepResponse,
 )
 from app.services.http_errors import require_found
-from app.services.workflow_service import WorkflowService, fork_workflow
+from app.services.workflow_audio_service import encode_chunks_to_mp3 as _encode_chunks
+from app.services.workflow_chunk_service import retry_tts_chunks
+from app.services.workflow_fork_service import fork_and_trigger
+from app.services.workflow_lifecycle_service import (
+    WorkflowLifecycleService,
+    create_and_trigger,
+)
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 log = structlog.get_logger()
@@ -91,47 +96,12 @@ async def _get_workflow_or_404(
     return require_found(result.scalar_one_or_none(), "Workflow not found")
 
 
-async def _trigger_and_create(input_data: WorkflowInputSchema, db: DbSession) -> Workflow:
-    """Create the DB record and trigger a ContentPipeline run via the engine."""
-    workflow_id = uuid.uuid4()
-
-    workflow = Workflow(
-        id=workflow_id,
-        workflow_type=WorkflowType.CONTENT_PIPELINE,
-        input_json=input_data,
-        status=WorkflowStatus.RUNNING,
-        started_at=datetime.now(timezone.utc),
-    )
-    db.add(workflow)
-    try:
-        await db.commit()
-    except Exception:
-        log.exception(
-            "Failed to persist Workflow record — aborting trigger",
-            workflow_id=str(workflow_id),
-        )
-        raise
-
-    try:
-        await engine.trigger("ContentPipeline", input_data, workflow_id)
-    except Exception:
-        # DB record committed but engine trigger failed — mark FAILED so it isn't stuck.
-        workflow.status = WorkflowStatus.FAILED
-        workflow.completed_at = datetime.now(timezone.utc)
-        await db.commit()
-        log.exception("engine.trigger failed for workflow", workflow_id=str(workflow_id))
-        raise
-
-    await db.refresh(workflow)
-    return workflow
-
-
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("", response_model=WorkflowResponse, status_code=201)
 async def create_workflow(request: CreateWorkflowRequest, db: DbSession) -> WorkflowResponse:
     """Trigger a new ContentPipeline workflow run."""
-    workflow = await _trigger_and_create(request, db)
+    workflow = await create_and_trigger(request, db, engine)
     return _to_response(workflow)
 
 
@@ -256,7 +226,7 @@ async def retry_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowRespo
             detail=f"Can only retry FAILED workflows (current status: {workflow.status})",
         )
 
-    new_workflow = await _trigger_and_create(workflow.input_json, db)
+    new_workflow = await create_and_trigger(workflow.input_json, db, engine)
     return _to_response(new_workflow)
 
 
@@ -287,42 +257,6 @@ class RetryChunksRequest(BaseModel):
 
     chunk_indices: list[int] | None = None
     """Chunk indices to retry. If omitted, all FAILED chunks are retried."""
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-# Pipeline step order — used to find the first incomplete step for resume.
-_PIPELINE_ORDER: list[StepName] = [
-    StepName.GENERATE_STORY,
-    StepName.TTS_SYNTHESIS,
-    StepName.IMAGE_GENERATION,
-    StepName.STITCH_FINAL,
-]
-
-
-async def _find_resume_step(workflow_id: uuid.UUID, db: DbSession) -> StepName:
-    """Walk pipeline order and return the first non-COMPLETED step.
-
-    Raises:
-        HTTPException: If all steps are already completed.
-    """
-    result = await db.execute(
-        select(WorkflowStep).where(WorkflowStep.workflow_id == workflow_id)
-    )
-    steps = result.scalars().all()
-    done_statuses = {StepStatus.COMPLETED, StepStatus.SKIPPED}
-    completed: set[StepName] = {
-        s.step_name for s in steps if s.status in done_statuses
-    }
-
-    for step_name in _PIPELINE_ORDER:
-        if step_name not in completed:
-            return step_name
-
-    raise HTTPException(
-        status_code=400,
-        detail="All steps already completed — nothing to resume",
-    )
 
 
 # ── step-level retry, pause, resume endpoints ────────────────────────────────
@@ -379,16 +313,10 @@ async def retry_chunks(
             ),
         )
 
-    svc = WorkflowService(db)
-    reset_count = await svc.reset_chunks_to_pending(workflow_id, body.chunk_indices)
+    reset_count = await retry_tts_chunks(workflow_id, body.chunk_indices, db, engine)
 
     if reset_count == 0:
         raise HTTPException(status_code=400, detail="No FAILED chunks found to retry")
-
-    # Schedule the retry BEFORE committing: if the engine raises, SQLAlchemy
-    # auto-rolls back our chunk resets, preserving FAILED state + blob references.
-    # retry_step now handles cold-start (no in-memory runner) automatically.
-    await engine.retry_step(str(workflow_id), StepName.TTS_SYNTHESIS.value)
 
     await db.commit()
 
@@ -402,12 +330,6 @@ async def retry_chunks(
     return _to_response(workflow)
 
 
-
-class EncodeMp3Response(BaseModel):
-    encoded: int
-    skipped: int
-
-
 @router.post("/{workflow_id}/encode-mp3", response_model=EncodeMp3Response)
 async def encode_chunks_to_mp3(
     workflow_id: uuid.UUID,
@@ -419,63 +341,7 @@ async def encode_chunks_to_mp3(
     but no MP3 blob (tts_mp3_blob_id = NULL), encodes them locally using ffmpeg,
     stores the MP3 as a new blob, and writes tts_mp3_blob_id back to the chunk row.
     """
-    import io
-    import numpy as np
-    import soundfile as sf
-    from app.audio.encoding import encode_wav_to_mp3
-    from app.models.enums import BlobType
-    from app.models.workflow import WorkflowChunk, WorkflowBlob
-    from app.services import blob_service
-    from app.workflows.db_helpers import get_session_maker
-
-    session_maker = get_session_maker()
-
-    # Load chunks that need MP3 encoding
-    result = await db.execute(
-        select(WorkflowChunk).where(
-            WorkflowChunk.workflow_id == workflow_id,
-            WorkflowChunk.tts_audio_blob_id.is_not(None),
-            WorkflowChunk.tts_mp3_blob_id.is_(None),
-        )
-    )
-    chunks = list(result.scalars().all())
-
-    if not chunks:
-        return EncodeMp3Response(encoded=0, skipped=0)
-
-    encoded = 0
-    skipped = 0
-
-    for chunk in chunks:
-        try:
-            async with session_maker() as session:
-                assert chunk.tts_audio_blob_id is not None
-                wav_blob = await blob_service.get(session, chunk.tts_audio_blob_id)
-                audio, sr = sf.read(io.BytesIO(wav_blob.data), dtype="float32")
-                mp3_bytes = await encode_wav_to_mp3(audio, sr)
-                mp3_blob = await blob_service.store(
-                    session=session,
-                    data=mp3_bytes,
-                    mime_type="audio/mpeg",
-                    blob_type=BlobType.CHUNK_AUDIO_MP3,
-                    workflow_id=workflow_id,
-                )
-                await session.commit()
-
-            chunk.tts_mp3_blob_id = mp3_blob.id
-            await db.flush()
-            encoded += 1
-            log.info(
-                "encode_mp3: chunk %d encoded mp3_blob_id=%s",
-                chunk.chunk_index,
-                mp3_blob.id,
-            )
-        except Exception:
-            log.exception("encode_mp3: failed chunk %d", chunk.chunk_index)
-            skipped += 1
-
-    await db.commit()
-    return EncodeMp3Response(encoded=encoded, skipped=skipped)
+    return await _encode_chunks(workflow_id, db)
 
 
 @router.post("/{workflow_id}/pause", status_code=204)
@@ -512,13 +378,10 @@ async def resume_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowResp
             ),
         )
 
-    # Try in-memory retry first (runner still around from this process).
-    if str(workflow_id) in engine._runners:
-        resume_step = await _find_resume_step(workflow_id, db)
-        await engine.retry_step(str(workflow_id), resume_step.value)
-    else:
-        # Cold-start: load from DB.
-        await engine.resume_from_db(workflow_id)
+    try:
+        await WorkflowLifecycleService(db).resume_workflow(workflow_id, engine)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     await db.refresh(workflow)
     return _to_response(workflow)
@@ -556,24 +419,8 @@ async def fork_workflow_endpoint(
     await _get_workflow_or_404(workflow_id, db)
 
     try:
-        new_wf = await fork_workflow(db, workflow_id, body.from_step)
+        new_wf = await fork_and_trigger(db, workflow_id, body.from_step, engine)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    await db.commit()
-
-    try:
-        await engine.trigger("ContentPipeline", new_wf.input_json, new_wf.id)
-    except Exception:
-        new_wf.status = WorkflowStatus.FAILED
-        await db.commit()
-        log.exception("fork: engine.trigger failed", workflow_id=str(new_wf.id))
-        raise
-
-    log.info(
-        "fork: created workflow_id=%s from source=%s from_step=%s",
-        new_wf.id,
-        workflow_id,
-        body.from_step.value,
-    )
     return ForkResponse(workflow_id=str(new_wf.id))

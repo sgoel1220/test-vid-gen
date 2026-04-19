@@ -142,3 +142,28 @@ class WorkflowChunkService:
                 f"WorkflowChunk not found: workflow_id={workflow_id} chunk_index={chunk_index}"
             )
         return chunk
+
+
+async def retry_tts_chunks(
+    workflow_id: uuid.UUID,
+    chunk_indices: list[int] | None,
+    db: AsyncSession,
+    engine: Any,
+) -> int:
+    """Reset FAILED TTS chunks to PENDING and schedule a TTS step retry.
+
+    The engine retry is scheduled before the session is committed so that if
+    the engine raises, SQLAlchemy rolls back the chunk resets automatically,
+    leaving chunks in their original FAILED state rather than stuck in PENDING.
+
+    Returns:
+        Number of chunks reset to PENDING.
+    """
+    _enums_mod: Any = import_module("app.models.enums")
+    svc = WorkflowChunkService(db)
+    reset_count = await svc.reset_chunks_to_pending(workflow_id, chunk_indices)
+    if reset_count > 0:
+        await engine.retry_step(
+            str(workflow_id), _enums_mod.StepName.TTS_SYNTHESIS.value
+        )
+    return reset_count
