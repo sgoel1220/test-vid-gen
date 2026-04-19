@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     image_height: int = 720
 
     # GPU pod lifecycle
-    pod_ready_timeout_sec: int = 1200  # 20 minutes to wait for pod ready (cold image pull)
+    pod_ready_timeout_sec: int = 600  # 10 minutes to wait for pod ready (cold image pull)
 
     # Cost tracking settings
     daily_cost_alert_threshold_cents: int = 1000  # $10
