@@ -369,6 +369,54 @@ async def _handle_pipeline_failure(
         log.exception("failed to mark story %s as failed", story.id)
 
 
+async def _stage_outline_review(
+    story: _PipelineStory,
+    bible: StoryBible,
+    outline: FiveActOutline,
+    db: AsyncSession,
+) -> tuple[StoryBible, FiveActOutline]:
+    return await _repair_outline_loop(story, bible, outline, db)
+
+
+async def _stage_act_generation(
+    story: _PipelineStory,
+    outline: FiveActOutline,
+    db: AsyncSession,
+) -> list[ActDraft]:
+    act_word_counts = _derive_act_word_counts(story.target_word_count, len(outline.acts))
+    story.act_word_counts = act_word_counts
+    acts: list[ActDraft] = []
+    story.acts = acts
+    for idx, act_outline in enumerate(outline.acts):
+        draft = await _write_act_with_review(
+            story,
+            act_outline.act_number,
+            list(acts),
+            act_word_counts[idx],
+        )
+        acts.append(draft)
+        story.acts = acts
+        await _persist_act_draft(story, draft, db)
+    return acts
+
+
+async def _stage_full_review(
+    story: _PipelineStory,
+    acts: list[ActDraft],
+    db: AsyncSession,
+) -> list[ActDraft]:
+    await _transition_story_status(story, StoryStatus.REVIEWING, db)
+    return await _full_story_review_loop(story, acts, db)
+
+
+async def _stage_persistence(
+    story: _PipelineStory,
+    acts: list[ActDraft],
+    db: AsyncSession,
+) -> None:
+    await _finalize_story(story, acts, db)
+
+
 async def run_pipeline(
     story_id: uuid.UUID,
     premise: str,
@@ -390,34 +438,19 @@ async def run_pipeline(
 
         # ── Step 1: Architect ────────────────────────────────────────
         bible, outline = await _run_architect(story, session)
-
         await _persist_bible_and_outline(story, bible, outline, session)
 
-        # ── Step 2: Outline review (max 2 loops) ────────────────────
-        bible, outline = await _repair_outline_loop(story, bible, outline, session)
+        # ── Step 2: Outline review ───────────────────────────────────
+        bible, outline = await _stage_outline_review(story, bible, outline, session)
 
-        # ── Step 3: Write acts + inline checks ──────────────────────
-        act_word_counts = _derive_act_word_counts(target_word_count, len(outline.acts))
-        story.act_word_counts = act_word_counts
-        acts: list[ActDraft] = []
-        story.acts = acts
-        for idx, act_outline in enumerate(outline.acts):
-            draft = await _write_act_with_review(
-                story,
-                act_outline.act_number,
-                list(acts),
-                act_word_counts[idx],
-            )
-            acts.append(draft)
-            story.acts = acts
-            await _persist_act_draft(story, draft, session)
+        # ── Step 3: Act generation ───────────────────────────────────
+        acts = await _stage_act_generation(story, outline, session)
 
-        # ── Step 4: Full story review loop ───────────────────────────
-        await _transition_story_status(story, StoryStatus.REVIEWING, session)
-        acts = await _full_story_review_loop(story, acts, session)
+        # ── Step 4: Full review ──────────────────────────────────────
+        acts = await _stage_full_review(story, acts, session)
 
-        # ── Done ─────────────────────────────────────────────────────
-        await _finalize_story(story, acts, session)
+        # ── Step 5: Persist ──────────────────────────────────────────
+        await _stage_persistence(story, acts, session)
 
     except Exception as exc:
         await _handle_pipeline_failure(story, exc, session)
