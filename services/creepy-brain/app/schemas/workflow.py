@@ -80,9 +80,21 @@ class GpuPodResponse(BaseModel):
     total_cost_cents: int
 
 
+class WorkflowSceneResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    scene_index: int
+    combined_text: str
+    image_status: ChunkStatus
+    image_prompt: str | None
+    image_negative_prompt: str | None
+    image_blob_id: uuid.UUID | None
+
+
 class WorkflowDetailResponse(WorkflowResponse):
     input: WorkflowInputSchema
     result: WorkflowResultSchema | None
     steps: list[WorkflowStepResponse]
     chunks: list[WorkflowChunkResponse]
+    scenes: list[WorkflowSceneResponse]
     gpu_pods: list[GpuPodResponse]
