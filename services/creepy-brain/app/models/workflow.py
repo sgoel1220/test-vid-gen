@@ -194,6 +194,11 @@ class WorkflowChunk(BaseModel):
         ForeignKey("workflow_blobs.id", ondelete="SET NULL"),
         nullable=True,
     )
+    tts_mp3_blob_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflow_blobs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     tts_duration_sec: Mapped[float | None] = mapped_column(nullable=True)
     tts_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

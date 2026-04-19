@@ -67,6 +67,7 @@ export interface WorkflowChunk {
   tts_status: ChunkTtsStatus;
   tts_duration_sec: number | null;
   tts_audio_blob_id: string | null;
+  tts_mp3_blob_id: string | null;
   tts_completed_at: string | null;
   scene_id: string | null;
 }

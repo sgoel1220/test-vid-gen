@@ -74,6 +74,7 @@ class WorkflowChunkResponse(BaseModel):
     tts_status: ChunkStatus
     tts_duration_sec: float | None
     tts_audio_blob_id: uuid.UUID | None
+    tts_mp3_blob_id: uuid.UUID | None
     tts_completed_at: datetime | None
     scene_id: uuid.UUID | None
 

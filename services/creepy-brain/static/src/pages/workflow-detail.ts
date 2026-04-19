@@ -289,8 +289,14 @@ function renderDetail(wf: WorkflowDetailResponse): string {
       const textPreview = c.chunk_text.length > 200
         ? esc(c.chunk_text.slice(0, 200)) + "&hellip;"
         : esc(c.chunk_text);
-      const audio = c.tts_audio_blob_id
-        ? `<audio class="chunk-audio" controls preload="none" src="/api/blobs/${c.tts_audio_blob_id}"></audio>`
+      const audioBlobId = c.tts_mp3_blob_id ?? c.tts_audio_blob_id;
+      const downloadBlobId = c.tts_mp3_blob_id ?? c.tts_audio_blob_id;
+      const downloadExt = c.tts_mp3_blob_id ? "mp3" : "wav";
+      const audio = audioBlobId
+        ? `<div class="audio-cell">
+            <audio class="chunk-audio" controls preload="none" src="/api/blobs/${audioBlobId}"></audio>
+            <a class="dl-link" href="/api/blobs/${downloadBlobId}" download="chunk-${c.chunk_index}.${downloadExt}" title="Download">⬇</a>
+           </div>`
         : '<span class="muted">-</span>';
       const completed = c.tts_completed_at ? timeAgo(c.tts_completed_at) : "-";
       return `<tr class="chunk-row" data-chunk-idx="${c.chunk_index}">

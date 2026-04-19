@@ -72,6 +72,7 @@ class BlobType(str, Enum):
     """Blob content types."""
 
     CHUNK_AUDIO = "chunk_audio"
+    CHUNK_AUDIO_MP3 = "chunk_audio_mp3"
     FINAL_AUDIO = "final_audio"
     IMAGE = "image"
     FINAL_VIDEO = "final_video"

@@ -73,6 +73,7 @@ class WorkflowService:
         blob_id: uuid.UUID,
         duration_sec: float,
         attempts_used: int,
+        mp3_blob_id: uuid.UUID | None = None,
     ) -> None:
         """Record successful TTS for a chunk (flush only).
 
@@ -82,10 +83,12 @@ class WorkflowService:
             blob_id: UUID of the saved WAV blob in ``workflow_blobs``.
             duration_sec: Audio duration in seconds.
             attempts_used: Number of synthesis attempts made (1 = first try succeeded).
+            mp3_blob_id: Optional UUID of the encoded MP3 blob.
         """
         chunk = await self._get_chunk_or_raise(workflow_id, chunk_index)
         chunk.tts_status = ChunkStatus.COMPLETED
         chunk.tts_audio_blob_id = blob_id
+        chunk.tts_mp3_blob_id = mp3_blob_id
         chunk.tts_duration_sec = duration_sec
         chunk.tts_completed_at = datetime.now(timezone.utc)
         await self._session.flush()

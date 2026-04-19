@@ -27,15 +27,19 @@ GPU pod contract (stateless /synthesize endpoint):
 
 from __future__ import annotations
 
+import io
 import logging
 import uuid
 
 import httpx
+import numpy as np
+import soundfile as sf
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.engine import StepContext
 
+from app.audio.encoding import encode_wav_to_mp3
 from app.audio.validation import validate_chunk_audio
 from app.config import settings
 from app.gpu import GpuPodSpec, get_provider

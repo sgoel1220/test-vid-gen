@@ -187,6 +187,7 @@ async def get_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowDetailR
                 tts_status=c.tts_status,
                 tts_duration_sec=c.tts_duration_sec,
                 tts_audio_blob_id=c.tts_audio_blob_id,
+                tts_mp3_blob_id=c.tts_mp3_blob_id,
                 tts_completed_at=c.tts_completed_at,
                 scene_id=c.scene_id,
             )
