@@ -131,3 +131,56 @@ async def terminate_and_finalize(
         total_cost = await CostService(session).finalize_cost(pod_id, reason=reason)
     log.info("pod terminated pod_id=%s cost_cents=%d reason=%s", pod_id, total_cost, reason)
     return total_cost
+
+
+from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator
+
+
+@asynccontextmanager
+async def gpu_pod(
+    provider: GpuProvider,
+    session_maker: async_sessionmaker[AsyncSession],
+    *,
+    spec: GpuPodSpec,
+    idempotency_key: str,
+    workflow_id: uuid.UUID | None,
+    label: str,
+    gpu_type_fallbacks: list[str] | None = None,
+    timeout_sec: int,
+    service_port: int | None = None,
+) -> AsyncGenerator[tuple[GpuPod, str], None]:
+    """Async context manager: create pod → wait ready → yield (pod, endpoint_url) → terminate.
+
+    Terminate-in-finally is always attempted; terminate exceptions are swallowed and logged
+    so the original work-body exception (if any) is not masked.
+
+    Usage::
+
+        async with gpu_pod(provider, session_maker, spec=..., ...) as (pod, endpoint_url):
+            result = await do_work(endpoint_url)
+    """
+    pod = await create_recorded_pod(
+        provider,
+        session_maker,
+        spec=spec,
+        idempotency_key=idempotency_key,
+        workflow_id=workflow_id,
+        label=label,
+        gpu_type_fallbacks=gpu_type_fallbacks,
+    )
+    try:
+        pod, endpoint_url = await wait_for_recorded_ready(
+            provider,
+            session_maker,
+            pod.id,
+            timeout_sec=timeout_sec,
+            label=label,
+            service_port=service_port,
+        )
+        yield pod, endpoint_url
+    finally:
+        try:
+            await terminate_and_finalize(provider, pod.id, session_maker)
+        except Exception as term_exc:
+            log.error("failed to terminate %s pod %s: %s", label, pod.id, term_exc)

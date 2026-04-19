@@ -43,11 +43,7 @@ from app.audio.encoding import encode_wav_to_mp3
 from app.audio.validation import validate_chunk_audio
 from app.config import settings
 from app.gpu import GpuPodSpec, get_provider
-from app.gpu.lifecycle import (
-    create_recorded_pod,
-    terminate_and_finalize,
-    wait_for_recorded_ready,
-)
+from app.gpu.lifecycle import gpu_pod
 from app.models.enums import BlobType, ChunkStatus
 from app.models.json_schemas import GenerateStoryStepOutput, WorkflowInputSchema
 from app.services import blob_service
@@ -234,10 +230,10 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
             chunks=all_results,
         )
 
-    # --- 6. Spin up TTS GPU pod ---
+    # --- 6-7. Spin up TTS GPU pod, wait for ready, synthesize, terminate ---
     provider = get_provider(settings.runpod_api_key)
     workflow_id_for_pod = get_optional_workflow_id(workflow_run_id)
-    pod = await create_recorded_pod(
+    async with gpu_pod(
         provider,
         session_maker,
         spec=GpuPodSpec.from_config(),
@@ -245,24 +241,10 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
         workflow_id=workflow_id_for_pod,
         label="tts",
         gpu_type_fallbacks=settings.gpu_type_fallbacks,
-    )
-
-    # --- 7. Wait for pod ready, then synthesize pending chunks ---
-    try:
-        pod, endpoint_url = await wait_for_recorded_ready(
-            provider,
-            session_maker,
-            pod.id,
-            timeout_sec=settings.pod_ready_timeout_sec,
-            label="tts",
-            service_port=settings.gpu_port,
-        )
-
-        # Mark pod ready for cost tracking (start billing clock)
-        async with _session_maker() as session:
-            await CostService(session).mark_ready(pod.id, pod.endpoint_url)
-
-        chunk_results, total_duration_sec = await _synthesize_all_chunks(
+        timeout_sec=settings.pod_ready_timeout_sec,
+        service_port=settings.gpu_port,
+    ) as (pod, endpoint_url):
+        all_chunks_result = await _synthesize_all_chunks(
             endpoint_url=endpoint_url,
             pending_chunks=pending_chunks,
             total_chunk_count=len(chunks),
@@ -270,11 +252,6 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
             workflow_run_id=workflow_run_id,
             session_maker=session_maker,
         )
-    finally:
-        try:
-            await terminate_and_finalize(provider, pod.id, session_maker)
-        except Exception as term_exc:
-            log.error("failed to terminate tts pod %s: %s", pod.id, term_exc)
 
     # --- 8. Merge resumed + newly synthesized results ---
     merged = resumed_results + all_chunks_result.chunk_results
