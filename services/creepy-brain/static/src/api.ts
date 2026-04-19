@@ -155,6 +155,22 @@ export function resumeWorkflow(id: string): Promise<WorkflowResponse> {
   return api(`/api/workflows/${id}/resume`, { method: "POST" });
 }
 
+export function retryTtsStep(id: string): Promise<WorkflowResponse> {
+  return api(`/api/workflows/${id}/retry-step`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ step_name: "tts_synthesis" }),
+  });
+}
+
+export function retryChunks(id: string, chunkIndices?: number[]): Promise<WorkflowResponse> {
+  return api(`/api/workflows/${id}/retry-chunks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chunk_indices: chunkIndices ?? null }),
+  });
+}
+
 export function fetchCostSummary(): Promise<CostSummary> {
   return api("/api/costs/summary");
 }

@@ -117,6 +117,39 @@ class WorkflowService:
         chunk.tts_completed_at = datetime.now(timezone.utc)
         await self._session.flush()
 
+    async def reset_chunks_to_pending(
+        self,
+        workflow_id: uuid.UUID,
+        chunk_indices: list[int] | None = None,
+    ) -> int:
+        """Reset FAILED chunks back to PENDING so they can be re-synthesized.
+
+        Args:
+            workflow_id: The owning workflow UUID.
+            chunk_indices: Specific chunk indices to reset. If None, resets all FAILED chunks.
+
+        Returns:
+            Number of chunks reset.
+        """
+        stmt = select(WorkflowChunk).where(
+            WorkflowChunk.workflow_id == workflow_id,
+            WorkflowChunk.tts_status == ChunkStatus.FAILED,
+        )
+        if chunk_indices is not None:
+            stmt = stmt.where(WorkflowChunk.chunk_index.in_(chunk_indices))
+
+        result = await self._session.execute(stmt)
+        chunks = list(result.scalars().all())
+
+        for chunk in chunks:
+            chunk.tts_status = ChunkStatus.PENDING
+            chunk.tts_audio_blob_id = None
+            chunk.tts_mp3_blob_id = None
+            chunk.tts_completed_at = None
+
+        await self._session.flush()
+        return len(chunks)
+
     # -------------------------------------------------------------------------
     # Scene operations (Image)
     # -------------------------------------------------------------------------

@@ -27,6 +27,7 @@ from app.schemas.workflow import (
     WorkflowStepResponse,
 )
 from app.services.http_errors import require_found
+from app.services.workflow_service import WorkflowService
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 log = structlog.get_logger()
@@ -248,6 +249,13 @@ class RetryStepRequest(BaseModel):
     step_name: StepName
 
 
+class RetryChunksRequest(BaseModel):
+    """Request body for retrying specific TTS chunks."""
+
+    chunk_indices: list[int] | None = None
+    """Chunk indices to retry. If omitted, all FAILED chunks are retried."""
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 # Pipeline step order — used to find the first incomplete step for resume.
@@ -307,6 +315,65 @@ async def retry_step(
         )
 
     await engine.retry_step(str(workflow_id), body.step_name.value)
+    await db.refresh(workflow)
+    return _to_response(workflow)
+
+
+@router.post("/{workflow_id}/retry-chunks", response_model=WorkflowResponse)
+async def retry_chunks(
+    workflow_id: uuid.UUID,
+    body: RetryChunksRequest,
+    db: DbSession,
+) -> WorkflowResponse:
+    """Reset specific FAILED TTS chunks to PENDING and retry the TTS step.
+
+    Allowed when the workflow is FAILED, CANCELLED, or COMPLETED (completed workflows
+    may still contain failed chunks when stitch succeeded on best-effort audio).
+    If ``chunk_indices`` is omitted, all FAILED chunks are reset.
+
+    Chunk resets are committed only after the retry is successfully scheduled so that
+    a missing in-memory runner causes an automatic rollback — leaving chunks in their
+    original FAILED state rather than a broken PENDING state with no blobs.
+    """
+    _RETRYABLE = {WorkflowStatus.FAILED, WorkflowStatus.CANCELLED, WorkflowStatus.COMPLETED}
+    workflow = await _get_workflow_or_404(workflow_id, db)
+    if workflow.status not in _RETRYABLE:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Can only retry chunks on FAILED, CANCELLED, or COMPLETED workflows "
+                f"(current: {workflow.status})"
+            ),
+        )
+
+    svc = WorkflowService(db)
+    reset_count = await svc.reset_chunks_to_pending(workflow_id, body.chunk_indices)
+
+    if reset_count == 0:
+        raise HTTPException(status_code=400, detail="No FAILED chunks found to retry")
+
+    # Schedule the retry BEFORE committing: if the engine raises (e.g. no in-memory
+    # runner after a process restart), SQLAlchemy auto-rolls back our chunk resets,
+    # preserving the FAILED state and existing audio blob references.
+    try:
+        await engine.retry_step(str(workflow_id), StepName.TTS_SYNTHESIS.value)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Could not schedule TTS retry: {exc}. "
+                "The workflow runner is not loaded — try a full workflow resume instead."
+            ),
+        ) from exc
+
+    await db.commit()
+
+    log.info(
+        "retry_chunks: reset %d chunk(s) to PENDING workflow_id=%s",
+        reset_count,
+        workflow_id,
+    )
+
     await db.refresh(workflow)
     return _to_response(workflow)
 

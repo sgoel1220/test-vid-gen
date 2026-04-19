@@ -5,6 +5,8 @@ import {
   fetchStoryByWorkflow,
   updateStory,
   retryWorkflow,
+  retryTtsStep,
+  retryChunks,
   cancelWorkflow,
   pauseWorkflow,
   resumeWorkflow,
@@ -80,6 +82,10 @@ function renderActions(wf: WorkflowDetailResponse): void {
   if (wf.status === "failed") {
     btns.push('<button id="act-retry" class="btn">Retry</button>');
   }
+  const hasFailedChunks = wf.chunks.some((c) => c.tts_status === "failed");
+  if (hasFailedChunks && (wf.status === "failed" || wf.status === "cancelled" || wf.status === "completed")) {
+    btns.push('<button id="act-retry-tts" class="btn">Retry TTS Step</button>');
+  }
   if (wf.status === "running") {
     btns.push('<button id="act-pause" class="btn">Pause</button>');
   }
@@ -122,6 +128,9 @@ function attachActionListeners(wf: WorkflowDetailResponse): void {
   document.getElementById("act-retry")?.addEventListener("click", () => {
     runAction(() => retryWorkflow(wf.id), true);
   });
+  document.getElementById("act-retry-tts")?.addEventListener("click", () => {
+    runAction(() => retryTtsStep(wf.id));
+  });
   document.getElementById("act-pause")?.addEventListener("click", () => {
     runAction(() => pauseWorkflow(wf.id));
   });
@@ -146,12 +155,23 @@ function attachChunkListeners(): void {
     refresh();
   });
 
+  // Per-chunk retry buttons
+  document.querySelectorAll<HTMLButtonElement>(".chunk-retry-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation(); // don't toggle row expand
+      const idx = parseInt(btn.dataset.chunkIndex ?? "", 10);
+      if (!isNaN(idx)) {
+        runAction(() => retryChunks(workflowId, [idx]));
+      }
+    });
+  });
+
   // Click-to-expand rows
   document.querySelectorAll<HTMLTableRowElement>(".chunk-row").forEach((row) => {
     row.style.cursor = "pointer";
     row.addEventListener("click", (e) => {
-      // Don't toggle when clicking audio controls
-      if ((e.target as HTMLElement).closest("audio")) return;
+      // Don't toggle when clicking audio controls or retry button
+      if ((e.target as HTMLElement).closest("audio, button")) return;
       const idx = row.dataset.chunkIdx;
       const detail = document.querySelector<HTMLTableRowElement>(
         `tr[data-detail-for="${idx}"]`,
@@ -299,10 +319,15 @@ function renderDetail(wf: WorkflowDetailResponse): string {
            </div>`
         : '<span class="muted">-</span>';
       const completed = c.tts_completed_at ? timeAgo(c.tts_completed_at) : "-";
+      const canRetryChunk = c.tts_status === "failed" &&
+        (wf.status === "failed" || wf.status === "cancelled" || wf.status === "completed");
+      const retryBtn = canRetryChunk
+        ? `<button class="btn btn-sm chunk-retry-btn" data-chunk-index="${c.chunk_index}" title="Retry this chunk">↺</button>`
+        : "";
       return `<tr class="chunk-row" data-chunk-idx="${c.chunk_index}">
         <td>${c.chunk_index}</td>
         <td class="chunk-text-cell" title="Click to expand">${textPreview}</td>
-        <td><span class="badge ${sc}">${c.tts_status}</span></td>
+        <td><span class="badge ${sc}">${c.tts_status}</span> ${retryBtn}</td>
         <td>${dur}</td>
         <td>${audio}</td>
         <td>${completed}</td>
