@@ -7,6 +7,7 @@ import {
   retryWorkflow,
   retryTtsStep,
   retryChunks,
+  encodeToMp3,
   cancelWorkflow,
   pauseWorkflow,
   resumeWorkflow,
@@ -86,6 +87,12 @@ function renderActions(wf: WorkflowDetailResponse): void {
   if (hasFailedChunks && (wf.status === "failed" || wf.status === "cancelled" || wf.status === "completed")) {
     btns.push('<button id="act-retry-tts" class="btn">Retry TTS Step</button>');
   }
+  const hasWavWithoutMp3 = wf.chunks.some(
+    (c) => c.tts_audio_blob_id && !c.tts_mp3_blob_id,
+  );
+  if (hasWavWithoutMp3) {
+    btns.push('<button id="act-encode-mp3" class="btn">WAV→MP3</button>');
+  }
   if (wf.status === "running") {
     btns.push('<button id="act-pause" class="btn">Pause</button>');
   }
@@ -158,6 +165,16 @@ function attachActionListeners(wf: WorkflowDetailResponse): void {
     if (confirm("Cancel this workflow?")) {
       runAction(() => cancelWorkflow(wf.id));
     }
+  });
+  document.getElementById("act-encode-mp3")?.addEventListener("click", () => {
+    runAction(
+      () => encodeToMp3(wf.id).then((r) => {
+        showActionStatus(`Encoded ${r.encoded} chunk(s)${r.skipped ? `, ${r.skipped} failed` : ""}`);
+        return r;
+      }),
+      false,
+      "Encoding WAV→MP3…",
+    );
   });
 }
 
