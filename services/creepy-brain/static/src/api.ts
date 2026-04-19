@@ -171,6 +171,15 @@ export function retryChunks(id: string, chunkIndices?: number[]): Promise<Workfl
   });
 }
 
+export interface EncodeMp3Response {
+  encoded: number;
+  skipped: number;
+}
+
+export function encodeToMp3(id: string): Promise<EncodeMp3Response> {
+  return api(`/api/workflows/${id}/encode-mp3`, { method: "POST" });
+}
+
 export function fetchCostSummary(): Promise<CostSummary> {
   return api("/api/costs/summary");
 }
