@@ -7,11 +7,11 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.models.story import Story
+from app.services.http_errors import require_found
 from app.schemas.story import (
     ActResponse,
     GenerateStoryRequest,
@@ -110,9 +110,10 @@ async def get_story_by_workflow(
     session: AsyncSession = Depends(get_session),
 ) -> StoryResponse:
     """Get story by its parent workflow ID."""
-    story = await story_service.get_by_workflow(session, workflow_id)
-    if story is None:
-        raise HTTPException(status_code=404, detail="Story not found for this workflow")
+    story = require_found(
+        await story_service.get_by_workflow(session, workflow_id),
+        "Story not found for this workflow",
+    )
     return _story_to_response(story)
 
 
@@ -123,15 +124,12 @@ async def update_story(
     session: AsyncSession = Depends(get_session),
 ) -> StoryResponse:
     """Update a story's full text (e.g. after manual review)."""
-    try:
-        story = await story_service.update_full_text(session, story_id, body.full_text)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Story not found")
+    await story_service.update_full_text(session, story_id, body.full_text)
     await session.commit()
     # Re-fetch with acts loaded
-    loaded = await story_service.get(session, story_id)
-    if loaded is None:
-        raise HTTPException(status_code=404, detail="Story not found")
+    loaded = require_found(
+        await story_service.get(session, story_id), "Story not found"
+    )
     return _story_to_response(loaded)
 
 
@@ -141,8 +139,9 @@ async def get_story(
     session: AsyncSession = Depends(get_session),
 ) -> StoryResponse:
     """Get story detail including acts."""
-    svc = StoryService(session)
-    story = require_found(await svc.get(story_id), "Story not found")
+    story = require_found(
+        await story_service.get(session, story_id), "Story not found"
+    )
     return _story_to_response(story)
 
 

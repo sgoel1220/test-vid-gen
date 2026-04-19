@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.voice import Voice
+from app.services.errors import ResourceNotFoundError
 
 
 class VoiceCreateResult(BaseModel):
@@ -83,12 +84,12 @@ async def set_default(session: AsyncSession, voice_id: uuid.UUID) -> Voice:
         The updated Voice.
 
     Raises:
-        ValueError: If the voice is not found.
+        ResourceNotFoundError: If the voice is not found.
     """
     result = await session.execute(select(Voice).where(Voice.id == voice_id))
     voice = result.scalar_one_or_none()
     if voice is None:
-        raise ValueError(f"Voice {voice_id} not found")
+        raise ResourceNotFoundError("Voice", voice_id)
     await _clear_default(session)
     voice.is_default = True
     await session.flush()

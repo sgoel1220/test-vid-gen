@@ -22,6 +22,7 @@ from sqlalchemy.orm import selectinload
 from app.models.enums import StoryStatus
 from app.models.json_schemas import StoryActOutline, StoryOutlineSchema
 from app.models.story import Story, StoryAct
+from app.services.errors import ResourceNotFoundError
 from app.pipeline.models import FiveActOutline, StoryBible
 from app.validation_limits import ACT_WORD_COUNT_PROPORTIONS, DEFAULT_STORY_TARGET_WORD_COUNT
 
@@ -201,10 +202,9 @@ async def fail_story(session: AsyncSession, story_id: uuid.UUID) -> None:
     story.status = StoryStatus.FAILED
     await session.flush()
 
-
 async def _get_or_raise(session: AsyncSession, story_id: uuid.UUID) -> Story:
     result = await session.execute(select(Story).where(Story.id == story_id))
     story = result.scalar_one_or_none()
     if story is None:
-        raise ValueError(f"Story {story_id} not found")
+        raise ResourceNotFoundError("Story", story_id)
     return story

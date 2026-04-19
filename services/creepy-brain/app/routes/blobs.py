@@ -9,7 +9,6 @@ from fastapi.responses import Response
 
 from app.db import DbSession
 from app.services import blob_service
-from app.services.errors import ResourceNotFoundError
 
 router = APIRouter(prefix="/api/blobs", tags=["blobs"])
 
@@ -17,11 +16,7 @@ router = APIRouter(prefix="/api/blobs", tags=["blobs"])
 @router.get("/{blob_id}")
 async def get_blob(blob_id: uuid.UUID, session: DbSession, request: Request) -> Response:
     """Return binary blob data with HTTP range request support for audio/video streaming."""
-    try:
-        blob = await blob_service.get(session, blob_id)
-    except ResourceNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
+    blob = await blob_service.get(session, blob_id)
     data: bytes = blob.data
     total = len(data)
     range_header = request.headers.get("Range")

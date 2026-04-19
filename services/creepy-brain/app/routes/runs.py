@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
 from app.db import DbSession
 from app.schemas.run import CreateRunRequest, PatchRunRequest, RunResponse
 from app.services import run_service
-from app.services.errors import ResourceNotFoundError
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -33,10 +32,7 @@ async def list_runs(
 
 @router.get("/{run_id}", response_model=RunResponse)
 async def get_run(run_id: uuid.UUID, session: DbSession) -> RunResponse:
-    try:
-        run = await run_service.get(session, run_id)
-    except ResourceNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    run = await run_service.get(session, run_id)
     return RunResponse.model_validate(run)
 
 
@@ -44,9 +40,6 @@ async def get_run(run_id: uuid.UUID, session: DbSession) -> RunResponse:
 async def patch_run(
     run_id: uuid.UUID, body: PatchRunRequest, session: DbSession
 ) -> RunResponse:
-    try:
-        run = await run_service.patch(session, run_id, body)
-    except ResourceNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    run = await run_service.patch(session, run_id, body)
     await session.commit()
     return RunResponse.model_validate(run)
