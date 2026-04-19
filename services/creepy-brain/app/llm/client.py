@@ -93,6 +93,13 @@ class AnthropicProvider:
             response.usage.input_tokens,
             response.usage.output_tokens,
         )
+        wf_id = _workflow_context.get()
+        if wf_id is not None:
+            usage = {
+                "prompt_tokens": response.usage.input_tokens,
+                "completion_tokens": response.usage.output_tokens,
+            }
+            await _persist_llm_usage(wf_id, self._model, usage)
         parts: list[str] = []
         for block in response.content:
             if hasattr(block, "text"):
