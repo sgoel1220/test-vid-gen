@@ -44,7 +44,11 @@ function navigate(): void {
 function updateNav(hash: string): void {
   document.querySelectorAll("nav a").forEach((a) => {
     const href = a.getAttribute("href") ?? "";
-    a.classList.toggle("active", hash.startsWith(href));
+    // Match exact, prefix/, or treat workflow detail as part of workflows
+    const active = hash === href
+      || hash.startsWith(href + "/")
+      || (href === "#/workflows" && hash.startsWith("#/workflow/"));
+    a.classList.toggle("active", active);
   });
 }
 
