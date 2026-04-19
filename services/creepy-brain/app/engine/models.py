@@ -60,7 +60,19 @@ class StepDef(BaseModel):
         default=False,
         description="If True, this step runs only when the workflow fails",
     )
+    auto_pause_after: bool = Field(
+        default=False,
+        description="If True, the workflow pauses after this step completes successfully",
+    )
 
+
+
+class PauseAfterStep(Exception):
+    """Raised by the runner when a step with auto_pause_after completes."""
+
+    def __init__(self, step_name: str) -> None:
+        self.step_name = step_name
+        super().__init__(f"Auto-pause after step '{step_name}'")
 
 class WorkflowDef(BaseModel):
     """Definition of a complete workflow with its steps."""

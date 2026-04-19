@@ -17,6 +17,7 @@ from app.schemas.story import (
     GenerateStoryResponse,
     StoryListItem,
     StoryResponse,
+    UpdateStoryRequest,
 )
 from app.services import story_service
 
@@ -37,10 +38,12 @@ def _story_to_response(story: Story) -> StoryResponse:
         premise=story.premise,
         status=story.status,
         word_count=story.word_count,
+        full_text=story.full_text,
         acts=[
             ActResponse(
                 act_number=act.act_number,
                 title=act.title,
+                content=act.content,
                 word_count=act.word_count,
             )
             for act in story.acts
@@ -98,6 +101,37 @@ async def generate_story(
     task.add_done_callback(bg_tasks.discard)
 
     return GenerateStoryResponse(story_id=story.id, status=story.status)
+
+
+@router.get("/by-workflow/{workflow_id}", response_model=StoryResponse)
+async def get_story_by_workflow(
+    workflow_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> StoryResponse:
+    """Get story by its parent workflow ID."""
+    story = await story_service.get_by_workflow(session, workflow_id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found for this workflow")
+    return _story_to_response(story)
+
+
+@router.put("/{story_id}", response_model=StoryResponse)
+async def update_story(
+    story_id: uuid.UUID,
+    body: UpdateStoryRequest,
+    session: AsyncSession = Depends(get_session),
+) -> StoryResponse:
+    """Update a story's full text (e.g. after manual review)."""
+    try:
+        story = await story_service.update_full_text(session, story_id, body.full_text)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await session.commit()
+    # Re-fetch with acts loaded
+    loaded = await story_service.get(session, story_id)
+    if loaded is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    return _story_to_response(loaded)
 
 
 @router.get("/{story_id}", response_model=StoryResponse)

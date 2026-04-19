@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
 from app.validation_limits import (
+    DEFAULT_STORY_TARGET_WORD_COUNT,
     ACT_TARGET_WORD_COUNT_MAX,
     ACT_TARGET_WORD_COUNT_MIN,
     MAX_REVISIONS_MAX,
@@ -36,7 +37,7 @@ class WorkflowInputSchema(BaseModel):
         description="Max story revision attempts",
     )
     target_word_count: int = Field(
-        default=200,
+        default=DEFAULT_STORY_TARGET_WORD_COUNT,
         ge=WORKFLOW_TARGET_WORD_COUNT_MIN,
         le=WORKFLOW_TARGET_WORD_COUNT_MAX,
         description="Target word count for story",

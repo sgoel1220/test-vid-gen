@@ -26,7 +26,7 @@ class TestWorkflowBounds:
             WorkflowInputSchema(
                 premise="A house at the edge of town",
                 voice_name="old_man_low.wav",
-                target_word_count=100,
+                target_word_count=99,
             )
 
 
@@ -49,7 +49,7 @@ class TestPipelineBounds:
             ActOutline(
                 act_number=1,
                 title="The Door",
-                target_word_count=50,
+                target_word_count=49,
                 beats=[_beat()],
                 act_hook="The handle moves by itself.",
                 act_cliffhanger="The door opens.",
@@ -78,6 +78,6 @@ class TestPipelineBounds:
                 act_number=1,
                 title="The Door",
                 summary="A door appears in a sealed room.",
-                target_word_count=50,
+                target_word_count=49,
                 key_events=["The door opens."],
             )

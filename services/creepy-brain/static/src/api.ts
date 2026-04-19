@@ -95,6 +95,23 @@ export interface CostSummary {
   active_pod_count: number;
 }
 
+export interface StoryAct {
+  act_number: number;
+  title: string | null;
+  content: string;
+  word_count: number | null;
+}
+
+export interface StoryDetailResponse {
+  id: string;
+  title: string | null;
+  premise: string;
+  status: string;
+  word_count: number | null;
+  full_text: string | null;
+  acts: StoryAct[];
+}
+
 // ── Fetch helpers ──────────────────────────────────────────────
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -139,4 +156,43 @@ export function resumeWorkflow(id: string): Promise<WorkflowResponse> {
 
 export function fetchCostSummary(): Promise<CostSummary> {
   return api("/api/costs/summary");
+}
+
+export interface CreateWorkflowRequest {
+  premise: string;
+  voice_name: string;
+  target_word_count: number;
+  generate_images?: boolean;
+  stitch_video?: boolean;
+}
+
+export interface VoiceResponse {
+  id: string;
+  name: string;
+  description: string | null;
+  is_default: boolean;
+}
+
+export function createWorkflow(req: CreateWorkflowRequest): Promise<WorkflowResponse> {
+  return api("/api/workflows", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export function fetchVoices(): Promise<VoiceResponse[]> {
+  return api("/api/voices");
+}
+
+export function fetchStoryByWorkflow(workflowId: string): Promise<StoryDetailResponse> {
+  return api(`/api/stories/by-workflow/${workflowId}`);
+}
+
+export function updateStory(storyId: string, fullText: string): Promise<StoryDetailResponse> {
+  return api(`/api/stories/${storyId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ full_text: fullText }),
+  });
 }

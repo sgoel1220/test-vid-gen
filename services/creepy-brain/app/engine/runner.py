@@ -35,7 +35,7 @@ from app.models.workflow import WorkflowStep
 from app.services.workflow_service import WorkflowService
 
 from .db_helpers import optional_session
-from .models import EmptyStepOutput, StepDef, StepContext, StepOutputMap, WorkflowDef
+from .models import EmptyStepOutput, PauseAfterStep, StepDef, StepContext, StepOutputMap, WorkflowDef
 
 log = logging.getLogger(__name__)
 
@@ -166,6 +166,10 @@ class WorkflowRunner:
             if error is not None:
                 failure_error = error
                 break
+
+            # Auto-pause after step if configured.
+            if step.auto_pause_after:
+                raise PauseAfterStep(step.name)
 
         if failure_error is not None:
             # Run on_failure steps, then mark workflow FAILED.

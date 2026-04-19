@@ -27,6 +27,7 @@ class ActResponse(BaseModel):
 
     act_number: int
     title: str | None
+    content: str
     word_count: int | None
 
 
@@ -38,6 +39,7 @@ class StoryResponse(BaseModel):
     premise: str
     status: StoryStatus
     word_count: int | None
+    full_text: str | None
     acts: list[ActResponse]
 
 
@@ -49,3 +51,9 @@ class StoryListItem(BaseModel):
     premise: str
     status: StoryStatus
     word_count: int | None
+
+
+class UpdateStoryRequest(BaseModel):
+    """Request body for updating a story's full text."""
+
+    full_text: str = Field(..., min_length=1, description="Updated full story text")

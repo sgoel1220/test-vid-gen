@@ -153,6 +153,74 @@
       border-left: 3px solid #0f3460;
     }
 
+    /* Forms */
+    .create-form { margin-bottom: 1rem; }
+    .form-row { margin-bottom: 0.5rem; }
+    .form-row label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 0.25rem; }
+    .form-row textarea, .form-row input[type="text"] {
+      width: 100%;
+      background: #111;
+      border: 1px solid #333;
+      color: #e0e0e0;
+      padding: 0.4rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      font-family: inherit;
+      resize: vertical;
+    }
+    .form-row textarea:focus, .form-row input:focus { outline: none; border-color: #7eb8da; }
+    .form-row-inline { display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; }
+    .form-field { flex: 1; min-width: 120px; }
+    .form-field label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 0.25rem; }
+    .form-field select, .form-field input[type="text"] {
+      width: 100%;
+      background: #111;
+      border: 1px solid #333;
+      color: #e0e0e0;
+      padding: 0.35rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+    }
+    .form-field select:focus { outline: none; border-color: #7eb8da; }
+    .form-field input[type="range"] { width: 100%; accent-color: #7eb8da; }
+    .form-field-btn { flex: 0 0 auto; }
+
+    /* Story review */
+    .story-textarea {
+      width: 100%;
+      min-height: 300px;
+      background: #111;
+      border: 1px solid #333;
+      color: #e0e0e0;
+      padding: 0.75rem;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      line-height: 1.7;
+      resize: vertical;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .story-textarea:focus { outline: none; border-color: #7eb8da; }
+    .story-text {
+      background: #111;
+      padding: 0.75rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .story-actions { margin-top: 0.5rem; display: flex; gap: 0.5rem; }
+    .story-hint { font-size: 0.8rem; color: #888; margin-bottom: 0.5rem; }
+    .btn-approve {
+      background: #2d6a4f;
+      border-color: #40916c;
+    }
+    .btn-approve:hover { background: #40916c; }
+
     /* Code */
     .code-block {
       background: #111;

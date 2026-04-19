@@ -82,6 +82,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> GenerateStory
             story_id=story_id,
             premise=premise,
             session=session,
+            target_word_count=input.target_word_count,
         )
 
     async with session_maker() as session:

@@ -159,6 +159,32 @@ async def complete_story(
     await session.flush()
 
 
+async def update_full_text(
+    session: AsyncSession,
+    story_id: uuid.UUID,
+    full_text: str,
+) -> Story:
+    """Update story full_text and recalculate word_count (flush only)."""
+    story = await _get_or_raise(session, story_id)
+    story.full_text = full_text
+    story.word_count = len(full_text.split())
+    await session.flush()
+    return story
+
+
+async def get_by_workflow(
+    session: AsyncSession,
+    workflow_id: uuid.UUID,
+) -> Story | None:
+    """Get story by workflow FK with acts eagerly loaded."""
+    result = await session.execute(
+        select(Story)
+        .options(selectinload(Story.acts))
+        .where(Story.workflow_id == workflow_id)
+    )
+    return result.scalar_one_or_none()
+
+
 async def fail_story(session: AsyncSession, story_id: uuid.UUID) -> None:
     """Mark story as failed (flush only)."""
     story = await _get_or_raise(session, story_id)

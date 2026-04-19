@@ -1,6 +1,9 @@
 // Workflow list page
 
-import { fetchWorkflows, type WorkflowStatus, type WorkflowResponse } from "../api.js";
+import {
+  fetchWorkflows, fetchVoices, createWorkflow,
+  type WorkflowStatus, type WorkflowResponse, type VoiceResponse,
+} from "../api.js";
 import { shortId, timeAgo, duration, statusClass, formatStep, esc } from "../utils.js";
 
 const STATUSES: (WorkflowStatus | "all")[] = [
@@ -12,12 +15,52 @@ let pollTimer: ReturnType<typeof setInterval> | undefined;
 
 export function mount(container: HTMLElement): void {
   container.innerHTML = `
+    <div class="section">
+      <h2>New Workflow</h2>
+      <form id="wf-create" class="create-form">
+        <div class="form-row">
+          <label for="wf-premise">Premise</label>
+          <textarea id="wf-premise" rows="2" placeholder="A house at the edge of town..." required></textarea>
+        </div>
+        <div class="form-row-inline">
+          <div class="form-field">
+            <label for="wf-voice">Voice</label>
+            <select id="wf-voice" required>
+              <option value="">Loading...</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="wf-words">Word Count <span id="wf-words-val" class="muted">200</span></label>
+            <input type="range" id="wf-words" min="100" max="400" step="50" value="200">
+          </div>
+          <div class="form-field form-field-btn">
+            <button type="submit" class="btn" id="wf-submit">Create</button>
+          </div>
+        </div>
+        <div id="wf-create-error" class="error" style="display:none"></div>
+      </form>
+    </div>
     <div class="toolbar">
       <div id="wf-filters" class="filter-row"></div>
     </div>
     <div id="wf-list" class="list"></div>
   `;
 
+  // Load voices
+  loadVoices();
+
+  // Word count slider label
+  const slider = document.getElementById("wf-words") as HTMLInputElement;
+  const valLabel = document.getElementById("wf-words-val")!;
+  slider.addEventListener("input", () => {
+    valLabel.textContent = slider.value;
+  });
+
+  // Form submit
+  const form = document.getElementById("wf-create") as HTMLFormElement;
+  form.addEventListener("submit", handleCreate);
+
+  // Filters
   const filtersEl = document.getElementById("wf-filters")!;
   for (const s of STATUSES) {
     const btn = document.createElement("button");
@@ -39,6 +82,51 @@ export function mount(container: HTMLElement): void {
 export function unmount(): void {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = undefined;
+}
+
+async function loadVoices(): Promise<void> {
+  const select = document.getElementById("wf-voice") as HTMLSelectElement;
+  try {
+    const voices: VoiceResponse[] = await fetchVoices();
+    select.innerHTML = voices
+      .map((v) => `<option value="${esc(v.name)}"${v.is_default ? " selected" : ""}>${esc(v.name)}</option>`)
+      .join("");
+    if (voices.length === 0) {
+      select.innerHTML = '<option value="">No voices available</option>';
+    }
+  } catch {
+    select.innerHTML = '<option value="">Failed to load voices</option>';
+  }
+}
+
+async function handleCreate(e: Event): Promise<void> {
+  e.preventDefault();
+  const premise = (document.getElementById("wf-premise") as HTMLTextAreaElement).value.trim();
+  const voice = (document.getElementById("wf-voice") as HTMLSelectElement).value;
+  const words = parseInt((document.getElementById("wf-words") as HTMLInputElement).value, 10);
+  const errEl = document.getElementById("wf-create-error")!;
+  const btn = document.getElementById("wf-submit") as HTMLButtonElement;
+
+  if (!premise || !voice) return;
+
+  btn.disabled = true;
+  btn.textContent = "Creating...";
+  errEl.style.display = "none";
+
+  try {
+    const wf = await createWorkflow({
+      premise,
+      voice_name: voice,
+      target_word_count: words,
+    });
+    // Navigate to the new workflow
+    location.hash = `#/workflow/${wf.id}`;
+  } catch (err) {
+    errEl.textContent = String(err);
+    errEl.style.display = "block";
+    btn.disabled = false;
+    btn.textContent = "Create";
+  }
 }
 
 async function refresh(): Promise<void> {

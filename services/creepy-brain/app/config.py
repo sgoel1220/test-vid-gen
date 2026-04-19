@@ -5,6 +5,12 @@ from typing import Annotated, Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.validation_limits import (
+    DEFAULT_STORY_TARGET_WORD_COUNT,
+    WORKFLOW_TARGET_WORD_COUNT_MAX,
+    WORKFLOW_TARGET_WORD_COUNT_MIN,
+)
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
@@ -77,6 +83,13 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     llm_model: str = "meta-llama/llama-3.1-8b-instruct"  # ~$0.05/1M tokens
     max_concurrent_generations: int = 2
+
+    # Story generation defaults
+    story_target_word_count: int = Field(
+        default=DEFAULT_STORY_TARGET_WORD_COUNT,
+        ge=WORKFLOW_TARGET_WORD_COUNT_MIN,
+        le=WORKFLOW_TARGET_WORD_COUNT_MAX,
+    )
 
     @property
     def database_url(self) -> str:

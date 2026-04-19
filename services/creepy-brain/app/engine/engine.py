@@ -24,7 +24,7 @@ from app.models.workflow import Workflow, WorkflowStep
 from app.services.workflow_service import WorkflowService
 
 from .db_helpers import get_optional_session_maker, optional_session
-from .models import StepOutputMap, WorkflowDef
+from .models import PauseAfterStep, StepOutputMap, WorkflowDef
 from .runner import WorkflowRunner, get_downstream_steps
 
 log = logging.getLogger(__name__)
@@ -297,6 +297,9 @@ class WorkflowEngine:
         """Wrapper: run the runner and clean up the task entry afterwards."""
         try:
             await runner.run()
+        except PauseAfterStep as exc:
+            log.info("engine: auto-pausing workflow %s after step '%s'", run_id, exc.step_name)
+            await self.pause(run_id)
         except asyncio.CancelledError:
             log.info("engine: workflow %s task cancelled", run_id)
             raise

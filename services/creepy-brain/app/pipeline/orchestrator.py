@@ -22,6 +22,7 @@ from app.pipeline import architect, reviewer, writer
 from app.pipeline.formatting import format_act_drafts
 from app.pipeline.models import ActDraft, ArchitectOutput
 from app.services import story_service
+from app.validation_limits import DEFAULT_STORY_TARGET_WORD_COUNT
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ async def run_pipeline(
     story_id: uuid.UUID,
     premise: str,
     session: AsyncSession,
+    target_word_count: int = DEFAULT_STORY_TARGET_WORD_COUNT,
 ) -> None:
     """Execute the full story generation pipeline.
 
@@ -45,7 +47,7 @@ async def run_pipeline(
         await session.commit()
 
         # ── Step 1: Architect ────────────────────────────────────────
-        arch_output = await architect.run(premise)
+        arch_output = await architect.run(premise, target_word_count=target_word_count)
         bible = arch_output.bible
         outline = arch_output.outline
 

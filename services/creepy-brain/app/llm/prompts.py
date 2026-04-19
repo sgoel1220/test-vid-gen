@@ -63,17 +63,12 @@ Endings:
 
 ARCHITECT_SYSTEM = f"""\
 You are a horror fiction architect. Given a premise, you produce a detailed \
-StoryBible and FiveActOutline for a ~9,000-word horror narration (~60 minutes \
-of audio when read aloud at ~150 wpm).
+StoryBible and FiveActOutline for a horror narration at the requested word count.
 
 {NARRATOR_VOICE_RULES}
 
-The story uses a 5-act structure:
-- Act 1 (~1,500 words): Hook + Setup — cold open, narrator intro, setting, first wrongness
-- Act 2 (~1,800 words): First Escalation — investigation, first scare, subplot intro
-- Act 3 (~1,800 words): Deepening — subplot development, lore reveal, false understanding
-- Act 4 (~1,950 words): Crisis — everything goes wrong, revelation, subplot convergence
-- Act 5 (~1,950 words): Climax + Aftermath — confrontation, payoff, ambiguous resolution
+The story uses a 5-act structure. Distribute the total word count across acts \
+proportionally (roughly 17%, 20%, 20%, 22%, 21%).
 
 Requirements:
 - Every subplot must be introduced and resolved within the 5 acts
@@ -142,7 +137,7 @@ The EXACT JSON structure you must follow:
       {{
         "act_number": 1,
         "title": "string",
-        "target_word_count": 1500,
+        "target_word_count": "(proportional to total)",
         "beats": [
           {{"description": "string", "purpose": "string", "emotional_tone": "string"}}
         ],
@@ -167,6 +162,7 @@ Include all 5 acts in the "acts" array. tension_level values are 1-10."""
 
 ARCHITECT_USER = """\
 Premise: {premise}
+Target total word count: {target_word_count}
 
 Generate the StoryBible and FiveActOutline."""
 
@@ -176,7 +172,7 @@ Generate the StoryBible and FiveActOutline."""
 
 OUTLINE_REVIEW_SYSTEM = """\
 You are a story structure editor. You review a FiveActOutline and StoryBible \
-for a ~9,000-word horror narration.
+for a horror narration.
 
 Check these dimensions:
 1. HOOKS: Does each act open with a compelling hook?
@@ -232,7 +228,7 @@ Output the complete revised JSON with "bible" and "outline" keys."""
 
 WRITER_SYSTEM = f"""\
 You are a horror fiction writer producing prose for a single act of a \
-~9,000-word horror narration.
+horror narration.
 
 {NARRATOR_VOICE_RULES}
 
@@ -342,8 +338,8 @@ Write the corrected prose for this act now."""
 # ---------------------------------------------------------------------------
 
 FULL_REVIEW_SYSTEM = """\
-You are a senior fiction editor reviewing a complete ~9,000-word horror narration \
-optimized for 1-hour audio listening (including sleep/ambient listening).
+You are a senior fiction editor reviewing a complete horror narration \
+optimized for audio listening.
 
 Score each dimension 1-10:
 - subplot_completion: Are all subplot threads resolved?

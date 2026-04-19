@@ -139,6 +139,20 @@ Always fix issues at the source — never apply runtime hacks, container patches
 - **Think long-term** — every hack is debt that compounds; a proper fix pays off on every future deploy
 - **Broken deploy = broken code** — treat import errors, missing modules, and config drift as bugs to fix in source
 
+## Build & Restart
+
+### Frontend (dashboard)
+```bash
+cd services/creepy-brain/static && npx esbuild src/main.ts --bundle --outfile=dist/app.js --format=esm --target=es2020
+```
+
+### Creepy Brain (Docker)
+```bash
+cd services/creepy-brain && docker compose up -d --build brain
+```
+
+The compose file lives at `services/creepy-brain/docker-compose.yml`. Services: `brain`, `postgres`.
+
 ## Architecture Reference
 
 See `docs/ARCHITECTURE.md` for project structure, API endpoints, GPU rules, and deploy info.

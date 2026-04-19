@@ -2,11 +2,14 @@
 
 import {
   fetchWorkflowDetail,
+  fetchStoryByWorkflow,
+  updateStory,
   retryWorkflow,
   cancelWorkflow,
   pauseWorkflow,
   resumeWorkflow,
   type WorkflowDetailResponse,
+  type StoryDetailResponse,
 } from "../api.js";
 import {
   shortId, timeAgo, duration, statusClass, formatStep, formatCost, esc,
@@ -18,8 +21,16 @@ let actionInFlight = false;
 let chunkPage = 0;
 const CHUNKS_PER_PAGE = 20;
 
+// Story editing state
+let storyData: StoryDetailResponse | null = null;
+let storyDirty = false;
+let storySaving = false;
+
 export function mount(container: HTMLElement, id: string): void {
   workflowId = id;
+  storyData = null;
+  storyDirty = false;
+  storySaving = false;
   container.innerHTML = `
     <div class="toolbar">
       <a href="#/workflows" class="back-link">&larr; Workflows</a>
@@ -41,10 +52,22 @@ async function refresh(): Promise<void> {
   if (!el) return;
   try {
     const wf = await fetchWorkflowDetail(workflowId);
+
+    // Fetch story if generate_story step is completed
+    const storyStep = wf.steps.find((s) => s.step_name === "generate_story");
+    if (storyStep?.status === "completed" && !storyDirty) {
+      try {
+        storyData = await fetchStoryByWorkflow(workflowId);
+      } catch {
+        storyData = null;
+      }
+    }
+
     el.innerHTML = renderDetail(wf);
     renderActions(wf);
     attachActionListeners(wf);
     attachChunkListeners();
+    attachStoryListeners(wf);
   } catch (err) {
     el.innerHTML = `<div class="error">Failed: ${esc(String(err))}</div>`;
   }
@@ -140,6 +163,53 @@ function attachChunkListeners(): void {
   });
 }
 
+function attachStoryListeners(wf: WorkflowDetailResponse): void {
+  const textarea = document.getElementById("story-textarea") as HTMLTextAreaElement | null;
+  if (textarea) {
+    textarea.addEventListener("input", () => {
+      storyDirty = true;
+    });
+  }
+
+  document.getElementById("story-save")?.addEventListener("click", async () => {
+    if (!storyData || storySaving) return;
+    const ta = document.getElementById("story-textarea") as HTMLTextAreaElement | null;
+    if (!ta) return;
+    storySaving = true;
+    try {
+      storyData = await updateStory(storyData.id, ta.value);
+      storyDirty = false;
+      await refresh();
+    } catch (err) {
+      alert(`Save failed: ${err}`);
+    } finally {
+      storySaving = false;
+    }
+  });
+
+  document.getElementById("story-approve")?.addEventListener("click", async () => {
+    if (storySaving) return;
+    storySaving = true;
+    try {
+      // Save any edits first
+      if (storyDirty && storyData) {
+        const ta = document.getElementById("story-textarea") as HTMLTextAreaElement | null;
+        if (ta) {
+          storyData = await updateStory(storyData.id, ta.value);
+          storyDirty = false;
+        }
+      }
+      // Resume workflow
+      await resumeWorkflow(wf.id);
+      await refresh();
+    } catch (err) {
+      alert(`Approve failed: ${err}`);
+    } finally {
+      storySaving = false;
+    }
+  });
+}
+
 function renderDetail(wf: WorkflowDetailResponse): string {
   const cls = statusClass(wf.status);
   const parts: string[] = [];
@@ -198,6 +268,11 @@ function renderDetail(wf: WorkflowDetailResponse): string {
         </table>
       </div>
     `);
+  }
+
+  // Story section
+  if (storyData) {
+    parts.push(renderStorySection(wf));
   }
 
   // Chunks (paginated)
@@ -285,4 +360,36 @@ function renderDetail(wf: WorkflowDetailResponse): string {
   }
 
   return parts.join("");
+}
+
+function renderStorySection(wf: WorkflowDetailResponse): string {
+  if (!storyData) return "";
+
+  const isPaused = wf.status === "paused";
+  const text = storyData.full_text ?? "";
+  const wordCount = storyData.word_count ?? 0;
+  const title = storyData.title ? esc(storyData.title) : "Untitled";
+
+  if (isPaused) {
+    // Editable mode
+    return `
+      <div class="section">
+        <h3>Story: ${title} <span class="muted">(${wordCount} words)</span></h3>
+        <p class="story-hint">Review and edit the story below, then approve to continue to TTS.</p>
+        <textarea id="story-textarea" class="story-textarea" rows="20">${esc(text)}</textarea>
+        <div class="story-actions">
+          <button id="story-save" class="btn">Save</button>
+          <button id="story-approve" class="btn btn-approve">Approve &amp; Continue</button>
+        </div>
+      </div>
+    `;
+  }
+
+  // Read-only mode
+  return `
+    <div class="section">
+      <h3>Story: ${title} <span class="muted">(${wordCount} words)</span></h3>
+      <div class="story-text">${esc(text)}</div>
+    </div>
+  `;
 }
