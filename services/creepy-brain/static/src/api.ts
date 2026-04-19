@@ -234,3 +234,14 @@ export function updateStory(storyId: string, fullText: string): Promise<StoryDet
     body: JSON.stringify({ full_text: fullText }),
   });
 }
+
+export interface WorkflowLogEntry {
+  timestamp: string;
+  level: string;
+  message: string;
+  step: string | null;
+}
+
+export function fetchWorkflowLogs(id: string): Promise<WorkflowLogEntry[]> {
+  return api(`/api/workflows/${id}/logs`);
+}

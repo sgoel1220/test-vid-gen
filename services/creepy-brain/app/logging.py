@@ -6,6 +6,8 @@ import sys
 import structlog
 from structlog.typing import Processor
 
+from app.log_buffer import WorkflowLogHandler, structlog_capture_processor
+
 
 def configure_logging(json_logs: bool = True) -> None:
     """Configure structlog for the application
@@ -19,6 +21,7 @@ def configure_logging(json_logs: bool = True) -> None:
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
+        structlog_capture_processor,  # capture to per-workflow buffer
     ]
 
     if json_logs:
@@ -37,7 +40,12 @@ def configure_logging(json_logs: bool = True) -> None:
 
     # Also configure standard library logging
     logging.basicConfig(
-        format="%(message)s",
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
         stream=sys.stdout,
         level=logging.INFO,
     )
+
+    # Attach workflow buffer handler to root logger so stdlib log calls are captured.
+    handler = WorkflowLogHandler()
+    handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+    logging.getLogger().addHandler(handler)

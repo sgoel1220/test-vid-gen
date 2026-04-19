@@ -91,6 +91,15 @@ class WorkflowSceneResponse(BaseModel):
     image_blob_id: uuid.UUID | None
 
 
+class WorkflowLogEntryResponse(BaseModel):
+    """A single captured log entry for a workflow step."""
+
+    timestamp: str
+    level: str
+    message: str
+    step: str | None
+
+
 class WorkflowDetailResponse(WorkflowResponse):
     input: WorkflowInputSchema
     result: WorkflowResultSchema | None

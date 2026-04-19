@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 import app.db as _db
+from app.log_buffer import step_name_var, workflow_id_var
 from app.models.enums import StepName, StepStatus
 from app.models.json_schemas import (
     GenerateStoryStepOutput,
@@ -245,10 +246,16 @@ class WorkflowRunner:
                     self._workflow_id, step.name, attempt, step.max_retries,
                 )
             try:
-                output = await asyncio.wait_for(
-                    step.fn(self.workflow_input, ctx),
-                    timeout=step.timeout_sec,
-                )
+                wid_tok = workflow_id_var.set(str(self._workflow_id))
+                step_tok = step_name_var.set(step.name)
+                try:
+                    output = await asyncio.wait_for(
+                        step.fn(self.workflow_input, ctx),
+                        timeout=step.timeout_sec,
+                    )
+                finally:
+                    workflow_id_var.reset(wid_tok)
+                    step_name_var.reset(step_tok)
                 if not isinstance(output, BaseModel):
                     raise TypeError(
                         f"Step '{step.name}' must return a Pydantic model, "

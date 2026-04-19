@@ -18,11 +18,13 @@ from app.models.enums import StepName, StepStatus, WorkflowStatus, WorkflowType
 from app.models.json_schemas import WorkflowInputSchema
 from app.models.workflow import Workflow, WorkflowScene, WorkflowStep
 from app.models.gpu_pod import GpuPod
+from app.log_buffer import log_buffer
 from app.schemas.workflow import (
     CreateWorkflowRequest,
     GpuPodResponse,
     WorkflowChunkResponse,
     WorkflowDetailResponse,
+    WorkflowLogEntryResponse,
     WorkflowResponse,
     WorkflowSceneResponse,
     WorkflowStepResponse,
@@ -223,6 +225,21 @@ async def get_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowDetailR
             for p in pods
         ],
     )
+
+
+@router.get("/{workflow_id}/logs", response_model=list[WorkflowLogEntryResponse])
+async def get_workflow_logs(workflow_id: uuid.UUID) -> list[WorkflowLogEntryResponse]:
+    """Return in-memory log lines captured during step execution for this workflow."""
+    entries = log_buffer.get(str(workflow_id))
+    return [
+        WorkflowLogEntryResponse(
+            timestamp=e.timestamp,
+            level=e.level,
+            message=e.message,
+            step=e.step,
+        )
+        for e in entries
+    ]
 
 
 @router.post("/{workflow_id}/retry", response_model=WorkflowResponse, status_code=201)
