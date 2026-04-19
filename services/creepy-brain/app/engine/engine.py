@@ -118,8 +118,12 @@ class WorkflowEngine:
     async def retry_step(self, workflow_run_id: str, step_name: str) -> None:
         """Reset *step_name* and all downstream steps to PENDING, then resume.
 
-        The current task is cancelled and a new runner is spawned with
-        already-completed step outputs preserved.
+        If there is an in-memory runner (hot path), cancels it and spawns a new
+        runner with the surviving step outputs preserved.
+
+        If there is no in-memory runner (cold-start after restart), loads the
+        workflow definition and input from DB, resets affected step rows, and
+        delegates to ``resume_from_db`` which auto-skips completed steps.
 
         Args:
             workflow_run_id: str(workflow_id) of the target run.
@@ -140,8 +144,42 @@ class WorkflowEngine:
         await self._cancel_task(run_id, mark_cancelled_in_db=False)
 
         if wf_def is None:
-            raise RuntimeError(f"Cannot retry: no runner found for workflow {run_id}")
+            # ── Cold-start path ──────────────────────────────────────────────
+            # No in-memory runner (process restarted).  Load the workflow
+            # definition from the registry and reset affected steps in DB,
+            # then hand off to resume_from_db which skips COMPLETED steps.
+            log.info(
+                "engine: no runner for %s — cold-start retry of step '%s'",
+                run_id, step_name,
+            )
+            async with optional_session() as session:
+                if session is None:
+                    raise RuntimeError("Database not available for cold-start retry")
+                result = await session.execute(
+                    select(Workflow).where(Workflow.id == uuid.UUID(run_id))
+                )
+                wf_row = result.scalar_one_or_none()
 
+            if wf_row is None:
+                raise RuntimeError(f"Workflow {run_id} not found in database")
+
+            wf_name = _workflow_type_to_name(wf_row.workflow_type)
+            cold_wf_def = self._registry.get(wf_name)
+            if cold_wf_def is None:
+                raise KeyError(f"No workflow registered with name '{wf_name}'")
+
+            reset_names = get_downstream_steps(cold_wf_def.steps, step_name)
+            try:
+                await self._reset_steps_in_db(uuid.UUID(run_id), reset_names)
+            except Exception as exc:
+                log.error("engine: cold retry_step failed to reset DB steps for %s: %s", run_id, exc)
+
+            await self.resume_from_db(uuid.UUID(run_id))
+            log.info("engine: cold-start retry of step '%s' for workflow %s", step_name, run_id)
+            return
+            # ── End cold-start path ──────────────────────────────────────────
+
+        # ── Hot path: runner was in memory ───────────────────────────────────
         # Remove reset steps from preserved outputs so the runner re-executes them.
         reset_names = get_downstream_steps(wf_def.steps, step_name)
         for name in reset_names:

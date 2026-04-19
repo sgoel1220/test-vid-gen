@@ -352,19 +352,10 @@ async def retry_chunks(
     if reset_count == 0:
         raise HTTPException(status_code=400, detail="No FAILED chunks found to retry")
 
-    # Schedule the retry BEFORE committing: if the engine raises (e.g. no in-memory
-    # runner after a process restart), SQLAlchemy auto-rolls back our chunk resets,
-    # preserving the FAILED state and existing audio blob references.
-    try:
-        await engine.retry_step(str(workflow_id), StepName.TTS_SYNTHESIS.value)
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Could not schedule TTS retry: {exc}. "
-                "The workflow runner is not loaded — try a full workflow resume instead."
-            ),
-        ) from exc
+    # Schedule the retry BEFORE committing: if the engine raises, SQLAlchemy
+    # auto-rolls back our chunk resets, preserving FAILED state + blob references.
+    # retry_step now handles cold-start (no in-memory runner) automatically.
+    await engine.retry_step(str(workflow_id), StepName.TTS_SYNTHESIS.value)
 
     await db.commit()
 

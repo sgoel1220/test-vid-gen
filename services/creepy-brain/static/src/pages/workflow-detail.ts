@@ -98,24 +98,41 @@ function renderActions(wf: WorkflowDetailResponse): void {
   el.innerHTML = btns.join(" ");
 }
 
-async function runAction(fn: () => Promise<unknown>, navigateToNew = false): Promise<void> {
+async function runAction(
+  fn: () => Promise<unknown>,
+  navigateToNew = false,
+  label = "Working…",
+): Promise<void> {
   if (actionInFlight) return;
   actionInFlight = true;
   setActionsDisabled(true);
+  showActionStatus(label);
   try {
     const result = await fn();
     if (navigateToNew && result && typeof result === "object" && "id" in result) {
       location.hash = `#/workflow/${(result as WorkflowDetailResponse).id}`;
       return;
     }
+    showActionStatus("");
     await refresh();
   } catch (err) {
-    const el = document.getElementById("wd-content");
-    if (el) el.innerHTML += `<div class="error">Action failed: ${esc(String(err))}</div>`;
+    showActionStatus(`Error: ${String(err)}`, true);
   } finally {
     actionInFlight = false;
     setActionsDisabled(false);
   }
+}
+
+function showActionStatus(msg: string, isError = false): void {
+  let el = document.getElementById("action-status");
+  if (!el) {
+    el = document.createElement("span");
+    el.id = "action-status";
+    el.style.cssText = "margin-left:12px;font-size:0.85rem;";
+    document.getElementById("wd-actions")?.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.color = isError ? "#e05252" : "#aaa";
 }
 
 function setActionsDisabled(disabled: boolean): void {
@@ -129,7 +146,7 @@ function attachActionListeners(wf: WorkflowDetailResponse): void {
     runAction(() => retryWorkflow(wf.id), true);
   });
   document.getElementById("act-retry-tts")?.addEventListener("click", () => {
-    runAction(() => retryTtsStep(wf.id));
+    runAction(() => retryTtsStep(wf.id), false, "Retrying TTS step…");
   });
   document.getElementById("act-pause")?.addEventListener("click", () => {
     runAction(() => pauseWorkflow(wf.id));
@@ -161,7 +178,7 @@ function attachChunkListeners(): void {
       e.stopPropagation(); // don't toggle row expand
       const idx = parseInt(btn.dataset.chunkIndex ?? "", 10);
       if (!isNaN(idx)) {
-        runAction(() => retryChunks(workflowId, [idx]));
+        runAction(() => retryChunks(workflowId, [idx]), false, `Retrying chunk ${idx}…`);
       }
     });
   });
