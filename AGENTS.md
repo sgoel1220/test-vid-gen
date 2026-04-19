@@ -100,24 +100,21 @@ mcp__beads__create(
 
 ## Bead Workflow
 
-1. **Worktree** — `EnterWorktree` before any code changes
-2. **Pick** — `mcp__beads__ready`, only status `"open"` (never `"in_progress"`)
-3. **Explore** — use Codex (read-only) to understand the area before touching code
-4. **Implement** — simplest solution that works; avoid premature abstractions
-5. **Test** — verify thoroughly
-6. **Adversarial review** — run `/adversarial-review` in the **foreground**; apply all findings; re-test
-7. **Commit** — descriptive message
-8. **Merge** — resolve conflicts if any; test again
-9. **Close** — `mcp__beads__close` only after successful merge
-10. **Push** — `git push origin main`
-11. **Clean up** — from repo root: `git worktree remove`, `git branch -d`, `git worktree prune`
+1. **Pick** — `mcp__beads__ready`, only status `"open"` (never `"in_progress"`)
+2. **Explore** — use Codex (read-only) to understand the area before touching code
+3. **Implement** — simplest solution that works; avoid premature abstractions
+4. **Test** — verify thoroughly
+5. **Adversarial review** — run `/adversarial-review` in the **foreground**; apply all findings; re-test
+6. **Commit** — descriptive message
+7. **Close** — `mcp__beads__close` only after successful push
+8. **Push** — `git push origin main`
 
 **CRITICAL RULES:**
 - ONLY pick `"open"` beads — never `"in_progress"`
-- NEVER commit directly to main — always use a worktree
+- NEVER use git worktrees — commit directly on main
 - ALWAYS use Codex to explore before implementing
-- NEVER skip `/adversarial-review` — foreground only, apply all findings before merging
-- NEVER mark done before push succeeds AND worktree branch is deleted
+- NEVER skip `/adversarial-review` — foreground only, apply all findings before pushing
+- NEVER mark done before push succeeds
 - NEVER assume — ask if anything is unclear
 
 ## Session Completion

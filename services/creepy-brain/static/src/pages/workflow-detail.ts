@@ -50,11 +50,27 @@ export function unmount(): void {
   pollTimer = undefined;
 }
 
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
+function isAudioPlaying(): boolean {
+  return Array.from(document.querySelectorAll<HTMLAudioElement>("audio.chunk-audio"))
+    .some((a) => !a.paused);
+}
+
 async function refresh(): Promise<void> {
+  // Don't interrupt audio playback with a re-render
+  if (isAudioPlaying()) return;
+
   const el = document.getElementById("wd-content");
   if (!el) return;
   try {
     const wf = await fetchWorkflowDetail(workflowId);
+
+    // Stop polling once workflow reaches a terminal state
+    if (TERMINAL_STATUSES.has(wf.status) && pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = undefined;
+    }
 
     // Fetch story if generate_story step is completed
     const storyStep = wf.steps.find((s) => s.step_name === "generate_story");
@@ -343,14 +359,14 @@ function renderDetail(wf: WorkflowDetailResponse): string {
       const textPreview = c.chunk_text.length > 200
         ? esc(c.chunk_text.slice(0, 200)) + "&hellip;"
         : esc(c.chunk_text);
-      const audioBlobId = c.tts_mp3_blob_id ?? c.tts_audio_blob_id;
-      const downloadBlobId = c.tts_mp3_blob_id ?? c.tts_audio_blob_id;
-      const downloadExt = c.tts_mp3_blob_id ? "mp3" : "wav";
-      const audio = audioBlobId
-        ? `<div class="audio-cell">
-            <audio class="chunk-audio" controls preload="none" src="/api/blobs/${audioBlobId}"></audio>
-            <a class="dl-link" href="/api/blobs/${downloadBlobId}" download="chunk-${c.chunk_index}.${downloadExt}" title="Download">⬇</a>
-           </div>`
+      const mp3Row = c.tts_mp3_blob_id
+        ? `<div class="audio-row"><span class="audio-label">MP3</span><audio class="chunk-audio" controls preload="none" src="/api/blobs/${c.tts_mp3_blob_id}"></audio><a class="dl-link" href="/api/blobs/${c.tts_mp3_blob_id}" download="chunk-${c.chunk_index}.mp3" title="Download MP3">⬇</a></div>`
+        : "";
+      const wavRow = c.tts_audio_blob_id
+        ? `<div class="audio-row"><span class="audio-label">WAV</span><audio class="chunk-audio" controls preload="none" src="/api/blobs/${c.tts_audio_blob_id}"></audio><a class="dl-link" href="/api/blobs/${c.tts_audio_blob_id}" download="chunk-${c.chunk_index}.wav" title="Download WAV">⬇</a></div>`
+        : "";
+      const audio = mp3Row || wavRow
+        ? `<div class="audio-cell">${mp3Row}${wavRow}</div>`
         : '<span class="muted">-</span>';
       const completed = c.tts_completed_at ? timeAgo(c.tts_completed_at) : "-";
       const canRetryChunk = c.tts_status === "failed" &&
