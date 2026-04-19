@@ -34,8 +34,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.engine import SkippedStepOutput, StepContext
 
 from app.config import settings
-from app.gpu import GpuPodSpec, get_provider
-from app.gpu.lifecycle import gpu_pod
+from app.gpu import GpuPodSpec
+from app.gpu.lifecycle import workflow_gpu_pod
 from app.llm.image_prompts import generate_scene_image_prompt
 from app.models.enums import BlobType, ChunkStatus
 from app.models.json_schemas import WorkflowInputSchema
@@ -259,16 +259,12 @@ async def execute(
     log.info("image_generation: %d prompts generated and saved", len(scene_prompts))
 
     # --- 6-8. Spin up image GPU pod, wait for ready, generate, terminate ---
-    provider = get_provider(settings.runpod_api_key)
-    async with gpu_pod(
-        provider,
+    async with workflow_gpu_pod(
         session_maker,
         spec=_image_pod_spec(),
         idempotency_key=f"img-{workflow_run_id}",
         workflow_id=workflow_id_uuid,
         label="image",
-        gpu_type_fallbacks=settings.gpu_type_fallbacks,
-        timeout_sec=settings.pod_ready_timeout_sec,
         service_port=settings.image_server_port,
     ) as (pod, endpoint_url):
         new_results = await _generate_images_from_prompts(

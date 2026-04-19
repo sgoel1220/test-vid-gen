@@ -42,8 +42,8 @@ from app.engine import StepContext
 from app.audio.encoding import encode_wav_to_mp3
 from app.audio.validation import validate_chunk_audio
 from app.config import settings
-from app.gpu import GpuPodSpec, get_provider
-from app.gpu.lifecycle import gpu_pod
+from app.gpu import GpuPodSpec
+from app.gpu.lifecycle import workflow_gpu_pod
 from app.models.enums import BlobType, ChunkStatus
 from app.models.json_schemas import GenerateStoryStepOutput, WorkflowInputSchema
 from app.services import blob_service
@@ -227,17 +227,13 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
         )
 
     # --- 6-7. Spin up TTS GPU pod, wait for ready, synthesize, terminate ---
-    provider = get_provider(settings.runpod_api_key)
     workflow_id_for_pod = get_optional_workflow_id(workflow_run_id)
-    async with gpu_pod(
-        provider,
+    async with workflow_gpu_pod(
         session_maker,
         spec=GpuPodSpec.from_config(),
         idempotency_key=f"tts-{workflow_run_id}",
         workflow_id=workflow_id_for_pod,
         label="tts",
-        gpu_type_fallbacks=settings.gpu_type_fallbacks,
-        timeout_sec=settings.pod_ready_timeout_sec,
         service_port=settings.gpu_port,
     ) as (pod, endpoint_url):
         all_chunks_result = await _synthesize_all_chunks(

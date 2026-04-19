@@ -184,3 +184,41 @@ async def gpu_pod(
             await terminate_and_finalize(provider, pod.id, session_maker)
         except Exception as term_exc:
             log.error("failed to terminate %s pod %s: %s", label, pod.id, term_exc)
+
+
+@asynccontextmanager
+async def workflow_gpu_pod(
+    session_maker: async_sessionmaker[AsyncSession],
+    *,
+    spec: GpuPodSpec,
+    idempotency_key: str,
+    workflow_id: uuid.UUID | None,
+    label: str,
+    service_port: int | None = None,
+) -> AsyncGenerator[tuple[GpuPod, str], None]:
+    """Like ``gpu_pod`` but pulls provider, fallbacks, and timeout from app settings.
+
+    Eliminates the per-step boilerplate of constructing a provider and
+    forwarding ``gpu_type_fallbacks`` / ``pod_ready_timeout_sec`` by hand.
+
+    Usage::
+
+        async with workflow_gpu_pod(session_maker, spec=..., ...) as (pod, url):
+            result = await do_work(url)
+    """
+    from app.config import settings  # lazy — avoids gpu → workflows circular dep
+    from app.gpu import get_provider  # lazy — same reason
+
+    provider = get_provider(settings.runpod_api_key)
+    async with gpu_pod(
+        provider,
+        session_maker,
+        spec=spec,
+        idempotency_key=idempotency_key,
+        workflow_id=workflow_id,
+        label=label,
+        gpu_type_fallbacks=settings.gpu_type_fallbacks,
+        timeout_sec=settings.pod_ready_timeout_sec,
+        service_port=service_port,
+    ) as result:
+        yield result
