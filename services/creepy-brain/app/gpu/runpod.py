@@ -264,7 +264,7 @@ class RunPodProvider(GpuProvider):
             return False
 
     async def wait_for_ready(
-        self, pod_id: str, timeout_sec: int = 720, service_port: int | None = None
+        self, pod_id: str, timeout_sec: int = 1200, service_port: int | None = None
     ) -> GpuPod:
         """Wait for pod to be ready (health check passes).
 
@@ -275,19 +275,38 @@ class RunPodProvider(GpuProvider):
                 If not specified, defaults to 8005 (TTS server). Use 8006 for image server.
         """
         deadline = asyncio.get_event_loop().time() + timeout_sec
+        last_status: str = ""
+        elapsed_log_interval = 30  # log status every 30 s
+        last_log_time = asyncio.get_event_loop().time()
 
         while asyncio.get_event_loop().time() < deadline:
             pod = await self.get_pod(pod_id, service_port)
+            current_status = pod.status.value if pod else "unknown"
+
+            now = asyncio.get_event_loop().time()
+            if current_status != last_status or (now - last_log_time) >= elapsed_log_interval:
+                elapsed = int(now - (deadline - timeout_sec))
+                log.info(
+                    "wait_for_ready pod=%s status=%s elapsed=%ds",
+                    pod_id, current_status, elapsed,
+                )
+                last_status = current_status
+                last_log_time = now
+
             if pod and pod.endpoint_url:
                 try:
                     async with httpx.AsyncClient(timeout=5.0) as client:
                         r = await client.get(f"{pod.endpoint_url}/health")
                         if r.status_code == 200:
                             pod.status = GpuPodStatus.READY
+                            log.info(
+                                "wait_for_ready pod=%s READY endpoint=%s",
+                                pod_id, pod.endpoint_url,
+                            )
                             return pod
                 except (httpx.ConnectError, httpx.TimeoutException):
                     pass
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
 
         raise TimeoutError(f"Pod {pod_id} did not become ready within {timeout_sec}s")
 
