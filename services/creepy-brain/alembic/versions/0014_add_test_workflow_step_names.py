@@ -1,4 +1,4 @@
-"""Add step_one and step_two to stepname PG enum for test workflow.
+"""Add step_one, step_two, recon_orphaned_pods to stepname PG enum.
 
 Revision ID: 0014
 Revises: 0013
@@ -18,6 +18,7 @@ depends_on: None = None
 def upgrade() -> None:
     op.execute("ALTER TYPE stepname ADD VALUE IF NOT EXISTS 'step_one'")
     op.execute("ALTER TYPE stepname ADD VALUE IF NOT EXISTS 'step_two'")
+    op.execute("ALTER TYPE stepname ADD VALUE IF NOT EXISTS 'recon_orphaned_pods'")
 
 
 def downgrade() -> None:

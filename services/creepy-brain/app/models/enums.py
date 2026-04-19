@@ -30,6 +30,7 @@ class StepName(str, Enum):
     CLEANUP_GPU_POD = "cleanup_gpu_pod"
     STEP_ONE = "step_one"
     STEP_TWO = "step_two"
+    RECON_ORPHANED_PODS = "recon_orphaned_pods"
 
 
 class StepStatus(str, Enum):
