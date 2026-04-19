@@ -23,6 +23,14 @@ from app.models.enums import StoryStatus
 from app.models.json_schemas import StoryActOutline, StoryOutlineSchema
 from app.models.story import Story, StoryAct
 from app.pipeline.models import FiveActOutline, StoryBible
+from app.validation_limits import ACT_WORD_COUNT_PROPORTIONS, DEFAULT_STORY_TARGET_WORD_COUNT
+
+
+def _derive_act_word_counts(total: int, num_acts: int) -> list[int]:
+    """Distribute total word count across acts using fixed proportions."""
+    proportions = ACT_WORD_COUNT_PROPORTIONS[:num_acts]
+    norm = sum(proportions) or 1.0
+    return [max(1, round(total * p / norm)) for p in proportions]
 
 
 async def create(
@@ -84,25 +92,27 @@ async def update_bible_and_outline(
     story_id: uuid.UUID,
     bible: StoryBible,
     outline: FiveActOutline,
+    target_word_count: int = DEFAULT_STORY_TARGET_WORD_COUNT,
 ) -> None:
     """Persist architect output: title and a simplified outline JSONB (flush only)."""
     story = await _get_or_raise(session, story_id)
     story.title = bible.title
 
+    act_word_counts = _derive_act_word_counts(target_word_count, len(outline.acts))
     acts_summary: list[StoryActOutline] = [
         StoryActOutline(
             act_number=act.act_number,
             title=act.title,
             summary=act.act_hook,
-            target_word_count=act.target_word_count,
+            target_word_count=act_word_counts[idx],
             key_events=[b.description for b in act.beats],
         )
-        for act in outline.acts
+        for idx, act in enumerate(outline.acts)
     ]
     story.outline = StoryOutlineSchema(
         title=bible.title,
         total_acts=len(acts_summary),
-        total_target_words=sum(a.target_word_count for a in acts_summary),
+        total_target_words=target_word_count,
         acts=acts_summary,
         themes=[],
         setting=bible.setting.location,

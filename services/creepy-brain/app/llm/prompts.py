@@ -67,8 +67,7 @@ StoryBible and FiveActOutline for a horror narration at the requested word count
 
 {NARRATOR_VOICE_RULES}
 
-The story uses a 5-act structure. Distribute the total word count across acts \
-proportionally (roughly 17%, 20%, 20%, 22%, 21%).
+The story uses a 5-act structure.
 
 Requirements:
 - Every subplot must be introduced and resolved within the 5 acts

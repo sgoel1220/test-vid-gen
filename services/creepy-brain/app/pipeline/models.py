@@ -9,8 +9,6 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from app.validation_limits import (
-    ACT_TARGET_WORD_COUNT_MAX,
-    ACT_TARGET_WORD_COUNT_MIN,
     DIMENSION_SCORE_MAX,
     DIMENSION_SCORE_MIN,
     TENSION_LEVEL_MAX,
@@ -93,7 +91,6 @@ class Beat(Frozen):
 class ActOutline(Frozen):
     act_number: int
     title: str
-    target_word_count: int = Field(ge=ACT_TARGET_WORD_COUNT_MIN, le=ACT_TARGET_WORD_COUNT_MAX)
     beats: list[Beat]
     act_hook: str
     act_cliffhanger: str
