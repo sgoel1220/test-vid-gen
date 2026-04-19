@@ -30,6 +30,8 @@ class GpuPodSpec(BaseModel):
     cloud_type: str = "COMMUNITY"  # COMMUNITY or SECURE
     env: dict[str, str] = Field(default_factory=dict)
     gpu_count: int = 1
+    min_download: int = 500  # Mbps; 0 = no filter
+    min_upload: int = 500  # Mbps; 0 = no filter
 
     @classmethod
     def from_config(cls) -> "GpuPodSpec":

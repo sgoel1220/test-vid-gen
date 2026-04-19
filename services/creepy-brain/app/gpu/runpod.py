@@ -186,7 +186,7 @@ class RunPodProvider(GpuProvider):
         env_dict = spec.env or {}
 
         def _create() -> object:
-            return runpod.create_pod(
+            kwargs: dict[str, object] = dict(
                 name=idempotency_key,
                 image_name=spec.image,
                 gpu_type_id=spec.gpu_type,
@@ -196,6 +196,11 @@ class RunPodProvider(GpuProvider):
                 ports=ports_str,
                 env=env_dict,
             )
+            if spec.min_download > 0:
+                kwargs["min_download"] = spec.min_download
+            if spec.min_upload > 0:
+                kwargs["min_upload"] = spec.min_upload
+            return runpod.create_pod(**kwargs)
 
         try:
             raw = _as_raw_pod(await asyncio.to_thread(_create))
