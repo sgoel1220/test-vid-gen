@@ -20,7 +20,7 @@ import logging
 import uuid
 
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 import app.db as _db
 from app.models.enums import StepName, StepStatus
@@ -184,12 +184,30 @@ class WorkflowRunner:
     # ------------------------------------------------------------------
 
     async def _load_completed_steps(self) -> None:
-        """Pre-seed _outputs for steps that are already COMPLETED in DB."""
+        """Pre-seed _outputs for steps that are already COMPLETED in DB.
+
+        Only the latest attempt per step name is considered — stale completed
+        rows from earlier attempts must not short-circuit a subsequent run.
+        """
         async with optional_session() as session:
             if session is None:
                 return
+            # Subquery: max attempt_number per step_name for this workflow.
+            latest_attempt_sq = (
+                select(
+                    WorkflowStep.step_name,
+                    func.max(WorkflowStep.attempt_number).label("max_attempt"),
+                )
+                .where(WorkflowStep.workflow_id == self._workflow_id)
+                .group_by(WorkflowStep.step_name)
+                .subquery()
+            )
             result = await session.execute(
-                select(WorkflowStep).where(
+                select(WorkflowStep).join(
+                    latest_attempt_sq,
+                    (WorkflowStep.step_name == latest_attempt_sq.c.step_name)
+                    & (WorkflowStep.attempt_number == latest_attempt_sq.c.max_attempt),
+                ).where(
                     WorkflowStep.workflow_id == self._workflow_id,
                     WorkflowStep.status == StepStatus.COMPLETED,
                 )
