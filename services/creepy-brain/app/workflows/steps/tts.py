@@ -363,7 +363,18 @@ async def _synthesize_all_chunks(
                     seed_offset=seed_offset,
                 )
 
-                # Persist blob and update chunk progress row
+                # Encode WAV → MP3 (best-effort; never blocks saving the WAV)
+                mp3_bytes: bytes | None = None
+                try:
+                    audio_arr: np.ndarray[tuple[int, ...], np.dtype[np.float32]]
+                    audio_arr, sr = sf.read(
+                        io.BytesIO(synthesis_result.wav_bytes), dtype="float32"
+                    )
+                    mp3_bytes = await encode_wav_to_mp3(audio_arr, sr)
+                except Exception as mp3_err:
+                    log.warning("chunk %d: MP3 encoding failed: %s", idx, mp3_err)
+
+                # Persist blob(s) and update chunk progress row
                 async with session_maker() as session:
                     blob = await blob_service.store(
                         session=session,
@@ -372,6 +383,16 @@ async def _synthesize_all_chunks(
                         blob_type=BlobType.CHUNK_AUDIO,
                         workflow_id=workflow_id_uuid,
                     )
+                    mp3_blob_id: uuid.UUID | None = None
+                    if mp3_bytes is not None:
+                        mp3_blob = await blob_service.store(
+                            session=session,
+                            data=mp3_bytes,
+                            mime_type="audio/mpeg",
+                            blob_type=BlobType.CHUNK_AUDIO_MP3,
+                            workflow_id=workflow_id_uuid,
+                        )
+                        mp3_blob_id = mp3_blob.id
                     if workflow_id_uuid is not None:
                         svc = WorkflowService(session)
                         if synthesis_result.validation_passed:
@@ -381,6 +402,7 @@ async def _synthesize_all_chunks(
                                 blob_id=blob.id,
                                 duration_sec=synthesis_result.duration_sec,
                                 attempts_used=synthesis_result.attempts_used,
+                                mp3_blob_id=mp3_blob_id,
                             )
                         else:
                             # Save best-effort audio but mark failed for now;
