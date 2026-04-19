@@ -345,6 +345,37 @@ function renderDetail(wf: WorkflowDetailResponse): string {
     parts.push(renderStorySection(wf));
   }
 
+  // Scenes
+  if (wf.scenes.length > 0) {
+    const rows = wf.scenes.map((s) => {
+      const sc = statusClass(s.image_status);
+      const textPreview = s.combined_text.length > 300
+        ? esc(s.combined_text.slice(0, 300)) + "&hellip;"
+        : esc(s.combined_text);
+      const promptPreview = s.image_prompt
+        ? (s.image_prompt.length > 200 ? esc(s.image_prompt.slice(0, 200)) + "&hellip;" : esc(s.image_prompt))
+        : '<span class="muted">-</span>';
+      const img = s.image_blob_id
+        ? `<img src="/api/blobs/${s.image_blob_id}" class="scene-thumb" alt="scene ${s.scene_index}" loading="lazy">`
+        : '<span class="muted">-</span>';
+      return `<tr>
+        <td class="scene-combined-text">${textPreview}</td>
+        <td class="scene-prompt-text">${promptPreview}</td>
+        <td class="scene-image-cell">${img}</td>
+        <td><span class="badge ${sc}">${s.image_status}</span></td>
+      </tr>`;
+    }).join("");
+    parts.push(`
+      <div class="section">
+        <h3>Scenes (${wf.scenes.length})</h3>
+        <table class="scenes-table">
+          <thead><tr><th>Chunk Text</th><th>Image Prompt</th><th>Image</th><th>Status</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `);
+  }
+
   // Chunks (paginated)
   if (wf.chunks.length > 0) {
     const totalPages = Math.ceil(wf.chunks.length / CHUNKS_PER_PAGE);

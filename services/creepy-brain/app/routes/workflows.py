@@ -16,7 +16,7 @@ from app.db import DbSession
 from app.engine import engine
 from app.models.enums import StepName, StepStatus, WorkflowStatus, WorkflowType
 from app.models.json_schemas import WorkflowInputSchema
-from app.models.workflow import Workflow, WorkflowStep
+from app.models.workflow import Workflow, WorkflowScene, WorkflowStep
 from app.models.gpu_pod import GpuPod
 from app.schemas.workflow import (
     CreateWorkflowRequest,
@@ -24,6 +24,7 @@ from app.schemas.workflow import (
     WorkflowChunkResponse,
     WorkflowDetailResponse,
     WorkflowResponse,
+    WorkflowSceneResponse,
     WorkflowStepResponse,
 )
 from app.services.http_errors import require_found
@@ -82,6 +83,7 @@ async def _get_workflow_or_404(
         query = query.options(
             selectinload(Workflow.steps),
             selectinload(Workflow.chunks),
+            selectinload(Workflow.scenes).selectinload(WorkflowScene.chunks),
         )
     result = await db.execute(query)
     return require_found(result.scalar_one_or_none(), "Workflow not found")
@@ -193,6 +195,20 @@ async def get_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowDetailR
                 scene_id=c.scene_id,
             )
             for c in sorted(workflow.chunks, key=lambda c: c.chunk_index)
+        ],
+        scenes=[
+            WorkflowSceneResponse(
+                scene_index=s.scene_index,
+                combined_text=" ".join(
+                    c.chunk_text
+                    for c in sorted(s.chunks, key=lambda c: c.chunk_index)
+                ),
+                image_status=s.image_status,
+                image_prompt=s.image_prompt,
+                image_negative_prompt=s.image_negative_prompt,
+                image_blob_id=s.image_blob_id,
+            )
+            for s in sorted(workflow.scenes, key=lambda s: s.scene_index)
         ],
         gpu_pods=[
             GpuPodResponse(

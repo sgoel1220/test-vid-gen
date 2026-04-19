@@ -72,6 +72,17 @@ export interface WorkflowChunk {
   scene_id: string | null;
 }
 
+export type SceneImageStatus = "pending" | "processing" | "completed" | "failed";
+
+export interface WorkflowScene {
+  scene_index: number;
+  combined_text: string;
+  image_status: SceneImageStatus;
+  image_prompt: string | null;
+  image_negative_prompt: string | null;
+  image_blob_id: string | null;
+}
+
 export interface WorkflowGpuPod {
   id: string;
   provider: string;
@@ -87,6 +98,7 @@ export interface WorkflowDetailResponse extends WorkflowResponse {
   result: WorkflowResult | null;
   steps: WorkflowStep[];
   chunks: WorkflowChunk[];
+  scenes: WorkflowScene[];
   gpu_pods: WorkflowGpuPod[];
 }
 
