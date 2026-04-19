@@ -33,6 +33,14 @@ export function mount(container: HTMLElement): void {
             <label for="wf-words">Word Count <span id="wf-words-val" class="muted">200</span></label>
             <input type="range" id="wf-words" min="100" max="400" step="50" value="200">
           </div>
+          <div class="form-field">
+            <label class="checkbox-label">
+              <input type="checkbox" id="wf-images"> Generate images
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="wf-stitch"> Stitch video
+            </label>
+          </div>
           <div class="form-field form-field-btn">
             <button type="submit" class="btn" id="wf-submit">Create</button>
           </div>
@@ -104,6 +112,8 @@ async function handleCreate(e: Event): Promise<void> {
   const premise = (document.getElementById("wf-premise") as HTMLTextAreaElement).value.trim();
   const voice = (document.getElementById("wf-voice") as HTMLSelectElement).value;
   const words = parseInt((document.getElementById("wf-words") as HTMLInputElement).value, 10);
+  const generateImages = (document.getElementById("wf-images") as HTMLInputElement).checked;
+  const stitchVideo = (document.getElementById("wf-stitch") as HTMLInputElement).checked;
   const errEl = document.getElementById("wf-create-error")!;
   const btn = document.getElementById("wf-submit") as HTMLButtonElement;
 
@@ -118,6 +128,8 @@ async function handleCreate(e: Event): Promise<void> {
       premise,
       voice_name: voice,
       target_word_count: words,
+      generate_images: generateImages,
+      stitch_video: stitchVideo,
     });
     // Navigate to the new workflow
     location.hash = `#/workflow/${wf.id}`;
