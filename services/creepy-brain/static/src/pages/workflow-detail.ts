@@ -3,6 +3,7 @@
 import {
   fetchWorkflowDetail,
   fetchStoryByWorkflow,
+  fetchWorkflowLogs,
   updateStory,
   retryWorkflow,
   retryTtsStep,
@@ -12,6 +13,7 @@ import {
   pauseWorkflow,
   resumeWorkflow,
   type WorkflowDetailResponse,
+  type WorkflowLogEntry,
   type StoryDetailResponse,
 } from "../api.js";
 import {
@@ -29,11 +31,17 @@ let storyData: StoryDetailResponse | null = null;
 let storyDirty = false;
 let storySaving = false;
 
+// Live logs state
+let logEntries: WorkflowLogEntry[] = [];
+let logsExpanded = false;
+
 export function mount(container: HTMLElement, id: string): void {
   workflowId = id;
   storyData = null;
   storyDirty = false;
   storySaving = false;
+  logEntries = [];
+  logsExpanded = false;
   container.innerHTML = `
     <div class="toolbar">
       <a href="#/workflows" class="back-link">&larr; Workflows</a>
@@ -64,7 +72,11 @@ async function refresh(): Promise<void> {
   const el = document.getElementById("wd-content");
   if (!el) return;
   try {
-    const wf = await fetchWorkflowDetail(workflowId);
+    const [wf, logs] = await Promise.all([
+      fetchWorkflowDetail(workflowId),
+      fetchWorkflowLogs(workflowId).catch(() => logEntries),
+    ]);
+    logEntries = logs;
 
     // Stop polling once workflow reaches a terminal state
     if (TERMINAL_STATUSES.has(wf.status) && pollTimer) {
@@ -87,6 +99,7 @@ async function refresh(): Promise<void> {
     attachActionListeners(wf);
     attachChunkListeners();
     attachStoryListeners(wf);
+    attachLogListeners();
   } catch (err) {
     el.innerHTML = `<div class="error">Failed: ${esc(String(err))}</div>`;
   }
@@ -280,6 +293,48 @@ function attachStoryListeners(wf: WorkflowDetailResponse): void {
   });
 }
 
+function attachLogListeners(): void {
+  document.getElementById("logs-toggle")?.addEventListener("click", () => {
+    logsExpanded = !logsExpanded;
+    const body = document.getElementById("logs-body");
+    const btn = document.getElementById("logs-toggle");
+    if (body) body.style.display = logsExpanded ? "" : "none";
+    if (btn) btn.textContent = logsExpanded ? "▲ Collapse" : "▼ Expand";
+  });
+}
+
+function renderLogsSection(): string {
+  if (logEntries.length === 0) return "";
+
+  const LEVEL_CLASS: Record<string, string> = {
+    ERROR: "log-error",
+    WARNING: "log-warn",
+    WARN: "log-warn",
+    INFO: "log-info",
+    DEBUG: "log-debug",
+    CRITICAL: "log-error",
+  };
+
+  const rows = logEntries.map((e) => {
+    const cls = LEVEL_CLASS[e.level] ?? "log-info";
+    const ts = e.timestamp.slice(11, 19); // HH:MM:SS
+    const step = e.step ? `<span class="log-step">[${esc(e.step)}]</span> ` : "";
+    return `<div class="log-line ${cls}"><span class="log-ts">${ts}</span> <span class="log-level">${esc(e.level)}</span> ${step}<span class="log-msg">${esc(e.message)}</span></div>`;
+  }).join("");
+
+  return `
+    <div class="section">
+      <h3>
+        Logs (${logEntries.length})
+        <button id="logs-toggle" class="btn btn-sm" style="margin-left:8px;">${logsExpanded ? "▲ Collapse" : "▼ Expand"}</button>
+      </h3>
+      <div id="logs-body" style="display:${logsExpanded ? "" : "none"}">
+        <div class="log-container">${rows}</div>
+      </div>
+    </div>
+  `;
+}
+
 function renderDetail(wf: WorkflowDetailResponse): string {
   const cls = statusClass(wf.status);
   const parts: string[] = [];
@@ -339,6 +394,10 @@ function renderDetail(wf: WorkflowDetailResponse): string {
       </div>
     `);
   }
+
+  // Logs section
+  const logsHtml = renderLogsSection();
+  if (logsHtml) parts.push(logsHtml);
 
   // Story section
   if (storyData) {

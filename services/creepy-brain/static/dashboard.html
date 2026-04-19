@@ -244,6 +244,29 @@
       white-space: pre-wrap;
       word-break: break-all;
     }
+
+    /* Log viewer */
+    .log-container {
+      background: #0d0d1a;
+      border: 1px solid #222;
+      border-radius: 4px;
+      padding: 0.5rem;
+      max-height: 400px;
+      overflow-y: auto;
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 0.78rem;
+      line-height: 1.5;
+    }
+    .log-line { display: flex; gap: 0.5rem; padding: 1px 0; flex-wrap: wrap; }
+    .log-ts { color: #555; flex-shrink: 0; }
+    .log-level { font-weight: 600; width: 5rem; flex-shrink: 0; }
+    .log-step { color: #7eb8da; flex-shrink: 0; }
+    .log-msg { color: #ccc; word-break: break-word; }
+    .log-info .log-level { color: #7eb8da; }
+    .log-warn .log-level { color: #fbbf24; }
+    .log-error .log-level { color: #f87171; }
+    .log-error .log-msg { color: #f87171; }
+    .log-debug .log-level { color: #666; }
   </style>
 </head>
 <body>
