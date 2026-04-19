@@ -1,34 +1,50 @@
-"""WorkflowChunk and WorkflowScene CRUD operations.
+"""Backward-compatible workflow service facade.
 
 Transaction ownership convention
 ---------------------------------
-Service methods only *flush* — they never commit.  The caller is responsible
+Service methods only *flush* -- they never commit. The caller is responsible
 for ``await session.commit()`` after each logical unit of work.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from importlib import import_module
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import ChunkStatus, StepName, StepStatus, WorkflowStatus
-from app.models.json_schemas import WorkflowResultSchema
-from app.models.workflow import Workflow, WorkflowChunk, WorkflowScene, WorkflowStep
+from app.services.workflow_chunk_service import WorkflowChunkService
+from app.services.workflow_fork_service import WorkflowForkService
+from app.services.workflow_ids import get_optional_workflow_id
+from app.services.workflow_lifecycle_service import WorkflowLifecycleService
+from app.services.workflow_read_repository import (
+    ChunkForImageStep,
+    WorkflowReadRepository,
+)
+from app.services.workflow_scene_service import WorkflowSceneService
+from app.services.workflow_step_service import WorkflowStepService
+
+_enums: Any = import_module("app.models.enums")
+_json_schemas: Any = import_module("app.models.json_schemas")
+_workflow_models: Any = import_module("app.models.workflow")
+StepName: Any = _enums.StepName
+StepOutputSchema: Any = _json_schemas.StepOutputSchema
+WorkflowResultSchema: Any = _json_schemas.WorkflowResultSchema
+Workflow: Any = _workflow_models.Workflow
+WorkflowChunk: Any = _workflow_models.WorkflowChunk
+WorkflowScene: Any = _workflow_models.WorkflowScene
 
 
 class WorkflowService:
-    """Database operations for WorkflowChunk and WorkflowScene."""
+    """Backward-compatible facade over focused workflow services."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-
-    # -------------------------------------------------------------------------
-    # Chunk operations (TTS)
-    # -------------------------------------------------------------------------
+        self._chunks = WorkflowChunkService(session)
+        self._scenes = WorkflowSceneService(session)
+        self._steps = WorkflowStepService(session)
+        self._lifecycle = WorkflowLifecycleService(session)
 
     async def upsert_chunk(
         self,
@@ -36,37 +52,8 @@ class WorkflowService:
         chunk_index: int,
         chunk_text: str,
     ) -> WorkflowChunk:
-        """Create or update the WorkflowChunk for *chunk_index* (flush only).
-
-        If the row already exists but ``chunk_text`` has changed (e.g. after
-        re-normalization), the text is updated and the status is reset to
-        PENDING so the chunk is re-synthesized, ensuring DB text always matches
-        the audio that was actually generated.
-        """
-        result = await self._session.execute(
-            select(WorkflowChunk).where(
-                WorkflowChunk.workflow_id == workflow_id,
-                WorkflowChunk.chunk_index == chunk_index,
-            )
-        )
-        chunk = result.scalar_one_or_none()
-        if chunk is None:
-            chunk = WorkflowChunk(
-                workflow_id=workflow_id,
-                chunk_index=chunk_index,
-                chunk_text=chunk_text,
-                tts_status=ChunkStatus.PENDING,
-            )
-            self._session.add(chunk)
-            await self._session.flush()
-            await self._session.refresh(chunk)
-        elif chunk.chunk_text != chunk_text:
-            chunk.chunk_text = chunk_text
-            chunk.tts_status = ChunkStatus.PENDING
-            chunk.tts_audio_blob_id = None
-            chunk.tts_duration_sec = None
-            await self._session.flush()
-        return chunk
+        """Create or update the WorkflowChunk for *chunk_index* (flush only)."""
+        return await self._chunks.upsert_chunk(workflow_id, chunk_index, chunk_text)
 
     async def mark_chunk_processing(
         self,
@@ -74,9 +61,7 @@ class WorkflowService:
         chunk_index: int,
     ) -> None:
         """Set tts_status to PROCESSING (flush only)."""
-        chunk = await self._get_chunk_or_raise(workflow_id, chunk_index)
-        chunk.tts_status = ChunkStatus.PROCESSING
-        await self._session.flush()
+        await self._chunks.mark_chunk_processing(workflow_id, chunk_index)
 
     async def complete_chunk_tts(
         self,
@@ -87,23 +72,15 @@ class WorkflowService:
         attempts_used: int,
         mp3_blob_id: uuid.UUID | None = None,
     ) -> None:
-        """Record successful TTS for a chunk (flush only).
-
-        Args:
-            workflow_id: The owning workflow UUID.
-            chunk_index: Zero-based chunk position.
-            blob_id: UUID of the saved WAV blob in ``workflow_blobs``.
-            duration_sec: Audio duration in seconds.
-            attempts_used: Number of synthesis attempts made (1 = first try succeeded).
-            mp3_blob_id: Optional UUID of the encoded MP3 blob.
-        """
-        chunk = await self._get_chunk_or_raise(workflow_id, chunk_index)
-        chunk.tts_status = ChunkStatus.COMPLETED
-        chunk.tts_audio_blob_id = blob_id
-        chunk.tts_mp3_blob_id = mp3_blob_id
-        chunk.tts_duration_sec = duration_sec
-        chunk.tts_completed_at = datetime.now(timezone.utc)
-        await self._session.flush()
+        """Record successful TTS for a chunk (flush only)."""
+        await self._chunks.complete_chunk_tts(
+            workflow_id,
+            chunk_index,
+            blob_id,
+            duration_sec,
+            attempts_used,
+            mp3_blob_id,
+        )
 
     async def fail_chunk_tts(
         self,
@@ -112,59 +89,21 @@ class WorkflowService:
         blob_id: uuid.UUID,
         attempts_used: int,
     ) -> None:
-        """Record a best-effort TTS chunk where all validation attempts failed (flush only).
-
-        The best-effort WAV blob is still saved so downstream steps have *something*
-        to work with, but the chunk is marked FAILED so operators can identify it.
-
-        Args:
-            workflow_id: The owning workflow UUID.
-            chunk_index: Zero-based chunk position.
-            blob_id: UUID of the saved (unvalidated) WAV blob in ``workflow_blobs``.
-            attempts_used: Total synthesis attempts made.
-        """
-        chunk = await self._get_chunk_or_raise(workflow_id, chunk_index)
-        chunk.tts_status = ChunkStatus.FAILED
-        chunk.tts_audio_blob_id = blob_id
-        chunk.tts_completed_at = datetime.now(timezone.utc)
-        await self._session.flush()
+        """Record a best-effort failed TTS chunk with its WAV blob (flush only)."""
+        await self._chunks.fail_chunk_tts(
+            workflow_id,
+            chunk_index,
+            blob_id,
+            attempts_used,
+        )
 
     async def reset_chunks_to_pending(
         self,
         workflow_id: uuid.UUID,
         chunk_indices: list[int] | None = None,
     ) -> int:
-        """Reset FAILED chunks back to PENDING so they can be re-synthesized.
-
-        Args:
-            workflow_id: The owning workflow UUID.
-            chunk_indices: Specific chunk indices to reset. If None, resets all FAILED chunks.
-
-        Returns:
-            Number of chunks reset.
-        """
-        stmt = select(WorkflowChunk).where(
-            WorkflowChunk.workflow_id == workflow_id,
-            WorkflowChunk.tts_status == ChunkStatus.FAILED,
-        )
-        if chunk_indices is not None:
-            stmt = stmt.where(WorkflowChunk.chunk_index.in_(chunk_indices))
-
-        result = await self._session.execute(stmt)
-        chunks = list(result.scalars().all())
-
-        for chunk in chunks:
-            chunk.tts_status = ChunkStatus.PENDING
-            chunk.tts_audio_blob_id = None
-            chunk.tts_mp3_blob_id = None
-            chunk.tts_completed_at = None
-
-        await self._session.flush()
-        return len(chunks)
-
-    # -------------------------------------------------------------------------
-    # Scene operations (Image)
-    # -------------------------------------------------------------------------
+        """Reset FAILED chunks back to PENDING so they can be re-synthesized."""
+        return await self._chunks.reset_chunks_to_pending(workflow_id, chunk_indices)
 
     async def create_scene(
         self,
@@ -172,32 +111,8 @@ class WorkflowService:
         scene_index: int,
         chunk_indices: list[int],
     ) -> WorkflowScene:
-        """Create a scene and link chunks to it (flush only).
-
-        Args:
-            workflow_id: The owning workflow UUID.
-            scene_index: Zero-based scene position.
-            chunk_indices: List of chunk indices belonging to this scene.
-
-        Returns:
-            The created WorkflowScene.
-        """
-        scene = WorkflowScene(
-            workflow_id=workflow_id,
-            scene_index=scene_index,
-            image_status=ChunkStatus.PENDING,
-        )
-        self._session.add(scene)
-        await self._session.flush()
-        await self._session.refresh(scene)
-
-        # Link chunks to this scene
-        for chunk_idx in chunk_indices:
-            chunk = await self._get_chunk_or_raise(workflow_id, chunk_idx)
-            chunk.scene_id = scene.id
-        await self._session.flush()
-
-        return scene
+        """Create a scene and link chunks to it (flush only)."""
+        return await self._scenes.create_scene(workflow_id, scene_index, chunk_indices)
 
     async def get_or_create_scene(
         self,
@@ -205,26 +120,12 @@ class WorkflowService:
         scene_index: int,
         chunk_indices: list[int],
     ) -> WorkflowScene:
-        """Get existing scene or create a new one (flush only).
-
-        Args:
-            workflow_id: The owning workflow UUID.
-            scene_index: Zero-based scene position.
-            chunk_indices: List of chunk indices belonging to this scene.
-
-        Returns:
-            The existing or newly created WorkflowScene.
-        """
-        result = await self._session.execute(
-            select(WorkflowScene).where(
-                WorkflowScene.workflow_id == workflow_id,
-                WorkflowScene.scene_index == scene_index,
-            )
+        """Get existing scene or create a new one (flush only)."""
+        return await self._scenes.get_or_create_scene(
+            workflow_id,
+            scene_index,
+            chunk_indices,
         )
-        scene = result.scalar_one_or_none()
-        if scene is not None:
-            return scene
-        return await self.create_scene(workflow_id, scene_index, chunk_indices)
 
     async def save_scene_prompt(
         self,
@@ -233,18 +134,13 @@ class WorkflowService:
         image_prompt: str,
         image_negative_prompt: str,
     ) -> None:
-        """Save image prompt for a scene before GPU generation (flush only).
-
-        Args:
-            workflow_id: The owning workflow UUID.
-            scene_index: Zero-based scene position.
-            image_prompt: The SDXL positive prompt.
-            image_negative_prompt: The SDXL negative prompt.
-        """
-        scene = await self._get_scene_or_raise(workflow_id, scene_index)
-        scene.image_prompt = image_prompt
-        scene.image_negative_prompt = image_negative_prompt
-        await self._session.flush()
+        """Save image prompt for a scene before GPU generation (flush only)."""
+        await self._scenes.save_scene_prompt(
+            workflow_id,
+            scene_index,
+            image_prompt,
+            image_negative_prompt,
+        )
 
     async def complete_scene_image(
         self,
@@ -252,73 +148,17 @@ class WorkflowService:
         scene_index: int,
         blob_id: uuid.UUID,
     ) -> None:
-        """Record successful image generation for a scene (flush only).
-
-        Args:
-            workflow_id: The owning workflow UUID.
-            scene_index: Zero-based scene position.
-            blob_id: UUID of the saved PNG blob in ``workflow_blobs``.
-        """
-        scene = await self._get_scene_or_raise(workflow_id, scene_index)
-        scene.image_status = ChunkStatus.COMPLETED
-        scene.image_blob_id = blob_id
-        scene.image_completed_at = datetime.now(timezone.utc)
-        await self._session.flush()
-
-    # -------------------------------------------------------------------------
-    # Step / workflow lifecycle
-    # -------------------------------------------------------------------------
+        """Record successful image generation for a scene (flush only)."""
+        await self._scenes.complete_scene_image(workflow_id, scene_index, blob_id)
 
     async def start_step(
         self,
         workflow_id: uuid.UUID,
         step_name: StepName,
     ) -> None:
-        """Create (or re-create) a WorkflowStep in RUNNING state (flush only).
-
-        If no step exists yet, or the latest attempt is COMPLETED/FAILED,
-        a new row is created with an incremented ``attempt_number``.
-        """
-        result = await self._session.execute(
-            select(WorkflowStep)
-            .where(
-                WorkflowStep.workflow_id == workflow_id,
-                WorkflowStep.step_name == step_name,
-            )
-            .order_by(desc(WorkflowStep.attempt_number))
-            .limit(1)
-        )
-        latest = result.scalar_one_or_none()
-
-        if latest is None or latest.status in (
-            StepStatus.COMPLETED,
-            StepStatus.FAILED,
-        ):
-            next_attempt = (latest.attempt_number + 1) if latest else 1
-            step = WorkflowStep(
-                workflow_id=workflow_id,
-                step_name=step_name,
-                status=StepStatus.RUNNING,
-                attempt_number=next_attempt,
-                started_at=datetime.now(timezone.utc),
-            )
-            self._session.add(step)
-        else:
-            latest.status = StepStatus.RUNNING
-            latest.started_at = datetime.now(timezone.utc)
-
-        # Update parent workflow
-        wf_result = await self._session.execute(
-            select(Workflow).where(Workflow.id == workflow_id)
-        )
-        wf = wf_result.scalar_one_or_none()
-        if wf is None:
-            raise ValueError(f"Workflow not found: {workflow_id}")
-        wf.current_step = step_name
-        if wf.status == WorkflowStatus.PENDING:
-            wf.status = WorkflowStatus.RUNNING
-            wf.started_at = datetime.now(timezone.utc)
-
+        """Create or re-create a step attempt and update parent workflow."""
+        await self._steps.start_step(workflow_id, step_name, flush=False)
+        await self._lifecycle.start_step(workflow_id, step_name, flush=False)
         await self._session.flush()
 
     async def complete_step(
@@ -327,20 +167,8 @@ class WorkflowService:
         step_name: StepName,
         output: StepOutputSchema | None = None,
     ) -> None:
-        """Mark the RUNNING WorkflowStep as COMPLETED (flush only).
-
-        Args:
-            workflow_id: The owning workflow UUID.
-            step_name: The step that completed.
-            output: Optional Pydantic output model to persist in ``output_json``
-                so that retry/resume paths can hydrate parent outputs correctly.
-        """
-        step = await self._get_running_step_or_raise(workflow_id, step_name)
-        step.status = StepStatus.COMPLETED
-        step.completed_at = datetime.now(timezone.utc)
-        if output is not None:
-            step.output_json = output
-        await self._session.flush()
+        """Mark the RUNNING WorkflowStep as COMPLETED (flush only)."""
+        await self._steps.complete_step(workflow_id, step_name, output)
 
     async def fail_step(
         self,
@@ -349,11 +177,7 @@ class WorkflowService:
         error: str,
     ) -> None:
         """Mark the RUNNING WorkflowStep as FAILED (flush only)."""
-        step = await self._get_running_step_or_raise(workflow_id, step_name)
-        step.status = StepStatus.FAILED
-        step.error = error
-        step.completed_at = datetime.now(timezone.utc)
-        await self._session.flush()
+        await self._steps.fail_step(workflow_id, step_name, error)
 
     async def complete_workflow(
         self,
@@ -361,11 +185,7 @@ class WorkflowService:
         result: WorkflowResultSchema,
     ) -> None:
         """Mark the Workflow as COMPLETED with result data (flush only)."""
-        wf = await self._get_workflow_or_raise(workflow_id)
-        wf.status = WorkflowStatus.COMPLETED
-        wf.result_json = result
-        wf.completed_at = datetime.now(timezone.utc)
-        await self._session.flush()
+        await self._lifecycle.complete_workflow(workflow_id, result)
 
     async def fail_workflow(
         self,
@@ -373,160 +193,23 @@ class WorkflowService:
         error_message: str,
     ) -> None:
         """Mark the Workflow as FAILED (flush only)."""
-        wf = await self._get_workflow_or_raise(workflow_id)
-        wf.status = WorkflowStatus.FAILED
-        wf.error = error_message
-        wf.completed_at = datetime.now(timezone.utc)
-        await self._session.flush()
-
-    # -------------------------------------------------------------------------
-    # Private helpers
-    # -------------------------------------------------------------------------
-
-    async def _get_chunk_or_raise(
-        self, workflow_id: uuid.UUID, chunk_index: int
-    ) -> WorkflowChunk:
-        result = await self._session.execute(
-            select(WorkflowChunk).where(
-                WorkflowChunk.workflow_id == workflow_id,
-                WorkflowChunk.chunk_index == chunk_index,
-            )
-        )
-        chunk = result.scalar_one_or_none()
-        if chunk is None:
-            raise ValueError(
-                f"WorkflowChunk not found: workflow_id={workflow_id} chunk_index={chunk_index}"
-            )
-        return chunk
-
-    async def _get_scene_or_raise(
-        self, workflow_id: uuid.UUID, scene_index: int
-    ) -> WorkflowScene:
-        result = await self._session.execute(
-            select(WorkflowScene).where(
-                WorkflowScene.workflow_id == workflow_id,
-                WorkflowScene.scene_index == scene_index,
-            )
-        )
-        scene = result.scalar_one_or_none()
-        if scene is None:
-            raise ValueError(
-                f"WorkflowScene not found: workflow_id={workflow_id} scene_index={scene_index}"
-            )
-        return scene
-
-    async def _get_running_step_or_raise(
-        self, workflow_id: uuid.UUID, step_name: StepName
-    ) -> WorkflowStep:
-        result = await self._session.execute(
-            select(WorkflowStep).where(
-                WorkflowStep.workflow_id == workflow_id,
-                WorkflowStep.step_name == step_name,
-                WorkflowStep.status == StepStatus.RUNNING,
-            )
-        )
-        step = result.scalar_one_or_none()
-        if step is None:
-            raise ValueError(
-                f"No RUNNING WorkflowStep found: workflow_id={workflow_id} step_name={step_name}"
-            )
-        return step
-
-    async def _get_workflow_or_raise(
-        self, workflow_id: uuid.UUID
-    ) -> Workflow:
-        result = await self._session.execute(
-            select(Workflow).where(Workflow.id == workflow_id)
-        )
-        wf = result.scalar_one_or_none()
-        if wf is None:
-            raise ValueError(f"Workflow not found: {workflow_id}")
-        return wf
-
-
-class ChunkForImageStep(BaseModel):
-    """Chunk data needed by image_generation and stitch_final steps."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    index: int = Field(ge=0, description="Zero-based chunk position")
-    text: str = Field(description="Chunk text content")
-    blob_id: str | None = Field(description="UUID of the WAV blob (None if TTS failed)")
-    tts_status: ChunkStatus = Field(description="Chunk TTS status")
-    scene_id: str | None = Field(description="UUID of the linked scene (None if unlinked)")
-    duration_sec: float | None = Field(
-        default=None, description="TTS audio duration in seconds (None if TTS not done)"
-    )
+        await self._lifecycle.fail_workflow(workflow_id, error_message)
 
 
 async def get_chunks_for_image_step(
     session: AsyncSession,
     workflow_id: uuid.UUID,
 ) -> list[ChunkForImageStep]:
-    """Return chunk data needed by the image_generation and stitch_final steps.
-
-    Args:
-        session: Active SQLAlchemy async session.
-        workflow_id: The workflow whose chunks to fetch.
-
-    Returns:
-        List of ChunkForImageStep models ordered by chunk_index.
-    """
-    result = await session.execute(
-        select(WorkflowChunk)
-        .where(WorkflowChunk.workflow_id == workflow_id)
-        .order_by(WorkflowChunk.chunk_index)
-    )
-    chunks = result.scalars().all()
-    return [
-        ChunkForImageStep(
-            index=c.chunk_index,
-            text=c.chunk_text,
-            blob_id=str(c.tts_audio_blob_id) if c.tts_audio_blob_id else None,
-            tts_status=c.tts_status,
-            scene_id=str(c.scene_id) if c.scene_id else None,
-            duration_sec=c.tts_duration_sec,
-        )
-        for c in chunks
-    ]
+    """Return chunk data needed by the image_generation and stitch_final steps."""
+    return await WorkflowReadRepository(session).get_chunks_for_image_step(workflow_id)
 
 
 async def get_scenes_for_workflow(
     session: AsyncSession,
     workflow_id: uuid.UUID,
 ) -> list[WorkflowScene]:
-    """Return all scenes for a workflow ordered by scene_index.
-
-    Args:
-        session: Active SQLAlchemy async session.
-        workflow_id: The workflow whose scenes to fetch.
-
-    Returns:
-        List of WorkflowScene objects.
-    """
-    result = await session.execute(
-        select(WorkflowScene)
-        .where(WorkflowScene.workflow_id == workflow_id)
-        .order_by(WorkflowScene.scene_index)
-    )
-    return list(result.scalars().all())
-
-
-def get_optional_workflow_id(workflow_run_id: str) -> uuid.UUID | None:
-    """Parse the workflow run ID string to a UUID, or return None on failure."""
-    try:
-        return uuid.UUID(workflow_run_id)
-    except ValueError:
-        return None
-
-
-# Pipeline step order used for fork logic.
-_FORK_STEP_ORDER: list[StepName] = [
-    StepName.GENERATE_STORY,
-    StepName.TTS_SYNTHESIS,
-    StepName.IMAGE_GENERATION,
-    StepName.STITCH_FINAL,
-]
+    """Return all scenes for a workflow ordered by scene_index."""
+    return await WorkflowReadRepository(session).get_scenes_for_workflow(workflow_id)
 
 
 async def fork_workflow(
@@ -534,141 +217,21 @@ async def fork_workflow(
     source_id: uuid.UUID,
     from_step: StepName,
 ) -> Workflow:
-    """Create a new workflow forked from *source_id* starting at *from_step*.
+    """Create a new workflow forked from *source_id* starting at *from_step*."""
+    return await WorkflowForkService(session).fork_workflow(source_id, from_step)
 
-    All steps before *from_step* are seeded as COMPLETED with their original
-    ``output_json``.  Auxiliary DB rows (chunks, scenes) are copied to the new
-    workflow_id so downstream steps can read them by ``workflow_id`` as usual.
 
-    Args:
-        session: Active SQLAlchemy async session (caller must commit).
-        source_id: UUID of the source workflow to fork from.
-        from_step: The step at which the fork should start running.
-
-    Returns:
-        The new (unseeded) :class:`Workflow` row (status RUNNING, not yet committed).
-
-    Raises:
-        ValueError: If the source workflow is not found or from_step is invalid.
-    """
-    from datetime import datetime, timezone
-
-    # ── Validate source workflow ──────────────────────────────────────────────
-    src_result = await session.execute(
-        select(Workflow).where(Workflow.id == source_id)
-    )
-    src = src_result.scalar_one_or_none()
-    if src is None:
-        raise ValueError(f"Source workflow not found: {source_id}")
-
-    try:
-        fork_idx = _FORK_STEP_ORDER.index(from_step)
-    except ValueError:
-        valid = [s.value for s in _FORK_STEP_ORDER]
-        raise ValueError(f"Invalid from_step '{from_step.value}'. Valid: {valid}")
-
-    predecessor_names = _FORK_STEP_ORDER[:fork_idx]
-
-    # ── Load latest completed steps from source ──────────────────────────────
-    src_steps_result = await session.execute(
-        select(WorkflowStep)
-        .where(
-            WorkflowStep.workflow_id == source_id,
-            WorkflowStep.status == StepStatus.COMPLETED,
-        )
-        .order_by(desc(WorkflowStep.attempt_number))
-    )
-    src_steps_all = src_steps_result.scalars().all()
-    # Keep only the latest completed attempt per step_name.
-    latest_completed: dict[StepName, WorkflowStep] = {}
-    for ws in src_steps_all:
-        if ws.step_name not in latest_completed:
-            latest_completed[ws.step_name] = ws
-
-    # ── Create new workflow row ───────────────────────────────────────────────
-    new_id = uuid.uuid4()
-    new_wf = Workflow(
-        id=new_id,
-        workflow_type=src.workflow_type,
-        input_json=src.input_json,
-        status=WorkflowStatus.RUNNING,
-        started_at=datetime.now(timezone.utc),
-    )
-    session.add(new_wf)
-    await session.flush()
-
-    # ── Seed completed steps for all predecessors ─────────────────────────────
-    now = datetime.now(timezone.utc)
-    for step_name in predecessor_names:
-        src_ws = latest_completed.get(step_name)
-        seeded = WorkflowStep(
-            workflow_id=new_id,
-            step_name=step_name,
-            status=StepStatus.COMPLETED,
-            output_json=src_ws.output_json if src_ws else None,
-            attempt_number=1,
-            started_at=now,
-            completed_at=now,
-        )
-        session.add(seeded)
-
-    await session.flush()
-
-    # ── Copy auxiliary DB rows based on from_step ─────────────────────────────
-    # image_generation and stitch_final need chunks; stitch_final also needs scenes.
-    needs_chunks = fork_idx >= _FORK_STEP_ORDER.index(StepName.IMAGE_GENERATION)
-    needs_scenes = fork_idx >= _FORK_STEP_ORDER.index(StepName.STITCH_FINAL)
-
-    if needs_chunks:
-        chunks_result = await session.execute(
-            select(WorkflowChunk)
-            .where(WorkflowChunk.workflow_id == source_id)
-            .order_by(WorkflowChunk.chunk_index)
-        )
-        src_chunks = chunks_result.scalars().all()
-
-        old_to_new_scene: dict[uuid.UUID, uuid.UUID] = {}
-
-        if needs_scenes:
-            scenes_result = await session.execute(
-                select(WorkflowScene)
-                .where(WorkflowScene.workflow_id == source_id)
-                .order_by(WorkflowScene.scene_index)
-            )
-            src_scenes = scenes_result.scalars().all()
-
-            for sc in src_scenes:
-                new_scene = WorkflowScene(
-                    workflow_id=new_id,
-                    scene_index=sc.scene_index,
-                    image_prompt=sc.image_prompt,
-                    image_negative_prompt=sc.image_negative_prompt,
-                    image_status=sc.image_status,
-                    image_blob_id=sc.image_blob_id,
-                    image_completed_at=sc.image_completed_at,
-                )
-                session.add(new_scene)
-                await session.flush()
-                await session.refresh(new_scene)
-                old_to_new_scene[sc.id] = new_scene.id
-
-        for ch in src_chunks:
-            new_scene_id: uuid.UUID | None = None
-            if ch.scene_id is not None and ch.scene_id in old_to_new_scene:
-                new_scene_id = old_to_new_scene[ch.scene_id]
-            new_chunk = WorkflowChunk(
-                workflow_id=new_id,
-                chunk_index=ch.chunk_index,
-                chunk_text=ch.chunk_text,
-                tts_status=ch.tts_status,
-                tts_audio_blob_id=ch.tts_audio_blob_id,
-                tts_mp3_blob_id=ch.tts_mp3_blob_id,
-                tts_duration_sec=ch.tts_duration_sec,
-                tts_completed_at=ch.tts_completed_at,
-                scene_id=new_scene_id,
-            )
-            session.add(new_chunk)
-
-        await session.flush()
-
-    return new_wf
+__all__ = [
+    "ChunkForImageStep",
+    "WorkflowChunkService",
+    "WorkflowForkService",
+    "WorkflowLifecycleService",
+    "WorkflowReadRepository",
+    "WorkflowSceneService",
+    "WorkflowService",
+    "WorkflowStepService",
+    "fork_workflow",
+    "get_chunks_for_image_step",
+    "get_optional_workflow_id",
+    "get_scenes_for_workflow",
+]

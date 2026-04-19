@@ -11,6 +11,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
+from importlib import import_module
 
 from croniter import croniter
 from pydantic import BaseModel, ConfigDict, Field
@@ -150,14 +151,18 @@ class CronScheduler:
         Raises on failure so _fire can abort the trigger.
         """
         import app.db as _db
-        from app.models.enums import WorkflowStatus, WorkflowType
-        from app.models.workflow import Workflow
-        from app.models.json_schemas import WorkflowInputSchema
 
         session_maker = _db.async_session_maker
         if session_maker is None:
             raise RuntimeError("DB not initialized; cannot create Workflow row")
 
+        enums_module = import_module("app.models.enums")
+        WorkflowStatus = getattr(enums_module, "WorkflowStatus")
+        WorkflowType = getattr(enums_module, "WorkflowType")
+        WorkflowInputSchema = getattr(
+            import_module("app.models.json_schemas"),
+            "WorkflowInputSchema",
+        )
         input_obj = entry.input_factory()
         # Only create a typed Workflow row for known input schemas.
         if not isinstance(input_obj, WorkflowInputSchema):
@@ -167,6 +172,7 @@ class CronScheduler:
             )
             return
 
+        Workflow = getattr(import_module("app.models.workflow"), "Workflow")
         async with session_maker() as session:
             wf = Workflow(
                 id=workflow_id,
