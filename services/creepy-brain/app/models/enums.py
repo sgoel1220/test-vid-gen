@@ -28,6 +28,8 @@ class StepName(str, Enum):
     IMAGE_GENERATION = "image_generation"
     STITCH_FINAL = "stitch_final"
     CLEANUP_GPU_POD = "cleanup_gpu_pod"
+    STEP_ONE = "step_one"
+    STEP_TWO = "step_two"
 
 
 class StepStatus(str, Enum):
