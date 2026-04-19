@@ -16,9 +16,9 @@ from pydantic import BaseModel, Field
 log = logging.getLogger(__name__)
 
 # Thresholds — tuned for Chatterbox speech output
-_MIN_RMS: float = 0.003          # silence floor
-_MIN_PEAK: float = 0.02          # minimum peak amplitude
-_MIN_VOICED_RATIO: float = 0.03  # at least 3% voiced frames
+_MIN_RMS: float = 0.0001         # silence floor
+_MIN_PEAK: float = 0.001         # minimum peak amplitude
+_MIN_VOICED_RATIO: float = 0.05  # at least 5% voiced frames
 _VOICED_THRESHOLD: float = 0.01  # frame RMS above this = voiced
 
 
