@@ -22,13 +22,20 @@ from app.pipeline import architect, reviewer, writer
 from app.pipeline.formatting import format_act_drafts
 from app.pipeline.models import ActDraft, ArchitectOutput
 from app.services import story_service
-from app.validation_limits import DEFAULT_STORY_TARGET_WORD_COUNT
+from app.validation_limits import ACT_WORD_COUNT_PROPORTIONS, DEFAULT_STORY_TARGET_WORD_COUNT
 
 log = logging.getLogger(__name__)
 
 MAX_OUTLINE_LOOPS = 2
 MAX_REVIEW_LOOPS = 3
 PASSING_SCORE = 8.0
+
+
+def _derive_act_word_counts(total: int, num_acts: int) -> list[int]:
+    """Distribute total word count across acts using fixed proportions."""
+    proportions = ACT_WORD_COUNT_PROPORTIONS[:num_acts]
+    norm = sum(proportions) or 1.0
+    return [max(1, round(total * p / norm)) for p in proportions]
 
 
 async def run_pipeline(
@@ -51,7 +58,7 @@ async def run_pipeline(
         bible = arch_output.bible
         outline = arch_output.outline
 
-        await story_service.update_bible_and_outline(session, story_id, bible=bible, outline=outline)
+        await story_service.update_bible_and_outline(session, story_id, bible=bible, outline=outline, target_word_count=target_word_count)
         await session.commit()
 
         # ── Step 2: Outline review (max 2 loops) ────────────────────
@@ -75,20 +82,22 @@ async def run_pipeline(
             bible = fix_result.bible
             outline = fix_result.outline
 
-            await story_service.update_bible_and_outline(session, story_id, bible=bible, outline=outline)
+            await story_service.update_bible_and_outline(session, story_id, bible=bible, outline=outline, target_word_count=target_word_count)
             await session.commit()
 
         # ── Step 3: Write acts + inline checks ──────────────────────
+        act_word_counts = _derive_act_word_counts(target_word_count, len(outline.acts))
         acts: list[ActDraft] = []
-        for act_outline in outline.acts:
+        for idx, act_outline in enumerate(outline.acts):
+            act_wc = act_word_counts[idx]
             prior = list(acts)
-            draft = await writer.write_act(bible, outline, act_outline, prior)
+            draft = await writer.write_act(bible, outline, act_outline, prior, act_wc)
 
             check = await reviewer.check_act(bible, act_outline, prior, draft.text)
             if not check.passes:
                 log.info("act %d failed inline check, rewriting", act_outline.act_number)
                 draft = await writer.rewrite_act(
-                    bible, outline, act_outline, prior, check.notes
+                    bible, outline, act_outline, prior, check.notes, act_wc
                 )
 
             acts.append(draft)
@@ -137,7 +146,7 @@ async def run_pipeline(
                         full_text=full_text,
                         act_number=fix.act_number,
                         act_title=act_outline.title,
-                        target_word_count=act_outline.target_word_count,
+                        target_word_count=act_word_counts[act_idx],
                         what_to_change=fix.what_to_change,
                         why=fix.why,
                     ),

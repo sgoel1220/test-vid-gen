@@ -30,6 +30,7 @@ async def write_act(
     outline: FiveActOutline,
     act_outline: ActOutline,
     prior_acts: list[ActDraft],
+    target_word_count: int,
 ) -> ActDraft:
     """Generate prose for a single act."""
     act_num = act_outline.act_number
@@ -41,7 +42,7 @@ async def write_act(
         prior_acts=format_act_drafts(prior_acts, empty_text=_FIRST_ACT_EMPTY_TEXT),
         act_number=act_num,
         act_title=act_outline.title,
-        target_word_count=act_outline.target_word_count,
+        target_word_count=target_word_count,
         beats=_format_beats(act_outline),
         act_hook=act_outline.act_hook,
         act_cliffhanger=act_outline.act_cliffhanger,
@@ -66,6 +67,7 @@ async def rewrite_act(
     act_outline: ActOutline,
     prior_acts: list[ActDraft],
     check_notes: str,
+    target_word_count: int,
 ) -> ActDraft:
     """Rewrite an act that failed inline check."""
     act_num = act_outline.act_number
@@ -77,7 +79,7 @@ async def rewrite_act(
         prior_acts=format_act_drafts(prior_acts, empty_text=_FIRST_ACT_EMPTY_TEXT),
         act_number=act_num,
         act_title=act_outline.title,
-        target_word_count=act_outline.target_word_count,
+        target_word_count=target_word_count,
         beats=_format_beats(act_outline),
         act_hook=act_outline.act_hook,
         act_cliffhanger=act_outline.act_cliffhanger,

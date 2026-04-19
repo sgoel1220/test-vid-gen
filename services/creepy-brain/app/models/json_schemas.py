@@ -9,8 +9,6 @@ from pydantic import BaseModel, Field
 
 from app.validation_limits import (
     DEFAULT_STORY_TARGET_WORD_COUNT,
-    ACT_TARGET_WORD_COUNT_MAX,
-    ACT_TARGET_WORD_COUNT_MIN,
     MAX_REVISIONS_MAX,
     MAX_REVISIONS_MIN,
     WORKFLOW_TARGET_WORD_COUNT_MAX,
@@ -162,7 +160,7 @@ class StoryActOutline(BaseModel):
     act_number: int
     title: str
     summary: str
-    target_word_count: int = Field(ge=ACT_TARGET_WORD_COUNT_MIN, le=ACT_TARGET_WORD_COUNT_MAX)
+    target_word_count: int = Field(ge=1)
     key_events: list[str]
 
 
