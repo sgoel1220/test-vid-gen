@@ -421,7 +421,7 @@ async def encode_chunks_to_mp3(
     """
     import io
     import numpy as np
-    import soundfile as sf  # type: ignore[import-untyped]
+    import soundfile as sf
     from app.audio.encoding import encode_wav_to_mp3
     from app.models.enums import BlobType
     from app.models.workflow import WorkflowChunk, WorkflowBlob
@@ -449,6 +449,7 @@ async def encode_chunks_to_mp3(
     for chunk in chunks:
         try:
             async with session_maker() as session:
+                assert chunk.tts_audio_blob_id is not None
                 wav_blob = await blob_service.get(session, chunk.tts_audio_blob_id)
                 audio, sr = sf.read(io.BytesIO(wav_blob.data), dtype="float32")
                 mp3_bytes = await encode_wav_to_mp3(audio, sr)

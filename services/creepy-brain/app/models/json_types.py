@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import typing
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from pydantic import BaseModel, TypeAdapter
 from sqlalchemy import TypeDecorator
@@ -44,10 +44,10 @@ class PydanticType(TypeDecorator[T]):
             return None
         if isinstance(value, dict):
             value = self._adapter.validate_python(value)
-        return self._adapter.dump_python(value, mode="json")
+        return cast(dict[str, Any], self._adapter.dump_python(value, mode="json"))
 
     def process_result_value(self, value: dict[str, Any] | None, dialect: Any) -> T | None:
         """Convert dict from database to Pydantic model."""
         if value is None:
             return None
-        return self._adapter.validate_python(value)
+        return cast(T, self._adapter.validate_python(value))
