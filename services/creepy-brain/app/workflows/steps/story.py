@@ -71,11 +71,42 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> GenerateStory
                 act_count=len(existing_story.acts),
             )
 
+    # --- Manual override: caller provided story text directly, skip LLM ---
+    if input.manual_story_text:
+        async with session_maker() as session:
+            story = await story_service.create(session, premise=premise, workflow_id=workflow_uuid)
+            await session.flush()
+            story_id: uuid.UUID = story.id
+            word_count = len(input.manual_story_text.split())
+            await story_service.upsert_act(
+                session,
+                story_id=story_id,
+                act_number=1,
+                title="Manual Story",
+                content=input.manual_story_text,
+                word_count=word_count,
+            )
+            await story_service.complete_story(
+                session,
+                story_id=story_id,
+                full_text=input.manual_story_text,
+                word_count=word_count,
+            )
+            await session.commit()
+
+        log.info("story step: manual override — story %s saved (%d words)", story_id, word_count)
+        return GenerateStoryStepOutput(
+            story_id=story_id,
+            title="",
+            word_count=word_count,
+            act_count=1,
+        )
+
     # --- Normal path: create + run pipeline ---
     async with session_maker() as session:
         story = await story_service.create(session, premise=premise, workflow_id=workflow_uuid)
         await session.commit()
-        story_id: uuid.UUID = story.id
+        story_id = story.id
 
     log.info("story %s created, starting pipeline", story_id)
 

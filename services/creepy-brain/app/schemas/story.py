@@ -7,6 +7,11 @@ import uuid
 from pydantic import BaseModel, Field
 
 from app.models.enums import StoryStatus
+from app.validation_limits import (
+    DEFAULT_STORY_TARGET_WORD_COUNT,
+    WORKFLOW_TARGET_WORD_COUNT_MAX,
+    WORKFLOW_TARGET_WORD_COUNT_MIN,
+)
 
 
 class GenerateStoryRequest(BaseModel):
@@ -57,3 +62,15 @@ class UpdateStoryRequest(BaseModel):
     """Request body for updating a story's full text."""
 
     full_text: str = Field(..., min_length=1, description="Updated full story text")
+
+
+class BuildStoryPromptsRequest(BaseModel):
+    """Request body for previewing the prompts that story generation would use."""
+
+    premise: str = Field(..., min_length=10, description="Story premise or idea")
+    target_word_count: int = Field(
+        default=DEFAULT_STORY_TARGET_WORD_COUNT,
+        ge=WORKFLOW_TARGET_WORD_COUNT_MIN,
+        le=WORKFLOW_TARGET_WORD_COUNT_MAX,
+        description="Target word count (affects per-act word budgets shown in prompts)",
+    )

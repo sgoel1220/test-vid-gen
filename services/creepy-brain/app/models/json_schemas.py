@@ -40,6 +40,13 @@ class WorkflowInputSchema(BaseModel):
         le=WORKFLOW_TARGET_WORD_COUNT_MAX,
         description="Target word count for story",
     )
+    manual_story_text: str | None = Field(
+        default=None,
+        description=(
+            "If set, skip LLM story generation entirely and use this text as the completed story. "
+            "Useful for manually authored or externally generated stories."
+        ),
+    )
 
 
 class WorkflowResultSchema(BaseModel):

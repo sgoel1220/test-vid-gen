@@ -12,8 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.models.story import Story
 from app.services.http_errors import require_found
+from app.schemas.prompts import PromptPreviewResponse
 from app.schemas.story import (
     ActResponse,
+    BuildStoryPromptsRequest,
     GenerateStoryRequest,
     GenerateStoryResponse,
     StoryListItem,
@@ -55,6 +57,18 @@ def _story_to_response(story: Story) -> StoryResponse:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+
+@router.post("/build-prompts", response_model=PromptPreviewResponse)
+async def build_story_prompts(body: BuildStoryPromptsRequest) -> PromptPreviewResponse:
+    """Return the LLM prompts the story pipeline would use — no LLM calls made.
+
+    Use this to manually run the prompts in Claude and feed the outputs back
+    via the workflow's manual_story_text field.
+    """
+    from app.pipeline.prompt_builder import build_story_prompts as _build
+
+    return _build(premise=body.premise, target_word_count=body.target_word_count)
 
 
 @router.post("/generate", response_model=GenerateStoryResponse, status_code=202)
