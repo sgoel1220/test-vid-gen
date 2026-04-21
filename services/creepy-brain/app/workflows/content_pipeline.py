@@ -19,11 +19,15 @@ from pydantic import BaseModel
 
 from app.engine import SkippedStepOutput, StepContext, StepDef, WorkflowDef, engine
 from app.engine.models import StepOutputMap
-from app.models.json_schemas import WorkflowInputSchema, WorkflowResultSchema
+from app.models.json_schemas import (
+    WaveformOverlayStepOutput,
+    WorkflowInputSchema,
+    WorkflowResultSchema,
+)
 from app.services.workflow_service import WorkflowService, get_optional_workflow_id
 
 from .db_helpers import ensure_db, get_session_maker
-from .steps import cleanup, image, stitch, story, tts
+from .steps import cleanup, image, stitch, story, tts, waveform_overlay as waveform
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +61,13 @@ async def _on_pipeline_complete(workflow_run_id: str, outputs: StepOutputMap) ->
     workflow_id = _to_uuid(workflow_run_id)
     if workflow_id is None:
         return
+
+    # Extract waveform_overlay output (optional — may be skipped)
+    waveform_out = outputs.get("waveform_overlay")
+    waveform_video_blob_id: uuid.UUID | None = None
+    if isinstance(waveform_out, WaveformOverlayStepOutput):
+        waveform_video_blob_id = waveform_out.waveform_video_blob_id
+
     await ensure_db()
     async with get_session_maker()() as session:
         svc = WorkflowService(session)
@@ -65,6 +76,7 @@ async def _on_pipeline_complete(workflow_run_id: str, outputs: StepOutputMap) ->
             run_id=None,
             final_audio_blob_id=_to_uuid(stitch_out.final_audio_blob_id),
             final_video_blob_id=_to_uuid(stitch_out.final_video_blob_id),
+            waveform_video_blob_id=waveform_video_blob_id,
             total_duration_sec=stitch_out.total_duration_sec,
             chunk_count=stitch_out.chunk_count,
             gpu_pod_id=None,
@@ -119,6 +131,12 @@ content_pipeline_def = WorkflowDef(
             name="stitch_final",
             fn=stitch.execute,
             parents=["image_generation"],
+            timeout_sec=3600,
+        ),
+        StepDef(
+            name="waveform_overlay",
+            fn=waveform.execute,
+            parents=["stitch_final"],
             timeout_sec=3600,
         ),
         StepDef(

@@ -103,7 +103,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
     existing_video_id: uuid.UUID | None = existing_blobs.get(BlobType.FINAL_VIDEO)
 
     # If both exist (or audio exists and no video needed), return early
-    needs_video = input.stitch_video
+    needs_video: bool = input.stitch_video
     if existing_audio_id is not None:
         if not needs_video or existing_video_id is not None:
             log.info(

@@ -27,6 +27,7 @@ class StepName(str, Enum):
     TTS_SYNTHESIS = "tts_synthesis"
     IMAGE_GENERATION = "image_generation"
     STITCH_FINAL = "stitch_final"
+    WAVEFORM_OVERLAY = "waveform_overlay"
     CLEANUP_GPU_POD = "cleanup_gpu_pod"
     STEP_ONE = "step_one"
     STEP_TWO = "step_two"
@@ -79,6 +80,7 @@ class BlobType(str, Enum):
     FINAL_AUDIO = "final_audio"
     IMAGE = "image"
     FINAL_VIDEO = "final_video"
+    WAVEFORM_VIDEO = "waveform_video"
     VOICE_AUDIO = "voice_audio"
 
 

@@ -56,6 +56,7 @@ class WorkflowResultSchema(BaseModel):
     run_id: uuid.UUID | None = Field(None, description="TTS run ID")
     final_audio_blob_id: uuid.UUID | None = Field(None, description="Final audio blob ID")
     final_video_blob_id: uuid.UUID | None = Field(None, description="Final video blob ID")
+    waveform_video_blob_id: uuid.UUID | None = Field(None, description="Waveform overlay video blob ID")
     total_duration_sec: float | None = Field(None, description="Total audio duration")
     chunk_count: int | None = Field(None, description="Number of chunks processed")
     gpu_pod_id: str | None = Field(None, description="GPU pod used")
@@ -150,12 +151,21 @@ class StitchFinalStepOutput(BaseModel):
     file_size_bytes: int
 
 
+class WaveformOverlayStepOutput(BaseModel):
+    """Output from waveform_overlay step."""
+
+    step_type: Literal["waveform_overlay"] = "waveform_overlay"
+    waveform_video_blob_id: uuid.UUID
+    file_size_bytes: int
+
+
 # Discriminated union for step outputs
 StepOutputSchema = Annotated[
     GenerateStoryStepOutput
     | TtsSynthesisStepOutput
     | ImageGenerationStepOutput
-    | StitchFinalStepOutput,
+    | StitchFinalStepOutput
+    | WaveformOverlayStepOutput,
     Field(discriminator="step_type"),
 ]
 
