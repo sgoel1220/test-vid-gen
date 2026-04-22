@@ -40,7 +40,8 @@ _VIDEO_W = 1280       # expected video width
 _ART_SIZE = 90        # album art thumbnail size
 _ART_X = 16          # album art left margin
 _ART_Y = 25          # album art top margin
-_N_BARS = 120         # number of waveform bars
+_N_BARS = 120         # number of waveform bars displayed at once
+_FINE_STEPS = 2000    # high-resolution envelope for scrolling
 _BAR_COLOR_PLAYED = (230, 60, 100)       # pink
 _BAR_COLOR_FUTURE = (100, 110, 140)      # gray-blue
 _PROGRESS_COLOR = (230, 60, 100)         # pink
@@ -90,12 +91,11 @@ def _build_static_frame(
     art_img: Image.Image | None,
     title: str,
     subtitle: str,
-    bar_envs: list[float],
 ) -> Image.Image:
     """Build the static part of the overlay frame (1280×140 RGBA).
 
-    Returns a PIL Image with the background, art, text, and waveform silhouette
-    (all bars as future/gray). Dynamic playback position is composited per-frame.
+    Returns a PIL Image with the background, art, text, and controls.
+    Waveform bars are drawn dynamically per-frame in _render_frame.
     """
     frame = Image.new("RGBA", (_VIDEO_W, _BAR_H), _BG_COLOR)
     draw = ImageDraw.Draw(frame)
@@ -122,23 +122,6 @@ def _build_static_frame(
     ctrl_y = 28
     draw.text((ctrl_x, ctrl_y), "⏮ ▶ ⏭", font=font_ctrl, fill=_TITLE_COLOR)
 
-    # --- Waveform bars (all gray/future) ---
-    waveform_x0 = text_x
-    waveform_x1 = ctrl_x - 20
-    bar_area_w = waveform_x1 - waveform_x0
-    bar_w = max(2, bar_area_w // (_N_BARS * 2))  # each bar + equal gap
-    bar_gap = bar_w
-    wave_y_center = 85
-    max_bar_h = 28
-
-    for i, env in enumerate(bar_envs):
-        bx = waveform_x0 + i * (bar_w + bar_gap)
-        bh = max(3, int(env * max_bar_h))
-        draw.rectangle(
-            [bx, wave_y_center - bh, bx + bar_w, wave_y_center + bh],
-            fill=_BAR_COLOR_FUTURE,
-        )
-
     # --- Progress track line (bottom) ---
     prog_y = _BAR_H - 8
     draw.line([(0, prog_y), (_VIDEO_W, prog_y)], fill=_BAR_COLOR_FUTURE, width=2)
@@ -148,12 +131,17 @@ def _build_static_frame(
 
 def _render_frame(
     static_arr: np.ndarray[Any, np.dtype[np.uint8]],
-    bar_envs: list[float],
+    fine_envs: list[float],
     progress: float,
     waveform_x0: int,
     waveform_x1: int,
 ) -> np.ndarray[Any, np.dtype[np.uint8]]:
-    """Clone static array and draw played waveform bars + progress indicator."""
+    """Clone static array and draw scrolling waveform bars + progress indicator.
+
+    Shows _N_BARS bars centered at the current playback position. Left half of
+    bars (already played) are pink; right half (upcoming) are gray. As progress
+    advances the waveform scrolls, giving a dynamic live-waveform appearance.
+    """
     frame = static_arr.copy()
 
     bar_area_w = waveform_x1 - waveform_x0
@@ -161,15 +149,29 @@ def _render_frame(
     bar_gap = bar_w
     wave_y_center = 85
     max_bar_h = 28
-    played_count = int(progress * _N_BARS)
 
-    # Redraw played bars in pink
-    for i in range(played_count):
+    n_fine = len(fine_envs)
+    # Index in fine_envs corresponding to current playback position
+    current_fine = int(progress * (n_fine - 1))
+    half_bars = _N_BARS // 2
+
+    for i in range(_N_BARS):
+        fine_idx = current_fine + (i - half_bars)
+        if 0 <= fine_idx < n_fine:
+            env = fine_envs[fine_idx]
+        else:
+            env = 0.0  # silence for out-of-range positions
+
         bx = waveform_x0 + i * (bar_w + bar_gap)
-        bh = max(3, int(bar_envs[i] * max_bar_h))
+        if bx + bar_w > waveform_x1:
+            break
+
+        bh = max(3, int(env * max_bar_h))
         y0 = wave_y_center - bh
         y1 = wave_y_center + bh
-        frame[y0:y1, bx : bx + bar_w] = (*_BAR_COLOR_PLAYED, 255)
+        # Bars at or before center = played (pink); after center = upcoming (gray)
+        color = _BAR_COLOR_PLAYED if i <= half_bars else _BAR_COLOR_FUTURE
+        frame[y0:y1, bx : bx + bar_w] = (*color, 255)
 
     # Progress bar fill
     prog_y = _BAR_H - 8
@@ -179,7 +181,6 @@ def _render_frame(
     # Scrubber dot
     dot_x = max(6, min(_VIDEO_W - 6, fill_w))
     dot_r = 5
-    # Draw a simple filled circle approximation via slice
     for dy in range(-dot_r, dot_r + 1):
         dx = int((dot_r**2 - dy**2) ** 0.5)
         y_pos = prog_y + dy
@@ -370,12 +371,12 @@ async def execute(
         fps, vid_w, vid_h = await _ffprobe_video(str(video_in))
         log.info("waveform_overlay: video %dx%d @%.2ffps", vid_w, vid_h, fps)
 
-        # --- Decode audio + compute envelope ---
+        # --- Decode audio + compute fine-resolution envelope for scrolling ---
         samples = await _decode_audio_f32(str(audio_in))
-        bar_envs = _compute_envelope(samples, _N_BARS)
+        fine_envs = _compute_envelope(samples, _FINE_STEPS)
 
-        # --- Pre-render static frame ---
-        static_pil = _build_static_frame(art_img, title, subtitle, bar_envs)
+        # --- Pre-render static frame (no bars — drawn per-frame) ---
+        static_pil = _build_static_frame(art_img, title, subtitle)
         static_arr = np.array(static_pil, dtype=np.uint8)
 
         # --- Compute frame count from video duration ---
@@ -426,7 +427,7 @@ async def execute(
         for frame_idx in range(total_frames):
             progress = frame_idx / max(1, total_frames - 1)
             frame_arr = _render_frame(
-                static_arr, bar_envs, progress, waveform_x0, waveform_x1
+                static_arr, fine_envs, progress, waveform_x0, waveform_x1
             )
             pil_frame = Image.fromarray(frame_arr, mode="RGBA")
             buf = io.BytesIO()
