@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.engine.models import BaseStepParams
+from app.models.step_params import BaseStepParams
 from app.validation_limits import (
     DEFAULT_STORY_TARGET_WORD_COUNT,
     MAX_REVISIONS_MAX,

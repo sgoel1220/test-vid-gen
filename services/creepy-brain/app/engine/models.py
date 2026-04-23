@@ -18,10 +18,7 @@ OnCompleteHook = Callable[[str, StepOutputMap], Awaitable[None]]
 
 
 
-class BaseStepParams(BaseModel):
-    """Base for per-step configurable parameters. Every step param model inherits this."""
-
-    enabled: bool = Field(default=True, description="Whether this step should run")
+from app.models.step_params import BaseStepParams as BaseStepParams  # noqa: F401 re-export
 
 
 class SkippedStepOutput(BaseModel):
