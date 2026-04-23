@@ -88,6 +88,27 @@ Use `mcp__beads__*` MCP tools directly — never call `bd` via Bash. The `bd` CL
 
 **Never use TodoWrite, TaskCreate, or markdown TODO lists.**
 
+### Keeping beads in sync across clones
+
+Beads uses `.beads/issues.jsonl` as source of truth — it travels with `git push/pull`.
+
+**After `git pull` in any clone:** hooks auto-run `bd prime` to resync the local DB. This is handled by `.githooks/post-merge` (installed via `bd hooks install`). If a clone is missing hooks, run `bd hooks install` once.
+
+**Manual resync (if hooks are missing or skipped):**
+```bash
+git pull && bd prime
+```
+
+**New clone setup:**
+```bash
+git clone <repo>
+cd <repo>
+bd hooks install   # installs post-merge + post-checkout hooks
+bd prime           # initial DB hydration from issues.jsonl
+```
+
+**Never edit `.beads/issues.jsonl` directly** — always use `bd`/`mcp__beads__*` tools.
+
 ### Filing beads during implementation
 
 Any out-of-scope issue you discover MUST become a bead immediately — never silently leave it unfiled.
