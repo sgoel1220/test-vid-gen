@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-from typing import TYPE_CHECKING
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, AsyncIterator
 
 import numpy as np
 import soundfile as sf
@@ -145,10 +146,19 @@ def _generate_sync(
 # FastAPI app
 # ---------------------------------------------------------------------------
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Pre-warm the EzAudio model on startup."""
+    logger.info("Starting SFX server on port 8008...")
+    asyncio.create_task(_ensure_model())
+    yield
+
+
 app = FastAPI(
     title="SFX Server",
     description="AI sound effect generation via EzAudio for creepy-brain orchestration",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -199,7 +209,10 @@ async def generate(request: GenerateRequest) -> Response:
         raise HTTPException(status_code=503, detail="GPU is busy processing another request. Please retry.")
     _gpu_busy = True
     try:
-        model = await _ensure_model()
+        try:
+            model = await _ensure_model()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         loop = asyncio.get_running_loop()
         try:
             wav_bytes = await loop.run_in_executor(
@@ -220,12 +233,6 @@ async def generate(request: GenerateRequest) -> Response:
         _gpu_busy = False
     return Response(content=wav_bytes, media_type=WAV_MEDIA_TYPE)
 
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    """Pre-warm model in background on startup."""
-    logger.info("Starting SFX server on port 8008...")
-    asyncio.create_task(_ensure_model())
 
 
 # ---------------------------------------------------------------------------
