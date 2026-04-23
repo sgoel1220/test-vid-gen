@@ -1,5 +1,5 @@
-# SFX generation server using EzAudio (OpenSound/EzAudio)
-# Exposes /health, /ready, and /generate endpoints on port 8008
+# SFX generation server using EzAudio
+# Exposes /generate endpoint on port 8008
 #
 # Build (from repo root):
 #   docker buildx build --platform linux/amd64 \
@@ -18,6 +18,7 @@ ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    ffmpeg \
     git \
     libsndfile1 \
     && apt-get clean \
@@ -35,24 +36,21 @@ ARG EZAUDIO_COMMIT=86f18268117dde73bb274401c610e639e4a8fae1
 RUN git clone https://github.com/haidog-yaqub/EzAudio.git /app/ezaudio \
     && git -C /app/ezaudio checkout "$EZAUDIO_COMMIT"
 
-# Install EzAudio's own dependencies
+# Install EzAudio dependencies
 RUN uv pip install --system --no-cache -r /app/ezaudio/requirements.txt
 
 # Install remaining server dependencies
 COPY services/sfx-server/requirements.txt /app/requirements.txt
 RUN uv pip install --system --no-cache -r /app/requirements.txt
 
-# Make EzAudio importable (installs the api/ package)
-RUN uv pip install --system --no-cache -e /app/ezaudio
-
 # Copy server
 COPY services/sfx-server/server.py /app/server.py
 
-# Create required directories
-RUN mkdir -p /app/hf_cache
-
 # Add EzAudio to Python path so `from api.ezaudio import EzAudio` works
 ENV PYTHONPATH="/app/ezaudio:${PYTHONPATH}"
+
+# Create required directories
+RUN mkdir -p /app/hf_cache
 
 EXPOSE 8008
 
