@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from app.engine import SkippedStepOutput, StepContext, StepDef, WorkflowDef, engine
 from app.models.json_schemas import (
     ImageStepParams,
+    MusicGenerationStepOutput,
     StitchStepParams,
     StoryStepParams,
     TtsStepParams,
@@ -33,7 +34,16 @@ from app.models.json_schemas import (
 from app.services.workflow_service import WorkflowService, get_optional_workflow_id
 
 from .db_helpers import ensure_db, get_session_maker
-from .steps import cleanup, image, stitch, story, tts, waveform_overlay as waveform
+from .steps import (
+    cleanup,
+    image,
+    music_generation as music,
+    sfx_generation as sfx,
+    stitch,
+    story,
+    tts,
+    waveform_overlay as waveform,
+)
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +77,11 @@ async def _on_pipeline_complete(workflow_run_id: str, outputs: StepOutputMap) ->
     if isinstance(waveform_out, WaveformOverlayStepOutput):
         waveform_video_blob_id = waveform_out.waveform_video_blob_id
 
+    music_out = outputs.get("music_generation")
+    music_bed_blob_id: uuid.UUID | None = None
+    if isinstance(music_out, MusicGenerationStepOutput):
+        music_bed_blob_id = _to_uuid(music_out.music_bed_blob_id)
+
     stitch_out = outputs.get("stitch_final")
 
     # When stitch was skipped (disabled), still complete the workflow with partial results
@@ -81,6 +96,7 @@ async def _on_pipeline_complete(workflow_run_id: str, outputs: StepOutputMap) ->
                 final_audio_blob_id=None,
                 final_video_blob_id=None,
                 waveform_video_blob_id=waveform_video_blob_id,
+                music_bed_blob_id=music_bed_blob_id,
                 total_duration_sec=None,
                 chunk_count=None,
                 gpu_pod_id=None,
@@ -103,6 +119,7 @@ async def _on_pipeline_complete(workflow_run_id: str, outputs: StepOutputMap) ->
             final_audio_blob_id=_to_uuid(stitch_out.final_audio_blob_id),
             final_video_blob_id=_to_uuid(stitch_out.final_video_blob_id),
             waveform_video_blob_id=waveform_video_blob_id,
+            music_bed_blob_id=music_bed_blob_id,
             total_duration_sec=stitch_out.total_duration_sec,
             chunk_count=stitch_out.chunk_count,
             gpu_pod_id=None,
@@ -160,9 +177,23 @@ content_pipeline_def = WorkflowDef(
             params_field="image_params",
         ),
         StepDef(
+            name="music_generation",
+            fn=music.execute,
+            parents=["tts_synthesis"],
+            timeout_sec=3600,
+            max_retries=2,
+        ),
+        StepDef(
+            name="sfx_generation",
+            fn=sfx.execute,
+            parents=["tts_synthesis"],
+            timeout_sec=3600,
+            max_retries=2,
+        ),
+        StepDef(
             name="stitch_final",
             fn=stitch.execute,
-            parents=["image_generation"],
+            parents=["image_generation", "music_generation", "sfx_generation"],
             timeout_sec=3600,
             params_schema=StitchStepParams,
             params_field="stitch_params",
