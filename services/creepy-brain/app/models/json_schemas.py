@@ -83,6 +83,11 @@ class WorkflowInputSchema(BaseModel):
     stitch_params: StitchStepParams = Field(default_factory=StitchStepParams)
     music_params: MusicStepParams = Field(default_factory=MusicStepParams)
 
+    # Audio design flags
+    generate_sfx: bool = Field(
+        default=False, description="Whether to generate SFX clips for each scene"
+    )
+
     # Deprecated — kept for backwards compat with existing DB rows
     generate_images: bool = Field(
         default=False, description="Deprecated: use image_params.enabled instead"
