@@ -55,9 +55,9 @@ Use the `/adversarial-review` skill command.
 
 ---
 
-## Step 6 — Commit
+## Step 6 — Commit and push
 
-Stage relevant files and create a descriptive commit:
+Stage relevant files, commit, and push immediately:
 
 ```bash
 git add <files>
@@ -69,6 +69,7 @@ git commit -m "$(cat <<'EOF'
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 EOF
 )"
+git pull --rebase && git push origin main
 ```
 
 ---
