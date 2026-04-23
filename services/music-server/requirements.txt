@@ -1,0 +1,16 @@
+# Music server dependencies
+# Note: ACE-Step 1.5 and nano-vllm are installed in the Dockerfile from the
+# pinned GitHub clone at /app/ace-step (requires nano-vllm to be installed first).
+
+# Server
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+pydantic==2.11.3
+
+# Audio
+torchaudio==2.5.1
+soundfile==0.13.1
+
+# HuggingFace model download
+huggingface_hub==0.30.2
+hf_transfer==0.1.9
