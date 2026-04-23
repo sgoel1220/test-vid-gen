@@ -1,4 +1,4 @@
-Pick a ready bead and complete it end-to-end: implement, test, review, commit, merge, push, and clean up.
+Pick a ready bead and complete it end-to-end: implement, test, review, commit, merge, and push.
 
 Follow this EXACT workflow. Do NOT skip any step.
 
@@ -116,24 +116,6 @@ Do NOT stop here if push fails — resolve and retry until it succeeds.
 
 ---
 
-## Step 11 — Clean up the worktree
-
-Run ALL commands from the **repo root**:
-
-```bash
-git worktree remove .claude/worktrees/bead-<id>
-git branch -d worktree-bead-<id>
-git worktree prune
-git status
-```
-
-If the branch has a remote tracking branch, also run:
-```bash
-git push origin --delete worktree-bead-<id>
-```
-
----
-
 ## Done
 
-Report to the user: bead closed, changes pushed, worktree deleted.
+Report to the user: bead closed, changes pushed.
