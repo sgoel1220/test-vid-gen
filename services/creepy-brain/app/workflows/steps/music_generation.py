@@ -514,7 +514,7 @@ async def _generate_pending_segments(
                     json={
                         "prompt": mood.prompt,
                         "duration_sec": duration_sec,
-                        "audio_tail_b64": audio_tail_b64,
+                        "audio_context": audio_tail_b64,
                     },
                 )
 

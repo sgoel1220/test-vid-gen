@@ -30,6 +30,12 @@ jobs:
           - name: image-server
             dockerfile: services/image-server/Dockerfile
             image: image-server
+          - name: music-server
+            dockerfile: services/music-server/Dockerfile
+            image: music-server
+          - name: sfx-server
+            dockerfile: services/sfx-server/Dockerfile
+            image: sfx-server
 
     steps:
       - name: Checkout repository

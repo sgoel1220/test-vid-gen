@@ -290,10 +290,32 @@ app = FastAPI(
 )
 
 
-@app.get("/health", response_model=HealthResponse)
-async def health() -> HealthResponse:
-    """Liveness check — always 200 if process is running."""
-    return HealthResponse(status="ok")
+@app.get("/health")
+async def health() -> Response:
+    """Liveness/readiness check.
+
+    Returns 200 once both models are loaded successfully, 503 while still
+    loading or after a fatal load error.  The RunPod lifecycle polls this
+    endpoint and only marks the pod READY when it gets 200, so we must not
+    return 200 before the models are usable.
+    """
+    if _model_error is not None:
+        return Response(
+            content=f'{{"status":"error","error":{_model_error!r}}}',
+            media_type="application/json",
+            status_code=503,
+        )
+    if _dit is None or _llm is None:
+        return Response(
+            content='{"status":"loading"}',
+            media_type="application/json",
+            status_code=503,
+        )
+    return Response(
+        content='{"status":"ok"}',
+        media_type="application/json",
+        status_code=200,
+    )
 
 
 @app.get("/ready")
