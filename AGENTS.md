@@ -104,7 +104,7 @@ mcp__beads__create(
 2. **Explore** — use Codex (read-only) to understand the area before touching code
 3. **Implement** — simplest solution that works; avoid premature abstractions
 4. **Test** — verify thoroughly
-5. **Adversarial review** — run `/adversarial-review` in the **foreground**; apply all findings; re-test
+5. **Adversarial review** — run `/adversarial-review` in the **foreground**; apply **all findings immediately without asking**; re-test. Only stop if a finding directly contradicts the bead's acceptance criteria.
 6. **Commit** — descriptive message
 7. **Close** — `mcp__beads__close` only after successful push
 8. **Push** — `git push origin main`
@@ -113,9 +113,10 @@ mcp__beads__create(
 - ONLY pick `"open"` beads — never `"in_progress"`
 - NEVER use git worktrees — commit directly on main
 - ALWAYS use Codex to explore before implementing
-- NEVER skip `/adversarial-review` — foreground only, apply all findings before pushing
+- NEVER skip `/adversarial-review` — foreground only, apply **all findings without asking** before pushing
 - NEVER mark done before push succeeds
 - NEVER assume — ask if anything is unclear
+- **Adversarial review findings = fix and continue** — implement every finding; never pause to ask unless it contradicts the bead's acceptance criteria
 
 ## Session Completion
 
