@@ -39,6 +39,12 @@ export function mount(container: HTMLElement): void {
               <input type="checkbox" id="wf-images"> Generate images
             </label>
             <label class="checkbox-label">
+              <input type="checkbox" id="wf-music"> Background music
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="wf-sfx"> Sound effects
+            </label>
+            <label class="checkbox-label">
               <input type="checkbox" id="wf-stitch"> Stitch video
             </label>
           </div>
@@ -114,6 +120,8 @@ async function handleCreate(e: Event): Promise<void> {
   const voice = (document.getElementById("wf-voice") as HTMLSelectElement).value;
   const words = parseInt((document.getElementById("wf-words") as HTMLInputElement).value, 10);
   const generateImages = (document.getElementById("wf-images") as HTMLInputElement).checked;
+  const generateMusic = (document.getElementById("wf-music") as HTMLInputElement).checked;
+  const generateSfx = (document.getElementById("wf-sfx") as HTMLInputElement).checked;
   const stitchVideo = (document.getElementById("wf-stitch") as HTMLInputElement).checked;
   const errEl = document.getElementById("wf-create-error")!;
   const btn = document.getElementById("wf-submit") as HTMLButtonElement;
@@ -130,6 +138,8 @@ async function handleCreate(e: Event): Promise<void> {
       voice_name: voice,
       story_params: { target_word_count: words },
       image_params: { enabled: generateImages },
+      music_params: { enabled: generateMusic },
+      generate_sfx: generateSfx,
       stitch_params: { enabled: stitchVideo },
     });
     // Navigate to the new workflow
