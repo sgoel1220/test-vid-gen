@@ -1,7 +1,10 @@
 {
   "mcpServers": {
     "beads": {
-      "command": "beads-mcp"
+      "command": "beads-mcp",
+      "env": {
+        "BEADS_WORKING_DIR": "${workspaceFolder}"
+      }
     },
     "serena": {
       "command": "uvx",
