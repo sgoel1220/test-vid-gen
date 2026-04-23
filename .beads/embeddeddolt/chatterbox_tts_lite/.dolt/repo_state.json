@@ -13,7 +13,7 @@
   "backups": {
     "backup_export": {
       "name": "backup_export",
-      "url": "file:///home/sg/v1/chatterbox-tts-lite/.beads/backup",
+      "url": "file:///home/sg/v2/chatterbox-tts-lite/.beads/backup",
       "fetch_specs": [
         "refs/heads/*:refs/remotes/backup_export/*"
       ],
