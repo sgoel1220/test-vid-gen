@@ -82,6 +82,18 @@ mcp__beads__close(issue_id="<id>", reason="Completed")
 
 ---
 
+## Step 7b — Close satisfied parent beads
+
+After closing the bead, check if it had any parent beads that are now fully satisfied:
+
+1. Call `mcp__beads__show(issue_id="<id>")` and look at the `dependents` list (beads that *depend on* this one).
+2. For each dependent, call `mcp__beads__show` on it and check if **all** of its dependencies are now closed.
+3. If a parent bead's work is fully done in the codebase (not just its dependencies resolved), close it too with an appropriate reason.
+
+**Why:** Agents close what they touched, not what they completed. Sub-task completion often satisfies a parent bead that was never re-evaluated.
+
+---
+
 ## Step 8 — Push to remote
 
 ```bash
