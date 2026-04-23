@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.step_params import BaseStepParams
 from app.validation_limits import (
@@ -54,6 +54,14 @@ class StitchStepParams(BaseStepParams):
     enabled: bool = Field(default=False, description="Whether to stitch final video")
 
 
+class MusicStepParams(BaseStepParams):
+    """Configurable params for the music generation step."""
+
+    enabled: bool = Field(
+        default=False, description="Whether to generate background music via GPU pod"
+    )
+
+
 # Workflow Input/Output Schemas
 class WorkflowInputSchema(BaseModel):
     """Input data for a content pipeline workflow."""
@@ -73,6 +81,7 @@ class WorkflowInputSchema(BaseModel):
     tts_params: TtsStepParams = Field(default_factory=TtsStepParams)
     image_params: ImageStepParams = Field(default_factory=ImageStepParams)
     stitch_params: StitchStepParams = Field(default_factory=StitchStepParams)
+    music_params: MusicStepParams = Field(default_factory=MusicStepParams)
 
     # Deprecated — kept for backwards compat with existing DB rows
     generate_images: bool = Field(
@@ -80,6 +89,9 @@ class WorkflowInputSchema(BaseModel):
     )
     stitch_video: bool = Field(
         default=False, description="Deprecated: use stitch_params.enabled instead"
+    )
+    generate_music: bool = Field(
+        default=False, description="Deprecated: use music_params.enabled instead"
     )
     max_revisions: int = Field(
         default=3,
@@ -101,6 +113,8 @@ class WorkflowInputSchema(BaseModel):
             self.image_params.enabled = True
         if self.stitch_video and not self.stitch_params.enabled:
             self.stitch_params.enabled = True
+        if self.generate_music and not self.music_params.enabled:
+            self.music_params.enabled = True
         if self.target_word_count != DEFAULT_STORY_TARGET_WORD_COUNT:
             if self.story_params.target_word_count == DEFAULT_STORY_TARGET_WORD_COUNT:
                 self.story_params.target_word_count = self.target_word_count
@@ -220,13 +234,38 @@ class WaveformOverlayStepOutput(BaseModel):
     file_size_bytes: int
 
 
+class MusicSegmentResult(BaseModel):
+    """Result of generating music for a single scene."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scene_index: int = Field(ge=0, description="Zero-based scene index")
+    chunk_indices: list[int] = Field(description="Indices of chunks in this scene")
+    duration_sec: float = Field(gt=0.0, description="Duration of this segment in seconds")
+    music_blob_id: str = Field(description="UUID of the saved MUSIC_AUDIO WAV blob")
+
+
+class MusicGenerationStepOutput(BaseModel):
+    """Output from music_generation step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    step_type: Literal["music_generation"] = "music_generation"
+    pod_id: str = Field(description="GPU pod ID used for generation (or 'resumed')")
+    segment_count: int = Field(ge=0, description="Number of music segments generated")
+    total_duration_sec: float = Field(ge=0.0, description="Total music bed duration in seconds")
+    music_bed_blob_id: str = Field(description="UUID of the full MUSIC_BED WAV blob")
+    segments: list[MusicSegmentResult] = Field(description="Per-scene music segment results")
+
+
 # Discriminated union for step outputs
 StepOutputSchema = Annotated[
     GenerateStoryStepOutput
     | TtsSynthesisStepOutput
     | ImageGenerationStepOutput
     | StitchFinalStepOutput
-    | WaveformOverlayStepOutput,
+    | WaveformOverlayStepOutput
+    | MusicGenerationStepOutput,
     Field(discriminator="step_type"),
 ]
 
