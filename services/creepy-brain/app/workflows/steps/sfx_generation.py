@@ -28,10 +28,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
-from typing import Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -42,7 +40,7 @@ from app.gpu import GpuPodSpec
 from app.gpu.lifecycle import workflow_gpu_pod
 from app.llm.audio_design import SfxCue, generate_sfx_cues
 from app.models.enums import BlobType
-from app.models.json_schemas import WorkflowInputSchema
+from app.models.json_schemas import SfxClipResult, SfxGenerationStepOutput, WorkflowInputSchema
 from app.models.workflow import WorkflowBlob
 from app.services import blob_service
 from app.services.workflow_service import get_chunks_for_image_step, get_optional_workflow_id
@@ -72,37 +70,6 @@ def _cue_hash(description: str, position: str, duration_sec: float) -> str:
     """
     payload = f"{description}|{position}|{duration_sec}"
     return hashlib.sha256(payload.encode()).hexdigest()[:8]
-
-
-# ---------------------------------------------------------------------------
-# Output models
-# ---------------------------------------------------------------------------
-
-
-class SfxClipResult(BaseModel):
-    """Result of generating a single SFX clip for a scene cue."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    scene_index: int = Field(ge=0, description="Zero-based scene index")
-    cue_index: int = Field(ge=0, description="Zero-based cue index within the scene")
-    description: str = Field(description="Natural-language description of the sound effect")
-    blob_id: str = Field(description="UUID of the saved WAV blob")
-    duration_sec: float = Field(gt=0, description="Duration of the SFX clip in seconds")
-    position: Literal["beginning", "middle", "end"] = Field(
-        description="Where in the scene this cue plays"
-    )
-
-
-class SfxGenerationStepOutput(BaseModel):
-    """Output of the sfx_generation step."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    step_type: Literal["sfx_generation"] = "sfx_generation"
-    pod_id: str = Field(description="GPU pod ID used for generation (or 'resumed')")
-    clip_count: int = Field(ge=0, description="Total number of SFX clips generated")
-    clips: list[SfxClipResult] = Field(description="SFX clip results ordered by scene/cue index")
 
 
 # ---------------------------------------------------------------------------

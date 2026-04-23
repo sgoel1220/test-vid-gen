@@ -23,8 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.engine import StepContext
 
 from app.audio.encoding import encode_wav_to_mp3
+from app.config import settings
 from app.models.enums import BlobType, ChunkStatus
-from app.models.json_schemas import WorkflowInputSchema
+from app.models.json_schemas import MusicGenerationStepOutput, SfxGenerationStepOutput, WorkflowInputSchema
 from app.models.workflow import WorkflowBlob
 from app.services import blob_service
 from app.services.workflow_service import (
@@ -33,6 +34,7 @@ from app.services.workflow_service import (
     get_optional_workflow_id,
     get_scenes_for_workflow,
 )
+from app.text.scene_grouping import group_chunks_into_scenes
 from app.workflows.db_helpers import get_session_maker
 from app.workflows.steps.image import SceneImageResult
 
@@ -130,6 +132,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
         )
 
     # --- Quality gate: skip non-completed chunks ---
+    all_chunks = chunk_data  # full list (used for scene-timeline computation)
     valid_chunks: list[ChunkForImageStep] = []
     for chunk in chunk_data:
         if chunk.tts_status != ChunkStatus.COMPLETED:
@@ -148,6 +151,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
         )
 
     chunk_data = valid_chunks
+    has_partial_tts = len(chunk_data) < len(all_chunks)
     log.info("stitch_final: %d chunks to stitch", len(chunk_data))
 
     # --- 2. Decode WAV blobs and concatenate ---
@@ -187,30 +191,43 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
         sample_rate,
     )
 
-    # --- 3. Encode to MP3 (skip if audio blob already exists from partial resume) ---
-    if existing_audio_id is not None:
-        async with session_maker() as session:
-            audio_blob_obj = await blob_service.get(session, existing_audio_id)
-        mp3_bytes = audio_blob_obj.data
-        audio_blob_id = existing_audio_id
-        log.info("stitch_final: reusing existing audio blob %s", audio_blob_id)
+    # --- 3. Mix music bed and SFX into narration ---
+    # Skip mixing when some TTS chunks failed: scene timelines would be wrong
+    # and SFX placement would be inaccurate.
+    if has_partial_tts:
+        log.warning(
+            "stitch_final: skipping music/SFX mixing — %d/%d chunks have partial TTS",
+            len(all_chunks) - len(chunk_data),
+            len(all_chunks),
+        )
+        mixed = stitched
     else:
-        mp3_bytes = await encode_wav_to_mp3(stitched, sample_rate)
-        log.info("stitch_final: encoded MP3, size=%d bytes", len(mp3_bytes))
+        mixed = await _mix_with_music_and_sfx(
+            narration=stitched,
+            sample_rate=sample_rate,
+            chunk_data=chunk_data,
+            ctx=ctx,
+            session_maker=session_maker,
+        )
 
-        # --- 4. Store final audio blob ---
-        async with session_maker() as session:
-            audio_blob = await blob_service.store(
-                session=session,
-                data=mp3_bytes,
-                mime_type="audio/mpeg",
-                blob_type=BlobType.FINAL_AUDIO,
-                workflow_id=workflow_id,
-            )
-            await session.commit()
-            audio_blob_id = audio_blob.id
+    # --- 4. Encode to MP3 and store ---
+    # Always re-encode from the mixed waveform. Reusing an existing FINAL_AUDIO blob
+    # is unsafe because it may be narration-only (stored before music/SFX were added).
+    mp3_bytes = await encode_wav_to_mp3(mixed, sample_rate)
+    log.info("stitch_final: encoded MP3, size=%d bytes", len(mp3_bytes))
 
-        log.info("stitch_final: saved final audio blob_id=%s", audio_blob_id)
+    async with session_maker() as session:
+        audio_blob = await blob_service.store(
+            session=session,
+            data=mp3_bytes,
+            mime_type="audio/mpeg",
+            blob_type=BlobType.FINAL_AUDIO,
+            workflow_id=workflow_id,
+        )
+        await session.commit()
+        audio_blob_id = audio_blob.id
+
+    log.info("stitch_final: saved final audio blob_id=%s", audio_blob_id)
 
     output = StitchStepOutput(
         final_audio_blob_id=str(audio_blob_id),
@@ -274,6 +291,207 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
     )
 
     return output
+
+
+
+def _resample_to(
+    arr: np.ndarray[Any, np.dtype[np.float32]],
+    src_sr: int,
+    dst_sr: int,
+) -> np.ndarray[Any, np.dtype[np.float32]]:
+    """Linearly resample *arr* from *src_sr* to *dst_sr*.
+
+    Uses numpy linear interpolation — no extra deps required.
+
+    Args:
+        arr: Input float32 array (1-D mono or 2-D [samples, channels]).
+        src_sr: Source sample rate in Hz.
+        dst_sr: Target sample rate in Hz.
+
+    Returns:
+        Resampled float32 array with the same number of channels.
+    """
+    if src_sr == dst_sr:
+        return arr
+    duration = len(arr) / src_sr
+    n_dst = max(1, int(round(duration * dst_sr)))
+    x_src = np.linspace(0.0, duration, len(arr), endpoint=False)
+    x_dst = np.linspace(0.0, duration, n_dst, endpoint=False)
+    resampled: np.ndarray[Any, np.dtype[np.float32]]
+    if arr.ndim == 1:
+        resampled = np.interp(x_dst, x_src, arr).astype(np.float32)
+    else:
+        channels = arr.shape[1]
+        resampled = np.stack(
+            [np.interp(x_dst, x_src, arr[:, ch]).astype(np.float32) for ch in range(channels)],
+            axis=1,
+        )
+    return resampled
+
+
+async def _mix_with_music_and_sfx(
+    narration: np.ndarray[Any, np.dtype[np.float32]],
+    sample_rate: int,
+    chunk_data: list[ChunkForImageStep],
+    ctx: StepContext,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> np.ndarray[Any, np.dtype[np.float32]]:
+    """Mix music bed and SFX clips into the narration array.
+
+    Does nothing (returns narration unchanged) if both music and SFX steps
+    are skipped or absent. Music is ducked to ``settings.music_volume_db`` dB
+    and looped to match narration length. SFX clips are placed at scene-relative
+    offsets determined by their ``position`` field.
+
+    All layers are resampled to the narration sample rate before mixing to
+    prevent pitch/speed artefacts.
+
+    Args:
+        narration: Concatenated narration float32 array (mono or stereo).
+        sample_rate: Sample rate of the narration array.
+        chunk_data: Completed chunks (used to compute per-scene start times).
+        ctx: Step context with parent outputs.
+        session_maker: DB session factory.
+
+    Returns:
+        Mixed float32 array, clipped to [-1, 1].
+    """
+    music_out = ctx.get_parent_output("music_generation", MusicGenerationStepOutput)
+    sfx_out = ctx.get_parent_output("sfx_generation", SfxGenerationStepOutput)
+
+    if music_out is None and (sfx_out is None or not sfx_out.clips):
+        return narration
+
+    result: np.ndarray[Any, np.dtype[np.float32]] = narration.copy()
+    n_samples = len(result)
+
+    # --- Music bed ---
+    if music_out is not None:
+        async with session_maker() as session:
+            music_blob = await blob_service.get(session, uuid.UUID(music_out.music_bed_blob_id))
+        music_arr: np.ndarray[Any, np.dtype[np.float32]]
+        music_arr, music_sr = sf.read(io.BytesIO(bytes(music_blob.data)), dtype="float32")
+
+        if music_sr != sample_rate:
+            log.info(
+                "stitch_final: resampling music bed %dHz -> %dHz",
+                music_sr,
+                sample_rate,
+            )
+            music_arr = _resample_to(music_arr, music_sr, sample_rate)
+
+        # Downmix stereo music to mono if narration is mono, or broadcast the other way
+        if music_arr.ndim > 1 and result.ndim == 1:
+            music_arr = music_arr.mean(axis=1)
+        elif music_arr.ndim == 1 and result.ndim > 1:
+            music_arr = np.stack([music_arr] * result.shape[1], axis=-1)
+
+        # Loop music to match narration length
+        while len(music_arr) < n_samples:
+            music_arr = np.concatenate([music_arr, music_arr])
+        music_arr = music_arr[:n_samples]
+
+        gain = 10.0 ** (settings.music_volume_db / 20.0)
+        result = result + (music_arr * gain).astype(np.float32)
+        log.info(
+            "stitch_final: mixed music bed blob=%s at %.1f dB",
+            music_out.music_bed_blob_id,
+            settings.music_volume_db,
+        )
+
+    # --- SFX clips ---
+    if sfx_out is not None and sfx_out.clips:
+        # Compute per-scene start times from sorted chunk_data.
+        # Chunks are sorted by index; group_chunks_into_scenes assigns 0-based
+        # positional indices, so scene.chunk_indices[j] is the j-th chunk in
+        # sorted order (not the chunk's .index field).
+        sorted_chunks = sorted(chunk_data, key=lambda c: c.index)
+        scenes = group_chunks_into_scenes(
+            chunks=[c.text for c in sorted_chunks],
+            chunks_per_scene=settings.chunks_per_scene,
+        )
+
+        # Accumulate per-chunk start times (positional, matching sorted_chunks)
+        chunk_start_sec: list[float] = []
+        t = 0.0
+        for c in sorted_chunks:
+            chunk_start_sec.append(t)
+            t += c.duration_sec or 0.0
+
+        scene_start_by_idx: dict[int, float] = {}
+        scene_dur_by_idx: dict[int, float] = {}
+        for scene in scenes:
+            if scene.chunk_indices:
+                first = scene.chunk_indices[0]
+                scene_start_by_idx[scene.scene_index] = (
+                    chunk_start_sec[first] if first < len(chunk_start_sec) else 0.0
+                )
+                scene_dur_by_idx[scene.scene_index] = sum(
+                    sorted_chunks[ci].duration_sec or 0.0
+                    for ci in scene.chunk_indices
+                    if ci < len(sorted_chunks)
+                )
+
+        sfx_gain = 10.0 ** (settings.sfx_volume_db / 20.0)
+        async with session_maker() as session:
+            for clip in sfx_out.clips:
+                if clip.scene_index not in scene_start_by_idx:
+                    log.warning(
+                        "stitch_final: SFX clip scene=%d not in scene map, skipping",
+                        clip.scene_index,
+                    )
+                    continue
+
+                scene_start = scene_start_by_idx[clip.scene_index]
+                scene_dur = scene_dur_by_idx[clip.scene_index]
+
+                if clip.position == "beginning":
+                    offset_sec = scene_start
+                elif clip.position == "middle":
+                    offset_sec = scene_start + max(
+                        0.0, scene_dur / 2.0 - clip.duration_sec / 2.0
+                    )
+                else:  # "end"
+                    offset_sec = scene_start + max(
+                        0.0, scene_dur - clip.duration_sec
+                    )
+
+                sfx_blob = await blob_service.get(session, uuid.UUID(clip.blob_id))
+                sfx_arr: np.ndarray[Any, np.dtype[np.float32]]
+                sfx_arr, sfx_sr = sf.read(
+                    io.BytesIO(bytes(sfx_blob.data)), dtype="float32"
+                )
+                if sfx_sr != sample_rate:
+                    log.info(
+                        "stitch_final: resampling SFX clip scene=%d cue=%d %dHz -> %dHz",
+                        clip.scene_index,
+                        clip.cue_index,
+                        sfx_sr,
+                        sample_rate,
+                    )
+                    sfx_arr = _resample_to(sfx_arr, sfx_sr, sample_rate)
+
+                if sfx_arr.ndim > 1 and result.ndim == 1:
+                    sfx_arr = sfx_arr.mean(axis=1)
+                elif sfx_arr.ndim == 1 and result.ndim > 1:
+                    sfx_arr = np.stack([sfx_arr] * result.shape[1], axis=-1)
+
+                sfx_start = int(offset_sec * sample_rate)
+                sfx_end = min(sfx_start + len(sfx_arr), n_samples)
+                sfx_len = sfx_end - sfx_start
+                if sfx_len > 0:
+                    result[sfx_start:sfx_end] += (sfx_arr[:sfx_len] * sfx_gain).astype(
+                        np.float32
+                    )
+                    log.info(
+                        "stitch_final: mixed SFX clip scene=%d cue=%d pos=%s offset=%.1fs",
+                        clip.scene_index,
+                        clip.cue_index,
+                        clip.position,
+                        offset_sec,
+                    )
+
+    return np.clip(result, -1.0, 1.0, out=result)
 
 
 async def _create_video(

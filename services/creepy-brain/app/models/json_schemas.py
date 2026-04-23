@@ -264,6 +264,32 @@ class MusicGenerationStepOutput(BaseModel):
     segments: list[MusicSegmentResult] = Field(description="Per-scene music segment results")
 
 
+class SfxClipResult(BaseModel):
+    """Result of generating a single SFX clip for a scene cue."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scene_index: int = Field(ge=0, description="Zero-based scene index")
+    cue_index: int = Field(ge=0, description="Zero-based cue index within the scene")
+    description: str = Field(description="Natural-language description of the sound effect")
+    blob_id: str = Field(description="UUID of the saved WAV blob")
+    duration_sec: float = Field(gt=0, description="Duration of the SFX clip in seconds")
+    position: Literal["beginning", "middle", "end"] = Field(
+        description="Where in the scene this cue plays"
+    )
+
+
+class SfxGenerationStepOutput(BaseModel):
+    """Output of the sfx_generation step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    step_type: Literal["sfx_generation"] = "sfx_generation"
+    pod_id: str = Field(description="GPU pod ID used for generation (or 'resumed')")
+    clip_count: int = Field(ge=0, description="Total number of SFX clips generated")
+    clips: list[SfxClipResult] = Field(description="SFX clip results ordered by scene/cue index")
+
+
 # Discriminated union for step outputs
 StepOutputSchema = Annotated[
     GenerateStoryStepOutput
@@ -271,7 +297,8 @@ StepOutputSchema = Annotated[
     | ImageGenerationStepOutput
     | StitchFinalStepOutput
     | WaveformOverlayStepOutput
-    | MusicGenerationStepOutput,
+    | MusicGenerationStepOutput
+    | SfxGenerationStepOutput,
     Field(discriminator="step_type"),
 ]
 
