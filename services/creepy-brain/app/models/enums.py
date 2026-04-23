@@ -26,6 +26,8 @@ class StepName(str, Enum):
     GENERATE_STORY = "generate_story"
     TTS_SYNTHESIS = "tts_synthesis"
     IMAGE_GENERATION = "image_generation"
+    MUSIC_GENERATION = "music_generation"
+    SFX_GENERATION = "sfx_generation"
     STITCH_FINAL = "stitch_final"
     WAVEFORM_OVERLAY = "waveform_overlay"
     CLEANUP_GPU_POD = "cleanup_gpu_pod"
@@ -82,6 +84,9 @@ class BlobType(str, Enum):
     FINAL_VIDEO = "final_video"
     WAVEFORM_VIDEO = "waveform_video"
     VOICE_AUDIO = "voice_audio"
+    MUSIC_AUDIO = "music_audio"
+    SFX_AUDIO = "sfx_audio"
+    MUSIC_BED = "music_bed"
 
 
 class StoryStatus(str, Enum):

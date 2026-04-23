@@ -71,6 +71,14 @@ class Settings(BaseSettings):
     image_width: int = 1280
     image_height: int = 720
 
+    # Music server GPU pod configuration
+    music_server_image: str = "ghcr.io/sgoel1220/music-server:main"
+    music_server_port: int = 8007
+    sfx_server_image: str = "ghcr.io/sgoel1220/sfx-server:main"
+    sfx_server_port: int = 8008
+    music_volume_db: float = -12.0  # static duck level under narration
+    sfx_volume_db: float = -6.0  # SFX louder than music bed
+
     # GPU pod lifecycle
     pod_ready_timeout_sec: int = 600  # 10 minutes to wait for pod ready (cold image pull)
 
