@@ -150,6 +150,17 @@ cd services/creepy-brain && docker compose up -d --build brain
 
 The compose file lives at `services/creepy-brain/docker-compose.yml`. Services: `brain`, `postgres`.
 
+### After Any Backend Fix (default flow)
+
+After applying any backend fix, **always** do this without being asked:
+
+1. Commit: `git add <files> && git commit -m "fix(...): ..."`
+2. Push: `git pull --rebase && git push`
+3. Rebuild + restart: `cd services/creepy-brain && docker compose up -d --build brain`
+4. Verify container is up: `docker compose ps brain`
+
+Do **not** wait for the user to ask for commit/push/rebuild — do it automatically as part of every fix.
+
 ## Architecture Reference
 
 See `docs/ARCHITECTURE.md` for project structure, API endpoints, GPU rules, and deploy info.
