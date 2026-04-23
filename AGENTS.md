@@ -69,8 +69,11 @@ See `docs/PYTHON_STANDARDS.md` for full rules. Summary:
 
 Use `mcp__beads__*` MCP tools directly — never call `bd` via Bash. The `bd` CLI is for you in the terminal.
 
+**Session init (required before any beads operation):** call `mcp__beads__context(workspace_root='.')` once at the start of every session to point beads at the repo's `.beads` database. Without this, beads has no database and all reads/writes fail.
+
 | Action | MCP tool |
 |--------|----------|
+| Init session | `mcp__beads__context(workspace_root='.')` |
 | Find available work | `mcp__beads__ready` |
 | View issue | `mcp__beads__show` |
 | Claim work | `mcp__beads__claim` |
