@@ -8,8 +8,9 @@ import io
 import logging
 import shutil
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, AsyncGenerator, Literal
 
 import numpy as np
 import soundfile as sf
@@ -283,10 +284,19 @@ def _outpaint_sync(
 # FastAPI app
 # ---------------------------------------------------------------------------
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Eager-load models on startup so /health returns 200 once ready."""
+    asyncio.ensure_future(_ensure_models())
+    yield
+
+
 app = FastAPI(
     title="Music Server",
     description="AI music generation via ACE-Step 1.5 for creepy-brain orchestration",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 
