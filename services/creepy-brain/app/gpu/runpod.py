@@ -8,7 +8,7 @@ from typing import cast
 import httpx
 import runpod
 
-from app.models.enums import GpuPodStatus
+from app.models.enums import GpuPodStatus, GpuProvider as GpuProviderName
 
 from .base import GpuPod, GpuPodSpec
 
@@ -141,14 +141,9 @@ class RunPodProvider:
         machine = raw.get("machine") or {}
         if not isinstance(machine, dict):
             raise TypeError("Expected 'machine' to be a dict")
-        if machine:
-            gpu_type = str(machine.get("gpuDisplayName", "")) or None
-            cost_raw = machine.get("costPerHr") or machine.get("costPerGpu")
-            cost_cents = int(float(cost_raw) * 100) if cost_raw else None
-        else:
-            raise TypeError(
-                f"Expected 'machine' to be a dict or None, got {type(machine).__name__!r}"
-            )
+        gpu_type = (str(machine.get("gpuDisplayName", "")) or None) if machine else None
+        cost_raw = (machine.get("costPerHr") or machine.get("costPerGpu")) if machine else None
+        cost_cents = int(float(cost_raw) * 100) if cost_raw else None
 
         created_at: datetime | None = None
         raw_created_at = raw.get("createdAt")

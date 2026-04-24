@@ -12,6 +12,8 @@ ERROR     – provider reported an error state
 from datetime import datetime
 from typing import Protocol
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from app.models.enums import GpuPodStatus
 
 
