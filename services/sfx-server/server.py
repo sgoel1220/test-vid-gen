@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, AsyncIterator
@@ -73,7 +74,11 @@ _gpu_busy = False
 
 
 def _get_device() -> str:
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    """Return best available device.  Aborts if CUDA is expected but missing."""
+    if torch.cuda.is_available():
+        return "cuda"
+    logger.critical("CUDA is not available — aborting to avoid billing a GPU pod for CPU inference.")
+    raise SystemExit(1)
 
 
 async def _ensure_model() -> EzAudioModel:
@@ -100,8 +105,8 @@ async def _ensure_model() -> EzAudioModel:
             logger.info("EzAudio model loaded successfully.")
         except Exception as exc:
             _model_error = str(exc)
-            logger.exception("Fatal: model load failed.")
-            raise
+            logger.exception("Fatal: model load failed — exiting to avoid idle billing.")
+            raise SystemExit(1) from exc
 
         return _model
 
@@ -148,9 +153,14 @@ def _generate_sync(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Pre-warm the EzAudio model on startup."""
+    """Load the EzAudio model before accepting requests.
+
+    Awaiting here means failure is deterministic: if CUDA is missing or the
+    model download fails, the process exits cleanly during startup instead of
+    leaving an orphan container that returns 503 forever.
+    """
     logger.info("Starting SFX server on port 8008...")
-    asyncio.create_task(_ensure_model())
+    await _ensure_model()
     yield
 
 
@@ -173,7 +183,7 @@ async def health() -> Response:
     """
     if _model_error is not None:
         return Response(
-            content=f'{{"status":"error","error":{_model_error!r}}}',
+            content=json.dumps({"status": "error", "error": _model_error}),
             media_type="application/json",
             status_code=503,
         )
