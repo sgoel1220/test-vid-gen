@@ -110,7 +110,9 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # music-server uses registry cache (torch layers exceed GHA's 10 GB limit)
-          cache-from: ${{ matrix.service.name == 'music-server' && format('type=registry,ref={0}/{1}/music-server-cache:buildcache', env.REGISTRY, github.repository_owner) || format('type=gha,scope={0}', matrix.service.name) }}
-          cache-to: ${{ matrix.service.name == 'music-server' && format('type=registry,ref={0}/{1}/music-server-cache:buildcache,mode=max', env.REGISTRY, github.repository_owner) || format('type=gha,mode=max,scope={0}', matrix.service.name) }}
+          # All GPU services use registry cache: combined layers exceed GHA's 10 GB
+          # repo limit, and shared pytorch base layers are deduplicated in GHCR.
+          # creepy-brain is CPU-only (~500 MB) so GHA cache is fine there.
+          cache-from: ${{ matrix.service.name == 'creepy-brain' && format('type=gha,scope={0}', matrix.service.name) || format('type=registry,ref={0}/{1}/{2}-cache:buildcache', env.REGISTRY, github.repository_owner, matrix.service.name) }}
+          cache-to: ${{ matrix.service.name == 'creepy-brain' && format('type=gha,mode=max,scope={0}', matrix.service.name) || format('type=registry,ref={0}/{1}/{2}-cache:buildcache,mode=max', env.REGISTRY, github.repository_owner, matrix.service.name) }}
           platforms: linux/amd64
