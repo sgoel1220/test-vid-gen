@@ -60,11 +60,15 @@ RUN uv pip install --system --no-cache -e /app/ace-step
 # circular-import crash on this torch/torchvision version combo.
 # LoKRConfig is only used for LoRA *training*; the inference server never calls it.
 RUN python3 - <<'EOF'
-import pathlib, textwrap
+import pathlib, textwrap, sys
 p = pathlib.Path("/app/ace-step/acestep/core/generation/handler/lora/lifecycle.py")
 src = p.read_text()
+target = "from acestep.training.configs import LoKRConfig"
+if target not in src:
+    print(f"FATAL: LoKR patch target not found in {p} — ACE-Step may have changed", file=sys.stderr)
+    sys.exit(1)
 src = src.replace(
-    "from acestep.training.configs import LoKRConfig",
+    target,
     textwrap.dedent("""\
         try:
             from acestep.training.configs import LoKRConfig

@@ -54,7 +54,7 @@ class GenerateRequest(BaseModel):
     duration_sec: float = Field(..., gt=0.0, le=MAX_DURATION_SEC, description="Duration in seconds (max 600).")
     seed: int = Field(0, ge=0, description="Random seed (0 = random).")
     inference_steps: int = Field(8, ge=1, le=100, description="Diffusion steps.")
-    lyrics: str = Field("[Instrumental]", description="Optional lyrics (use [Instrumental] for no vocals).")
+    lyrics: str = Field("[Instrumental]", max_length=5000, description="Optional lyrics (use [Instrumental] for no vocals).")
 
 
 class OutpaintRequest(BaseModel):
@@ -71,7 +71,7 @@ class OutpaintRequest(BaseModel):
     )
     seed: int = Field(0, ge=0, description="Random seed (0 = random).")
     inference_steps: int = Field(8, ge=1, le=100, description="Diffusion steps.")
-    lyrics: str = Field("[Instrumental]", description="Optional lyrics.")
+    lyrics: str = Field("[Instrumental]", max_length=5000, description="Optional lyrics.")
     crossfade_sec: float = Field(0.25, ge=0.0, le=5.0, description="Crossfade seconds at the continuation seam.")
 
 
@@ -103,8 +103,11 @@ _gpu_lock = asyncio.Lock()
 
 
 def _get_device() -> str:
-    """Return best available device."""
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    """Return best available device.  Aborts if CUDA is expected but missing."""
+    if torch.cuda.is_available():
+        return "cuda"
+    logger.critical("CUDA is not available — aborting to avoid billing a GPU pod for CPU inference.")
+    raise SystemExit(1)
 
 
 async def _ensure_models() -> tuple[AceStepHandler, LLMHandler]:
@@ -158,8 +161,8 @@ async def _ensure_models() -> tuple[AceStepHandler, LLMHandler]:
             logger.info("ACE-Step 1.5 models loaded successfully.")
         except Exception as exc:
             _model_error = str(exc)
-            logger.exception("Fatal: model load failed.")
-            raise
+            logger.exception("Fatal: model load failed — exiting to avoid idle billing.")
+            raise SystemExit(1) from exc
 
         return _dit, _llm
 
