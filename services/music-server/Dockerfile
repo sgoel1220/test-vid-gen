@@ -55,6 +55,25 @@ RUN uv pip install --system --no-cache -e /app/ace-step/acestep/third_parts/nano
 # Install ACE-Step 1.5 (installs torch 2.10.0+cu128 from pytorch-cu128 index)
 RUN uv pip install --system --no-cache -e /app/ace-step
 
+# Patch: make LoKRConfig import lazy in lora/lifecycle.py.
+# That import pulls in lightning → torchmetrics → torchvision which triggers a
+# circular-import crash on this torch/torchvision version combo.
+# LoKRConfig is only used for LoRA *training*; the inference server never calls it.
+RUN python3 - <<'EOF'
+import pathlib, textwrap
+p = pathlib.Path("/app/ace-step/acestep/core/generation/handler/lora/lifecycle.py")
+src = p.read_text()
+src = src.replace(
+    "from acestep.training.configs import LoKRConfig",
+    textwrap.dedent("""\
+        try:
+            from acestep.training.configs import LoKRConfig
+        except Exception:
+            LoKRConfig = None  # type: ignore[assignment,misc]  # training deps unavailable"""),
+)
+p.write_text(src)
+EOF
+
 # Install remaining server dependencies
 COPY services/music-server/requirements.txt /app/requirements.txt
 RUN uv pip install --system --no-cache -r /app/requirements.txt
