@@ -11,5 +11,6 @@ pydantic==2.11.3
 soundfile==0.13.1
 
 # HuggingFace model download
-huggingface_hub==0.30.2
+# huggingface_hub is installed by ACE-Step (via transformers); do NOT pin here
+# or the Dockerfile install order will downgrade it and break transformers.
 hf_transfer==0.1.9

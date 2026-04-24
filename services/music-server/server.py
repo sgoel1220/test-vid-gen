@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import json
 import logging
 import shutil
 import tempfile
@@ -310,7 +311,7 @@ async def health() -> Response:
     """
     if _model_error is not None:
         return Response(
-            content=f'{{"status":"error","error":{_model_error!r}}}',
+            content=json.dumps({"status": "error", "error": _model_error}),
             media_type="application/json",
             status_code=503,
         )
