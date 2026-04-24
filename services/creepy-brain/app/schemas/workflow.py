@@ -128,6 +128,7 @@ class WorkflowDetailResponse(WorkflowResponse):
     scenes: list[WorkflowSceneResponse]
     gpu_pods: list[GpuPodResponse]
     sfx_clips: list[SfxClipResponse] = Field(default_factory=list)
+    music_bed_blob_id: str | None = None
 
 
 class EncodeMp3Response(BaseModel):

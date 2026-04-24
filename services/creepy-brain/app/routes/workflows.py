@@ -17,7 +17,7 @@ from app.models.enums import StepName, WorkflowStatus, WorkflowType
 from app.models.workflow import Workflow, WorkflowScene, WorkflowStep
 from app.models.gpu_pod import GpuPod
 from app.log_buffer import log_buffer
-from app.models.json_schemas import SfxGenerationStepOutput
+from app.models.json_schemas import MusicGenerationStepOutput, SfxGenerationStepOutput
 from app.schemas.workflow import (
     CreateWorkflowRequest,
     EncodeMp3Response,
@@ -171,13 +171,25 @@ async def get_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowDetailR
     )
     pods = pods_result.scalars().all()
 
+    sorted_steps = sorted(workflow.steps, key=lambda s: s.attempt_number, reverse=True)
+
+    # Extract music bed blob from music_generation step output
+    music_bed_blob_id: str | None = None
+    # Prefer result_json if available, else fall back to step output
+    if workflow.result_json and workflow.result_json.music_bed_blob_id:
+        music_bed_blob_id = str(workflow.result_json.music_bed_blob_id)
+    else:
+        music_step = next(
+            (s for s in sorted_steps if s.step_name == StepName.MUSIC_GENERATION and s.output_json is not None),
+            None,
+        )
+        if music_step is not None and isinstance(music_step.output_json, MusicGenerationStepOutput):
+            music_bed_blob_id = music_step.output_json.music_bed_blob_id
+
     # Extract SFX clips from the latest sfx_generation step output
     sfx_clips: list[SfxClipResponse] = []
     sfx_step = next(
-        (
-            s for s in sorted(workflow.steps, key=lambda s: s.attempt_number, reverse=True)
-            if s.step_name == StepName.SFX_GENERATION and s.output_json is not None
-        ),
+        (s for s in sorted_steps if s.step_name == StepName.SFX_GENERATION and s.output_json is not None),
         None,
     )
     if sfx_step is not None and isinstance(sfx_step.output_json, SfxGenerationStepOutput):
@@ -255,6 +267,7 @@ async def get_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowDetailR
             for p in pods
         ],
         sfx_clips=sfx_clips,
+        music_bed_blob_id=music_bed_blob_id,
     )
 
 

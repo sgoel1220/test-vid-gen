@@ -583,12 +583,12 @@ function renderDetail(wf: WorkflowDetailResponse): string {
     `);
   }
 
-  // Output (stitched audio / video)
-  if (wf.result) {
-    const r = wf.result;
+  // Output (stitched audio / video + music bed from step output)
+  {
     const outputParts: string[] = [];
+    const r = wf.result;
 
-    if (r.final_audio_blob_id) {
+    if (r?.final_audio_blob_id) {
       const audioUrl = `/api/blobs/${r.final_audio_blob_id}`;
       outputParts.push(`
         <div class="output-block">
@@ -605,7 +605,7 @@ function renderDetail(wf: WorkflowDetailResponse): string {
       `);
     }
 
-    if (r.final_video_blob_id) {
+    if (r?.final_video_blob_id) {
       const videoUrl = `/api/blobs/${r.final_video_blob_id}`;
       outputParts.push(`
         <div class="output-block">
@@ -620,7 +620,7 @@ function renderDetail(wf: WorkflowDetailResponse): string {
       `);
     }
 
-    if (r.waveform_video_blob_id) {
+    if (r?.waveform_video_blob_id) {
       const waveformUrl = `/api/blobs/${r.waveform_video_blob_id}`;
       outputParts.push(`
         <div class="output-block">
@@ -635,8 +635,8 @@ function renderDetail(wf: WorkflowDetailResponse): string {
       `);
     }
 
-    if (r.music_bed_blob_id) {
-      const musicUrl = `/api/blobs/${r.music_bed_blob_id}`;
+    if (wf.music_bed_blob_id) {
+      const musicUrl = `/api/blobs/${wf.music_bed_blob_id}`;
       outputParts.push(`
         <div class="output-block">
           <h4>Music Bed</h4>

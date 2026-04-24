@@ -112,6 +112,7 @@ export interface WorkflowDetailResponse extends WorkflowResponse {
   scenes: WorkflowScene[];
   gpu_pods: WorkflowGpuPod[];
   sfx_clips: SfxClip[];
+  music_bed_blob_id: string | null;
 }
 
 export interface CostSummary {
