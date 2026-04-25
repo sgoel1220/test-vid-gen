@@ -251,6 +251,14 @@ export interface StitchStepParams {
   enabled?: boolean;
 }
 
+export interface MusicStepParams {
+  enabled?: boolean;
+}
+
+export interface SfxStepParams {
+  enabled?: boolean;
+}
+
 export interface CreateWorkflowRequest {
   premise: string;
   voice_name: string;
@@ -258,10 +266,13 @@ export interface CreateWorkflowRequest {
   tts_params?: TtsStepParams;
   image_params?: ImageStepParams;
   stitch_params?: StitchStepParams;
+  music_params?: MusicStepParams;
+  sfx_params?: SfxStepParams;
   // Deprecated — kept for backwards compat
   target_word_count?: number;
   generate_images?: boolean;
   stitch_video?: boolean;
+  generate_sfx?: boolean;
 }
 
 // Schema discovery types
