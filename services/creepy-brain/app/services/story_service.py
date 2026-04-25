@@ -228,6 +228,17 @@ async def ingest(
     session.add(story)
     await session.flush()
     await session.refresh(story)
+
+    act = StoryAct(
+        story_id=story.id,
+        act_number=1,
+        title=title[:200],
+        content=full_text,
+        word_count=len(full_text.split()),
+    )
+    session.add(act)
+    await session.flush()
+
     return story
 
 

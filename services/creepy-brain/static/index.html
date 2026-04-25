@@ -135,6 +135,10 @@
     const API = '';
     let currentStory = null;
 
+    function esc(str) {
+      return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
     async function loadStories() {
       const list = document.getElementById('stories-list');
       list.innerHTML = '<span class="empty">Loading...</span>';
@@ -183,8 +187,8 @@
         }
 
         const html = story.acts.map(act => `
-          <div class="act-title">Act ${act.act_number}: ${act.title}</div>
-          <div>${act.content || '<em>No content</em>'}</div>
+          <div class="act-title">Act ${esc(act.act_number)}: ${esc(act.title)}</div>
+          <div>${act.content ? esc(act.content) : '<em>No content</em>'}</div>
         `).join('\n');
 
         box.innerHTML = html;
