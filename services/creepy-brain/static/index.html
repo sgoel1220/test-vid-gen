@@ -99,12 +99,51 @@
     }
     .audio-info { color: #888; font-size: 14px; }
     audio { border-radius: 4px; }
+    .generate-section {
+      background: #16213e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .generate-section label {
+      display: block;
+      color: #aaa;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .generate-section textarea, .generate-section select {
+      width: 100%;
+      background: #1a1a2e;
+      border: 1px solid #333;
+      color: #eee;
+      border-radius: 4px;
+      padding: 8px 10px;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+    .generate-section textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+    .generate-section select option { background: #1a1a2e; }
+    .gen-status { margin-top: 10px; font-size: 13px; color: #f39c12; min-height: 20px; }
+    .gen-status.ok { color: #2ecc71; }
+    .gen-status.err { color: #e74c3c; }
   </style>
 </head>
 <body>
   <h1>Creepy Brain</h1>
   <p class="meta">Story Viewer & Script Copier</p>
 
+  <h2>Generate Story</h2>
+  <div class="generate-section">
+    <label for="premise-input">Premise</label>
+    <textarea id="premise-input" placeholder="A lonely lighthouse keeper discovers a message in a bottle that changes everything..."></textarea>
+    <label for="voice-select">Voice</label>
+    <select id="voice-select"><option value="">Loading voices...</option></select>
+    <button id="generate-btn">Generate Story</button>
+    <div class="gen-status" id="gen-status"></div>
+  </div>
+
+  <h2>Stories</h2>
   <div class="stories-list" id="stories-list">
     <span class="empty">Loading stories...</span>
   </div>
@@ -153,9 +192,9 @@
         }
 
         list.innerHTML = stories.map(s => `
-          <button class="story-btn" data-id="${s.id}">
-            ${s.premise.slice(0, 40)}...
-            <span class="status ${s.status}">${s.status}</span>
+          <button class="story-btn" data-id="${esc(s.id)}">
+            ${esc(s.premise.slice(0, 40))}…
+            <span class="status ${esc(s.status)}">${esc(s.status)}</span>
           </button>
         `).join('');
 
@@ -217,6 +256,102 @@
 
     document.getElementById('refresh-btn').addEventListener('click', loadStories);
 
+    async function loadVoices() {
+      const sel = document.getElementById('voice-select');
+      try {
+        const res = await fetch(`${API}/api/voices`);
+        const voices = await res.json();
+        if (!voices.length) {
+          sel.innerHTML = '<option value="">No voices configured</option>';
+          return;
+        }
+        sel.innerHTML = voices.map(v => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+      } catch (e) {
+        sel.innerHTML = '<option value="">Error loading voices</option>';
+      }
+    }
+
+    let pollTimer = null;
+    function startPolling(storyId) {
+      clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        try {
+          const res = await fetch(`${API}/api/stories/${storyId}`);
+          const story = await res.json();
+          const status = document.getElementById('gen-status');
+          if (story.status === 'completed') {
+            clearInterval(pollTimer);
+            status.textContent = 'Story ready!';
+            status.className = 'gen-status ok';
+            document.getElementById('generate-btn').disabled = false;
+            loadStories();
+          } else if (story.status === 'failed') {
+            clearInterval(pollTimer);
+            status.textContent = 'Generation failed.';
+            status.className = 'gen-status err';
+          } else {
+            status.textContent = `Generating... (${story.status})`;
+          }
+        } catch (_) {}
+      }, 5000);
+    }
+
+    document.getElementById('generate-btn').addEventListener('click', async () => {
+      const premise = document.getElementById('premise-input').value.trim();
+      const voice = document.getElementById('voice-select').value;
+      const status = document.getElementById('gen-status');
+
+      if (premise.length < 10) {
+        status.textContent = 'Premise must be at least 10 characters.';
+        status.className = 'gen-status err';
+        return;
+      }
+      if (!voice) {
+        status.textContent = 'Select a voice first.';
+        status.className = 'gen-status err';
+        return;
+      }
+
+      document.getElementById('generate-btn').disabled = true;
+      status.textContent = 'Submitting...';
+      status.className = 'gen-status';
+
+      try {
+        const res = await fetch(`${API}/api/workflows`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ premise, voice_name: voice }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || res.statusText);
+        }
+        const wf = await res.json();
+        status.textContent = 'Workflow started — generating…';
+        status.className = 'gen-status';
+        // Poll the workflow for story_id, then poll story
+        const wfPoll = setInterval(async () => {
+          try {
+            const r = await fetch(`${API}/api/workflows/${wf.id}`);
+            const w = await r.json();
+            if (w.result?.story_id) {
+              clearInterval(wfPoll);
+              startPolling(w.result.story_id);
+            } else if (w.status === 'failed' || w.status === 'cancelled') {
+              clearInterval(wfPoll);
+              status.textContent = `Workflow ${w.status}.`;
+              status.className = 'gen-status err';
+              document.getElementById('generate-btn').disabled = false;
+            }
+          } catch (_) {}
+        }, 3000);
+      } catch (e) {
+        status.textContent = `Error: ${e.message}`;
+        status.className = 'gen-status err';
+        document.getElementById('generate-btn').disabled = false;
+      }
+    });
+
     // Audio player info
     const audioPlayer = document.getElementById('audio-player');
     const audioInfo = document.getElementById('audio-info');
@@ -232,6 +367,7 @@
     });
 
     loadStories();
+    loadVoices();
   </script>
 </body>
 </html>
