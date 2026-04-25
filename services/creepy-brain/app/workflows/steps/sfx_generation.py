@@ -83,7 +83,6 @@ def _sfx_pod_spec() -> GpuPodSpec:
         gpu_type=settings.gpu_type,
         image=settings.sfx_server_image,
         disk_size_gb=settings.gpu_container_disk_gb,
-        volume_gb=settings.gpu_volume_gb,
         ports=[settings.sfx_server_port],
         cloud_type=settings.gpu_cloud_type,
     )

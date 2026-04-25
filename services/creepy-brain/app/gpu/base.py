@@ -33,7 +33,7 @@ class GpuPodSpec(BaseModel):
     gpu_type: str
     image: str
     disk_size_gb: int
-    volume_gb: int
+    volume_gb: int | None = None
     ports: list[int]
     cloud_type: str = "COMMUNITY"  # COMMUNITY or SECURE
     env: dict[str, str] = Field(default_factory=dict)
@@ -50,7 +50,6 @@ class GpuPodSpec(BaseModel):
             gpu_type=settings.gpu_type,
             image=settings.gpu_image,
             disk_size_gb=settings.gpu_container_disk_gb,
-            volume_gb=settings.gpu_volume_gb,
             ports=[settings.gpu_port],
             cloud_type=settings.gpu_cloud_type,
         )

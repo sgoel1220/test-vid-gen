@@ -220,10 +220,11 @@ class RunPodProvider:
                 gpu_type_id=spec.gpu_type,
                 cloud_type=spec.cloud_type,
                 container_disk_in_gb=spec.disk_size_gb,
-                volume_in_gb=spec.volume_gb,
                 ports=ports_str,
                 env=env_dict,
             )
+            if spec.volume_gb:
+                kwargs["volume_in_gb"] = spec.volume_gb
             if spec.min_download > 0:
                 kwargs["min_download"] = spec.min_download
             if spec.min_upload > 0:
