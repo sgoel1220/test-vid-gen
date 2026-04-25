@@ -148,7 +148,17 @@ def _crossfade_and_concat(
     segment_bytes_list: list[bytes],
     crossfade_sec: float = _CROSSFADE_SEC,
 ) -> bytes:
-    """Crossfade-overlap-add and concatenate multiple WAV segments.
+    """Crossfade-overlap-add and concatenate multiple WAV segments incrementally.
+
+    Processes one segment at a time so that at most two float32 arrays are held
+    in memory simultaneously, regardless of total segment count.  This keeps
+    peak RAM at O(2 segments) instead of O(N segments).
+
+    Invariant: ``pending`` always holds the last ``crossfade_samples`` samples
+    of the accumulated output (or all accumulated output when shorter).  These
+    samples are not flushed to the writer yet so they can participate in the
+    next crossfade.  This ensures correctness even when a middle segment is
+    shorter than ``2 * crossfade_sec``.
 
     Args:
         segment_bytes_list: One WAV bytes entry per segment, in order.
@@ -163,50 +173,67 @@ def _crossfade_and_concat(
     if not segment_bytes_list:
         raise ValueError("No segments to concatenate")
 
-    arrays: list[np.ndarray] = []
-    sample_rate: int | None = None
+    seg_iter = iter(segment_bytes_list)
 
-    for seg_bytes in segment_bytes_list:
-        data, sr = sf.read(io.BytesIO(seg_bytes), dtype="float32")
-        if sample_rate is None:
-            sample_rate = sr
-        elif sr != sample_rate:
+    # Read first segment to learn sample_rate and channel count.
+    first_data, sample_rate = sf.read(io.BytesIO(next(seg_iter)), dtype="float32")
+    channels = 1 if first_data.ndim == 1 else first_data.shape[1]
+
+    out_buf = io.BytesIO()
+    writer = sf.SoundFile(
+        out_buf,
+        mode="w",
+        samplerate=sample_rate,
+        channels=channels,
+        format="WAV",
+        subtype="PCM_16",
+    )
+
+    crossfade_samples = int(crossfade_sec * sample_rate)
+
+    # Seed pending with last crossfade_samples of the first segment (or all of
+    # it when the segment is shorter than the crossfade window).
+    if len(first_data) <= crossfade_samples:
+        pending: np.ndarray = first_data
+    else:
+        writer.write(first_data[:-crossfade_samples])
+        pending = first_data[-crossfade_samples:]
+
+    for seg_bytes in seg_iter:
+        nxt, sr = sf.read(io.BytesIO(seg_bytes), dtype="float32")
+        if sr != sample_rate:
             log.warning(
                 "Music segment sample rate mismatch: expected %d, got %d — proceeding anyway",
                 sample_rate,
                 sr,
             )
-        arrays.append(data.copy())
 
-    if sample_rate is None:
-        raise ValueError("No audio data loaded")
-
-    if len(arrays) == 1:
-        out_buf = io.BytesIO()
-        sf.write(out_buf, arrays[0], sample_rate, format="WAV", subtype="PCM_16")
-        return out_buf.getvalue()
-
-    crossfade_samples = int(crossfade_sec * sample_rate)
-    result: np.ndarray = arrays[0]
-
-    for nxt in arrays[1:]:
-        actual_fade = min(crossfade_samples, len(result), len(nxt))
+        actual_fade = min(crossfade_samples, len(pending), len(nxt))
         if actual_fade > 0:
             fade_out = np.linspace(1.0, 0.0, actual_fade, dtype=np.float32)
             fade_in = np.linspace(0.0, 1.0, actual_fade, dtype=np.float32)
-            # Handle stereo: broadcast over channel dimension
-            if result.ndim > 1:
+            # Handle stereo: broadcast over channel dimension.
+            if pending.ndim > 1:
                 fade_out = fade_out[:, np.newaxis]
                 fade_in = fade_in[:, np.newaxis]
-            result[-actual_fade:] = result[-actual_fade:] * fade_out
-            nxt_head = nxt[:actual_fade] * fade_in
-            overlap = result[-actual_fade:] + nxt_head
-            result = np.concatenate([result[:-actual_fade], overlap, nxt[actual_fade:]])
+            overlap = pending[-actual_fade:] * fade_out + nxt[:actual_fade] * fade_in
+            # combined = [pending body] + [blend zone] + [nxt tail]
+            combined = np.concatenate([pending[:-actual_fade], overlap, nxt[actual_fade:]])
         else:
-            result = np.concatenate([result, nxt])
+            combined = np.concatenate([pending, nxt])
 
-    out_buf = io.BytesIO()
-    sf.write(out_buf, result, sample_rate, format="WAV", subtype="PCM_16")
+        # Flush all but the last crossfade_samples to the writer, then keep
+        # only that tail as the new pending for the next crossfade.
+        if len(combined) <= crossfade_samples:
+            pending = combined
+        else:
+            writer.write(combined[:-crossfade_samples])
+            pending = combined[-crossfade_samples:]
+
+    # Flush the remaining pending tail.
+    writer.write(pending)
+    writer.close()
+
     return out_buf.getvalue()
 
 

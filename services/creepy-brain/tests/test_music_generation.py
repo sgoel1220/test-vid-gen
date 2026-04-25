@@ -197,3 +197,37 @@ class TestCrossfadeAndConcat:
         segs = [_make_wav(2.0, sample_rate=44100) for _ in range(2)]
         result = _crossfade_and_concat(segs)
         assert result.startswith(b"RIFF")
+
+    def test_many_segments_incremental(self) -> None:
+        """12 segments — verifies incremental path handles >10 segments correctly."""
+        n = 12
+        seg_dur = 3.0
+        crossfade = 0.5
+        segments = [_make_wav(seg_dur, sample_rate=16000) for _ in range(n)]
+        result = _crossfade_and_concat(segments, crossfade_sec=crossfade)
+        data, sr = sf.read(io.BytesIO(result))
+        assert result.startswith(b"RIFF")
+        expected_min = n * seg_dur - (n - 1) * crossfade - 0.5
+        expected_max = n * seg_dur + 0.5
+        duration = len(data) / sr
+        assert expected_min < duration < expected_max
+
+    def test_short_middle_segment_crossfades_correctly(self) -> None:
+        """Middle segments shorter than 2*crossfade_sec must not break adjacent crossfades.
+
+        Previously, pending = nxt[actual_fade:] left too few samples for the
+        next iteration's crossfade when a segment was short.  The fixed
+        invariant keeps the last crossfade_samples of accumulated output in
+        pending so both adjacent crossfades use a full window.
+        """
+        crossfade = 0.5
+        sr = 16000
+        long1 = _make_wav(4.0, sample_rate=sr)   # normal
+        short = _make_wav(0.6, sample_rate=sr)   # shorter than 2 * crossfade_sec
+        long2 = _make_wav(4.0, sample_rate=sr)   # normal
+        result = _crossfade_and_concat([long1, short, long2], crossfade_sec=crossfade)
+        data, _ = sf.read(io.BytesIO(result))
+        assert result.startswith(b"RIFF")
+        # Total = 4 + 0.6 + 4 - 2*0.5 crossfades = 7.6s; allow ±0.5s tolerance
+        duration = len(data) / sr
+        assert 7.0 < duration < 8.5
