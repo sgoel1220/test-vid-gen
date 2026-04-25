@@ -48,6 +48,7 @@ hf_cache/
 # .serena cache and local config are ignored by .serena/.gitignore
 .claude/*
 !.claude/commands/
+!.claude/skills/
 
 # Ignore test reports/coverage
 .coverage
