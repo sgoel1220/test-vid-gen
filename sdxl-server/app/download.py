@@ -74,7 +74,7 @@ def _download(url: str, dest: Path, label: str) -> None:
     except Exception as exc:
         tmp.unlink(missing_ok=True)
         log.error("FAILED %s: %s", label, exc)
-        raise
+        return
 
 
 def _civitai_url(version_id: str) -> str:
