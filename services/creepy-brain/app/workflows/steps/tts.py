@@ -386,14 +386,14 @@ async def _synthesize_all_chunks(
 
                 total_duration_sec += synthesis_result.duration_sec
 
-                if validation_passed:
+                if synthesis_result.validation_passed:
                     chunk_results.append(
                         TtsChunkResult(
                             index=idx,
                             text=chunk_text,
                             blob_id=str(blob.id),
-                            duration_sec=duration_sec,
-                            attempts_used=attempts_used,
+                            duration_sec=synthesis_result.duration_sec,
+                            attempts_used=synthesis_result.attempts_used,
                             validation_passed=True,
                         )
                     )
@@ -402,8 +402,8 @@ async def _synthesize_all_chunks(
                         idx + 1,
                         total_chunk_count,
                         blob.id,
-                        duration_sec,
-                        attempts_used,
+                        synthesis_result.duration_sec,
+                        synthesis_result.attempts_used,
                     )
                 else:
                     # Enqueue for next round (or record final failure below)
