@@ -1,6 +1,6 @@
 # Skill: generate-story
 
-Generate a horror story optimized for audio narration, save it locally, and push it to the server.
+Generate a horror story optimized for YouTube audio narration, save it locally, and push it to the server.
 
 ---
 
@@ -22,45 +22,58 @@ If the premise could benefit from grounding in real-world details (a specific pr
 
 Write a complete horror story following these rules:
 
-**Length:** 2000–4000 words
+**Length:** 3000–5000 words (long-form for audio; ~45–60 min narration)
 
 **NARRATOR_VOICE_RULES (embed all of these):**
 - Single narrator: old male, first-person past tense ("I remember when…", "That was the night I…")
-- No dialogue from other characters — narrator may paraphrase what others said, never quote them directly
+- No dialogue from other characters — narrator may paraphrase what others said, never quote directly
 - Short paragraphs: 2–4 sentences each. One-sentence paragraphs for emphasis only.
 - Sound-based descriptions preferred over visual ones (footsteps, breathing, the creak of a door)
 - Lingering unease over jump scares — the horror should grow slowly
-- Slow escalation: establish routine first, then let the wrongness seep in
-- Never name the monster/entity/force explicitly — let the reader fill the gap
-- Sentence rhythm matters for audio: vary sentence length. Short. Then longer flowing sentences that build. Then short again.
-- Avoid complex punctuation (em-dashes, semicolons) — read aloud naturally
+- Never name the monster/entity/force explicitly — let the listener fill the gap
+- Sentence rhythm matters for audio: vary length. Short. Then longer flowing sentences that build. Then short again.
+- Avoid complex punctuation (em-dashes, semicolons) — must read aloud naturally
 - No chapter breaks, no section headers — single flowing narrative
 
-**Story structure:**
-1. Opening hook (1–2 paragraphs): place the narrator in time, hint at what was lost
-2. Routine established (3–5 paragraphs): normal life, the job/place/habit at center
-3. First wrongness (2–3 paragraphs): something small that doesn't fit
-4. Escalation (5–8 paragraphs): wrong things compound, narrator rationalizes
-5. Peak horror (3–4 paragraphs): the full shape of it, no escape
-6. Aftermath (2–3 paragraphs): narrator survived, but changed — the unease lingers
+**YouTube Retention Rules (critical):**
+- **Hook in the first 3 sentences**: hint at something wrong immediately — a missing person, an abandoned tool, a detail that doesn't fit. Do not open with pure reflection. The listener must feel tension before 30 seconds.
+- **Wave-like tension**: do not hold at flat low intensity. Insert micro-escalations every 4–6 paragraphs — a small wrong detail, a sound that stops, something slightly off — before the main event.
+- **Climax reinforcement**: when the peak horror moment happens, linger on it. Describe the sensation or realization twice in different ways so audio-only listeners don't miss it.
+- **Ending with a sharper closing beat**: lingering unease alone is not enough for audio. End with one concrete detail that implies the threat is ongoing or personal — something the narrator notices, hears, or realizes in the final paragraph that tightens the dread.
+
+**Story structure (timed for ~1 hour narration):**
+1. **Hook (0–1 min)**: open mid-tension — reference the disappearance, the wrong detail, or the thing that was never explained. Pull the listener in immediately.
+2. **Backstory (1–6 min)**: who the narrator is, the job/place/relationship at the center, what was normal before.
+3. **Arrival / Setup (6–15 min)**: returning to the scene, environment described in full sensory detail, first signs something is wrong.
+4. **Disturbance (15–25 min)**: abandoned tools, wrong smells, silences, details that don't add up. Narrator rationalizes. Insert 1–2 micro-escalations here.
+5. **Escalation / Climb (25–40 min)**: narrator goes deeper in — physically or psychologically. Wrong things compound. Each rationalization fails.
+6. **Contact / Peak horror (40–50 min)**: the full shape of it. Describe it slowly. Reinforce the key moment twice so it lands in audio.
+7. **Aftermath (50–60 min)**: narrator survived but is changed. End with one sharp concrete beat — not just reflection, but something that happened after, something noticed, something that means it isn't over.
 
 ---
 
 ## Step 3 — Self-review
 
-Read the draft and evaluate:
+Read the draft and evaluate against all of the following:
 
-1. **Pacing**: Does the routine feel lived-in before the horror starts?
-2. **Prose quality**: Are there clichés? ("heart pounding", "blood ran cold") — replace them.
-3. **Audio rhythm**: Read 3 random paragraphs aloud mentally. Do they flow?
-4. **Horror effectiveness**: Is the unknown more terrifying than what's shown?
-5. **Dialogue rule**: Any quoted dialogue from other characters? Remove it.
+1. **Hook**: Does tension appear in the first 3 sentences? If not, restructure — bring the anomaly forward.
+2. **Wave tension**: Are there micro-escalations every 4–6 paragraphs in the middle section? If the tone is flat, insert them.
+3. **Prose quality**: Are there clichés? ("heart pounding", "blood ran cold", "spine tingling") — replace every one.
+4. **Audio rhythm**: Read 3 random paragraphs aloud mentally. Do they flow without stumbling?
+5. **Climax reinforcement**: Is the peak moment described twice in different ways? If not, add the reinforcement.
+6. **Ending beat**: Does the final paragraph end with something concrete and threatening, not just mood? If not, sharpen it.
+7. **Dialogue rule**: Any quoted dialogue from other characters? Remove it.
+8. **Length**: Is the story at least 3000 words? If under, expand the environment, backstory, or disturbance sections.
 
 ---
 
 ## Step 4 — Revise
 
-Apply all fixes identified in Step 3. Trim any paragraph that doesn't earn its place. Strengthen the atmosphere in the opening and the aftermath.
+Apply every fix identified in Step 3. Do not skip any item. Specifically:
+- If the hook is weak, rewrite the opening paragraph before anything else.
+- If micro-escalations are missing, add them now — do not leave the middle flat.
+- If the climax is subtle, add one reinforcing paragraph immediately after the peak moment.
+- If the ending lacks a concrete beat, write one — a sound, a detail, a discovery — that closes with dread not resignation.
 
 ---
 
@@ -97,14 +110,14 @@ Create the `output/stories/` directory if it doesn't exist.
 Call the ingest endpoint. Include the idempotency key so retries are safe (server returns the existing story if already ingested):
 
 ```bash
-RESPONSE=$(curl --fail-with-body -sS -X POST http://localhost:8000/api/stories/ingest \
+RESPONSE=$(curl --fail-with-body -sS -X POST http://localhost:8006/api/stories/ingest \
   -H 'Content-Type: application/json' \
   -d "{\"title\": \"<title>\", \"premise\": \"<premise>\", \"full_text\": \"<full story text escaped for JSON>\", \"idempotency_key\": \"<YYYY-MM-DD-slug>\"}" \
   2>&1)
 echo "$RESPONSE"
 ```
 
-`--fail-with-body` causes curl to exit non-zero on HTTP 4xx/5xx while still printing the response body, so the caller can tell whether the commit succeeded.
+`--fail-with-body` causes curl to exit non-zero on HTTP 4xx/5xx while still printing the response body.
 
 If curl exits non-zero or connection is refused, print the error and continue — the story is already saved locally. Do not retry automatically.
 
