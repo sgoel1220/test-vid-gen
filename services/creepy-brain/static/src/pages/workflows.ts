@@ -6,6 +6,7 @@ import {
   type PipelineSchemaResponse, type StepParamSchemaEntry,
 } from "../api.js";
 import { shortId, timeAgo, duration, statusClass, formatStep, esc } from "../utils.js";
+import { patchHTML } from "../dom.js";
 
 const STATUSES: (WorkflowStatus | "all")[] = [
   "all", "running", "paused", "completed", "failed", "cancelled",
@@ -159,10 +160,10 @@ async function refresh(): Promise<void> {
   try {
     const workflows = await fetchWorkflows(currentFilter);
     if (workflows.length === 0) {
-      list.innerHTML = '<div class="empty">No workflows found.</div>';
+      patchHTML(list, '<div class="empty">No workflows found.</div>');
       return;
     }
-    list.innerHTML = workflows.map(renderRow).join("");
+    patchHTML(list, workflows.map(renderRow).join(""));
   } catch (err) {
     list.innerHTML = `<div class="error">Failed to load: ${esc(String(err))}</div>`;
   }

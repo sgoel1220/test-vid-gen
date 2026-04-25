@@ -2,6 +2,7 @@
 
 import { fetchCostSummary, fetchWorkflows, fetchWorkflowDetail, type CostSummary } from "../api.js";
 import { formatCost, timeAgo, duration, statusClass, shortId, esc } from "../utils.js";
+import { patchHTML } from "../dom.js";
 
 interface PodView {
   id: string;
@@ -48,26 +49,26 @@ async function refresh(): Promise<void> {
   try {
     // Fetch cost summary from dedicated endpoint
     const costs = await fetchCostSummary();
-    summaryEl.innerHTML = renderSummary(costs);
+    patchHTML(summaryEl, renderSummary(costs));
 
     // Collect pods from recent workflows (no dedicated gpu-pods endpoint yet)
     const pods = await collectPods();
     const active = pods.filter((p) => isActive(p.status));
     const terminated = pods.filter((p) => !isActive(p.status));
 
-    // Warn if cost summary shows more active pods than we found
+    // Build active pods HTML
+    let activeHTML = "";
     if (costs.active_pod_count > active.length) {
       const missing = costs.active_pod_count - active.length;
-      activeEl.innerHTML = `<div class="error">Warning: ${missing} active pod(s) not shown (attached to older workflows or missing from recent results).</div>`;
-    } else {
-      activeEl.innerHTML = "";
+      activeHTML += `<div class="error">Warning: ${missing} active pod(s) not shown (attached to older workflows or missing from recent results).</div>`;
     }
-    activeEl.innerHTML += active.length > 0
+    activeHTML += active.length > 0
       ? active.map(renderPod).join("")
       : '<div class="empty">No active pods.</div>';
-    terminatedEl.innerHTML = terminated.length > 0
+    patchHTML(activeEl, activeHTML);
+    patchHTML(terminatedEl, terminated.length > 0
       ? terminated.map(renderPod).join("")
-      : '<div class="empty">No terminated pods.</div>';
+      : '<div class="empty">No terminated pods.</div>');
   } catch (err) {
     summaryEl.innerHTML = `<div class="error">${esc(String(err))}</div>`;
   }

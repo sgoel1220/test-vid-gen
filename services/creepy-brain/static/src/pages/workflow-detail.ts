@@ -24,6 +24,7 @@ import {
 import {
   shortId, timeAgo, duration, statusClass, formatStep, formatCost, esc,
 } from "../utils.js";
+import { patchHTML } from "../dom.js";
 
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let workflowId = "";
@@ -105,7 +106,7 @@ async function refresh(): Promise<void> {
       }
     }
 
-    el.innerHTML = renderDetail(wf);
+    patchHTML(el, renderDetail(wf));
     renderActions(wf);
     attachActionListeners(wf);
     attachChunkListeners();
@@ -142,7 +143,7 @@ function renderActions(wf: WorkflowDetailResponse): void {
   if (wf.status === "running" || wf.status === "paused" || wf.status === "pending") {
     btns.push('<button id="act-cancel" class="btn btn-danger">Cancel</button>');
   }
-  el.innerHTML = btns.join(" ");
+  patchHTML(el, btns.join(" "));
 }
 
 async function runAction(
