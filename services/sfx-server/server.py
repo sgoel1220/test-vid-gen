@@ -135,9 +135,12 @@ def _generate_sync(
 ) -> bytes:
     """Blocking SFX generation. Must be called in a thread pool."""
     random_seed: int | None = seed if seed > 0 else None
+    # EzAudio multiplies length by latent_sr (50) to get frame count, which is
+    # passed to torch.randn — that requires integer dimensions.  Pydantic sends
+    # a float, so round to the nearest int to avoid a TypeError.
     sr, audio = model.generate_audio(
         text=prompt,
-        length=duration_sec,
+        length=round(duration_sec),
         guidance_scale=guidance_scale,
         ddim_steps=ddim_steps,
         random_seed=random_seed,
