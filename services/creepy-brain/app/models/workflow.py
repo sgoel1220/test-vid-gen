@@ -182,6 +182,7 @@ class WorkflowChunk(BaseModel):
     )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # TTS fields
     tts_status: Mapped[ChunkStatus] = mapped_column(

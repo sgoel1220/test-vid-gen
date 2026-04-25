@@ -51,9 +51,10 @@ class WorkflowService:
         workflow_id: uuid.UUID,
         chunk_index: int,
         chunk_text: str,
+        normalized_text: str | None = None,
     ) -> WorkflowChunk:
         """Create or update the WorkflowChunk for *chunk_index* (flush only)."""
-        return await self._chunks.upsert_chunk(workflow_id, chunk_index, chunk_text)
+        return await self._chunks.upsert_chunk(workflow_id, chunk_index, chunk_text, normalized_text)
 
     async def mark_chunk_processing(
         self,

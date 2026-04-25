@@ -24,6 +24,7 @@ class ChunkForImageStep(BaseModel):
 
     index: int = Field(ge=0, description="Zero-based chunk position")
     text: str = Field(description="Chunk text content")
+    normalized_text: str | None = Field(default=None, description="Normalized text for TTS (None if not yet computed)")
     blob_id: str | None = Field(description="UUID of the WAV blob (None if TTS failed)")
     tts_status: ChunkStatus = Field(description="Chunk TTS status")
     scene_id: str | None = Field(description="UUID of the linked scene (None if unlinked)")
@@ -53,6 +54,7 @@ class WorkflowReadRepository:
             ChunkForImageStep(
                 index=c.chunk_index,
                 text=c.chunk_text,
+                normalized_text=c.normalized_text,
                 blob_id=str(c.tts_audio_blob_id) if c.tts_audio_blob_id else None,
                 tts_status=c.tts_status,
                 scene_id=str(c.scene_id) if c.scene_id else None,

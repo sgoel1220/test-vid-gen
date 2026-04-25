@@ -48,6 +48,7 @@ from app.models.enums import BlobType, ChunkStatus
 from app.models.json_schemas import GenerateStoryStepOutput, WorkflowInputSchema
 from app.services import blob_service
 from app.services import story_service as _story_service
+from app.services.workflow_read_repository import ChunkForImageStep
 from app.services.workflow_service import (
     WorkflowService,
     get_chunks_for_image_step,
@@ -156,32 +157,46 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
         len(full_text),
     )
 
-    # --- 2. Normalize full text (LLM call, cached in-process by text hash) ---
-    normalized_text = await normalize_text(full_text)
-
-    # --- 3. Chunk normalized text ---
-    chunks: list[str] = chunk_text_by_sentences(normalized_text, chunk_size=settings.tts_chunk_size)
-    if not chunks:
-        raise ValueError("text chunking produced zero chunks")
-
-    log.info("tts_synthesis: %d chunks to synthesize", len(chunks))
-
-    # --- 3.5. Persist all chunks to DB (text only, PENDING status) ---
+    # --- 2. Check DB for cached chunks (skip LLM normalization if all chunks already stored) ---
     workflow_id_uuid = get_optional_workflow_id(workflow_run_id)
+    db_chunks_cached: list[ChunkForImageStep] = []
     if workflow_id_uuid is not None:
         async with session_maker() as session:
-            svc = WorkflowService(session)
-            for idx, chunk_text in enumerate(chunks):
-                await svc.upsert_chunk(
-                    workflow_id=workflow_id_uuid,
-                    chunk_index=idx,
-                    chunk_text=chunk_text,
-                )
-            await session.commit()
-        log.info("tts_synthesis: persisted %d chunks to DB", len(chunks))
+            db_chunks_cached = await get_chunks_for_image_step(session, workflow_id_uuid)
+
+    # Use cached normalized text if all chunks already have it — avoids re-running the LLM call.
+    if db_chunks_cached and all(c.normalized_text is not None for c in db_chunks_cached):
+        chunks = [c.normalized_text for c in db_chunks_cached if c.normalized_text is not None]
+        log.info(
+            "tts_synthesis: using cached normalized text from DB (%d chunks)", len(chunks)
+        )
+    else:
+        # --- 2a. Normalize full text (LLM call, cached in-process by text hash) ---
+        normalized_full_text = await normalize_text(full_text)
+
+        # --- 3. Chunk normalized text ---
+        chunks = chunk_text_by_sentences(normalized_full_text, chunk_size=settings.tts_chunk_size)
+        if not chunks:
+            raise ValueError("text chunking produced zero chunks")
+
+        log.info("tts_synthesis: %d chunks to synthesize", len(chunks))
+
+        # --- 3.5. Persist all chunks to DB (text + normalized_text, PENDING status) ---
+        if workflow_id_uuid is not None:
+            async with session_maker() as session:
+                svc = WorkflowService(session)
+                for idx, chunk_text in enumerate(chunks):
+                    await svc.upsert_chunk(
+                        workflow_id=workflow_id_uuid,
+                        chunk_index=idx,
+                        chunk_text=chunk_text,
+                        normalized_text=chunk_text,
+                    )
+                await session.commit()
+            log.info("tts_synthesis: persisted %d chunks to DB", len(chunks))
 
     # --- 4. Read DB chunks back and split by status (DB is the source of truth) ---
-    # pending_chunks uses DB text so what is synthesized == what is stored.
+    # pending_chunks uses DB normalized_text so what is synthesized == what is stored.
     resumed_results: list[TtsChunkResult] = []
     pending_chunks: list[tuple[int, str]] = []
     resumed_duration: float = 0.0
@@ -203,7 +218,8 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
                 ))
                 resumed_duration += dur
             else:
-                pending_chunks.append((db_chunk.index, db_chunk.text))
+                tts_text = db_chunk.normalized_text or db_chunk.text
+                pending_chunks.append((db_chunk.index, tts_text))
     else:
         pending_chunks = list(enumerate(chunks))
 

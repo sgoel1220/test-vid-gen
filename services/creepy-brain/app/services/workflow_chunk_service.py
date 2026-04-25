@@ -33,6 +33,7 @@ class WorkflowChunkService:
         workflow_id: uuid.UUID,
         chunk_index: int,
         chunk_text: str,
+        normalized_text: str | None = None,
     ) -> WorkflowChunk:
         """Create or update the WorkflowChunk for *chunk_index* (flush only)."""
         result = await self._session.execute(
@@ -47,6 +48,7 @@ class WorkflowChunkService:
                 workflow_id=workflow_id,
                 chunk_index=chunk_index,
                 chunk_text=chunk_text,
+                normalized_text=normalized_text,
                 tts_status=ChunkStatus.PENDING,
             )
             self._session.add(chunk)
@@ -54,9 +56,13 @@ class WorkflowChunkService:
             await self._session.refresh(chunk)
         elif chunk.chunk_text != chunk_text:
             chunk.chunk_text = chunk_text
+            chunk.normalized_text = normalized_text
             chunk.tts_status = ChunkStatus.PENDING
             chunk.tts_audio_blob_id = None
             chunk.tts_duration_sec = None
+            await self._session.flush()
+        elif normalized_text is not None and chunk.normalized_text is None:
+            chunk.normalized_text = normalized_text
             await self._session.flush()
         return chunk
 
