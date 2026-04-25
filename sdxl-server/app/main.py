@@ -18,7 +18,7 @@ from diffusers import (
     StableDiffusionXLPipeline,
 )
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from PIL import Image
 from pydantic import BaseModel, Field, field_validator
 
@@ -424,6 +424,31 @@ async def generate(req: GenerateRequest) -> GenerateResponse:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, _generate_sync, req)
     return result
+
+
+@app.post(
+    "/generate/preview",
+    responses={200: {"content": {"image/png": {}}}},
+    response_class=Response,
+    summary="Generate and preview as PNG",
+)
+async def generate_preview(req: GenerateRequest) -> Response:
+    """Same as /generate but returns the raw PNG image — renders inline in Swagger UI."""
+    if base_pipe is None or refiner_pipe is None:
+        raise HTTPException(status_code=503, detail="Models not loaded yet")
+    async with _gpu_lock:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _generate_sync, req)
+    png_bytes = base64.b64decode(result.image_b64)
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={
+            "X-Seed": str(result.seed),
+            "X-Elapsed": str(result.elapsed_seconds),
+            "X-Steps": str(result.steps),
+        },
+    )
 
 
 @app.post("/reload-loras")
