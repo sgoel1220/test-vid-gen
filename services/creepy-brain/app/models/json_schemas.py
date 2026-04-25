@@ -62,6 +62,14 @@ class MusicStepParams(BaseStepParams):
     )
 
 
+class SfxStepParams(BaseStepParams):
+    """Configurable params for the SFX generation step."""
+
+    enabled: bool = Field(
+        default=False, description="Whether to generate sound-effect clips for each scene"
+    )
+
+
 # Workflow Input/Output Schemas
 class WorkflowInputSchema(BaseModel):
     """Input data for a content pipeline workflow."""
@@ -82,13 +90,12 @@ class WorkflowInputSchema(BaseModel):
     image_params: ImageStepParams = Field(default_factory=ImageStepParams)
     stitch_params: StitchStepParams = Field(default_factory=StitchStepParams)
     music_params: MusicStepParams = Field(default_factory=MusicStepParams)
-
-    # Audio design flags
-    generate_sfx: bool = Field(
-        default=False, description="Whether to generate SFX clips for each scene"
-    )
+    sfx_params: SfxStepParams = Field(default_factory=SfxStepParams)
 
     # Deprecated — kept for backwards compat with existing DB rows
+    generate_sfx: bool = Field(
+        default=False, description="Deprecated: use sfx_params.enabled instead"
+    )
     generate_images: bool = Field(
         default=False, description="Deprecated: use image_params.enabled instead"
     )
@@ -120,6 +127,8 @@ class WorkflowInputSchema(BaseModel):
             self.stitch_params.enabled = True
         if self.generate_music and not self.music_params.enabled:
             self.music_params.enabled = True
+        if self.generate_sfx and not self.sfx_params.enabled:
+            self.sfx_params.enabled = True
         if self.target_word_count != DEFAULT_STORY_TARGET_WORD_COUNT:
             if self.story_params.target_word_count == DEFAULT_STORY_TARGET_WORD_COUNT:
                 self.story_params.target_word_count = self.target_word_count

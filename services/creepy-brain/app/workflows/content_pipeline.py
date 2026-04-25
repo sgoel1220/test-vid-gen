@@ -21,6 +21,8 @@ from app.engine import SkippedStepOutput, StepContext, StepDef, WorkflowDef, eng
 from app.models.json_schemas import (
     ImageStepParams,
     MusicGenerationStepOutput,
+    MusicStepParams,
+    SfxStepParams,
     StitchStepParams,
     StoryStepParams,
     TtsStepParams,
@@ -182,6 +184,8 @@ content_pipeline_def = WorkflowDef(
             parents=["tts_synthesis"],
             timeout_sec=3600,
             max_retries=2,
+            params_schema=MusicStepParams,
+            params_field="music_params",
         ),
         StepDef(
             name="sfx_generation",
@@ -189,6 +193,8 @@ content_pipeline_def = WorkflowDef(
             parents=["tts_synthesis"],
             timeout_sec=3600,
             max_retries=2,
+            params_schema=SfxStepParams,
+            params_field="sfx_params",
         ),
         StepDef(
             name="stitch_final",

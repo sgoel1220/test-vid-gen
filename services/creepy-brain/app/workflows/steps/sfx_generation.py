@@ -310,7 +310,7 @@ async def execute(
     Returns:
         SfxGenerationStepOutput with all clip results, or SkippedStepOutput if disabled.
     """
-    if not input.generate_sfx:
+    if not input.sfx_params.enabled:
         log.info("sfx_generation skipped: generate_sfx=false")
         return SkippedStepOutput(reason="generate_sfx=false")
 
