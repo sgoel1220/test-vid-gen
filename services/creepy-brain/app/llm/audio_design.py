@@ -34,23 +34,16 @@ _REQUIRED_MUSIC_KEYWORD_GROUPS: list[frozenset[str]] = [
     ),
     # tempo indicator
     frozenset(["bpm", "tempo", "slow", "fast", "moderate", "pulse"]),
-    # instrumentation (vocal/choir excluded — instrumental only)
+    # instrumentation — classical acoustic only, 1-2 instruments preferred
+    # Piano is primary; cello/violin/strings as solo secondary option
     frozenset(
         [
             "piano",
             "strings",
             "violin",
             "cello",
-            "synth",
-            "bass",
-            "drums",
-            "percussion",
-            "guitar",
-            "brass",
-            "organ",
-            "pad",
             "flute",
-            "orchestral",
+            "harp",
         ]
     ),
 ]
@@ -77,7 +70,8 @@ class MusicMoodResult(BaseModel):
         min_length=10,
         description=(
             "ACE-Step prompt describing the music mood, e.g. "
-            "'dark ambient, sparse piano, 60 BPM, horror'"
+            "'dark ambient, solo piano, 55 BPM, haunting' or "
+            "'eerie atmospheric, piano and cello, slow pulse, melancholic'"
         ),
     )
     intensity: int = Field(
@@ -160,14 +154,16 @@ Ignore story-specific details. Two scenes with the same mood should produce simi
 
 ACE-Step prompt format — combine these elements with commas:
 1. GENRE/MOOD: e.g. "dark ambient", "horror soundtrack", "eerie atmospheric"
-2. INSTRUMENTATION: e.g. "sparse piano", "orchestral strings", "synth pad", "bass drone"
-3. TEMPO: always include an explicit BPM or qualifier, e.g. "60 BPM", "slow pulse"
+2. INSTRUMENTATION: use piano as primary; optionally add ONE classical string instrument (cello, violin, strings, flute, or harp). Never use more than 2 instruments total. No synth, drums, bass, guitar, brass, organ, or electronic instruments.
+3. TEMPO: always include an explicit BPM or qualifier, e.g. "55 BPM", "slow pulse"
 4. ADDITIONAL MOOD TAGS: e.g. "haunting", "tense", "foreboding", "melancholic"
 
 Guidelines:
-- Keep prompts concise: 10–20 comma-separated descriptors
+- Keep prompts concise: 8–15 comma-separated descriptors
 - Match the intensity to the emotional stakes (1=calm ambience, 10=peak terror)
-- Prefer sparse, textural arrangements — narration must remain audible
+- ALWAYS use piano as the primary or sole instrument — it produces the highest quality output
+- Prefer solo piano ("solo piano", "sparse piano") for most scenes — add a second instrument only when the mood genuinely calls for it (e.g. cello for deep grief, violin for tension)
+- Sparse, minimal arrangements sit cleanly under narration without masking the voice
 - STRICTLY instrumental — no vocals, choir, choral, or singing of any kind
 
 Output format: JSON object with "prompt" (string) and "intensity" (integer 1-10) keys."""
