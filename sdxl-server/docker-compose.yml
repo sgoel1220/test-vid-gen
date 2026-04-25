@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  sdxl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Set BUILD_MODELS=1 and pass --build-arg HF_TOKEN=$HF_TOKEN to bake
+        # the model weights into the image layer (large image, no cold-start).
+        BUILD_MODELS: "0"
+    image: sdxl-runpod:latest
+    container_name: sdxl-server
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      # Supply your HuggingFace token. On RunPod set this in Template Settings.
+      HF_TOKEN: "${HF_TOKEN}"
+      # Optional: override LoRA scan dir (default /loras)
+      LORAS_DIR: "${LORAS_DIR:-/loras}"
+      # HuggingFace cache dir — ensures weights survive restarts if
+      # you mount a persistent volume at /root/.cache/huggingface
+      HF_HOME: "/root/.cache/huggingface"
+      TRANSFORMERS_CACHE: "/root/.cache/huggingface/transformers"
+      DIFFUSERS_CACHE: "/root/.cache/huggingface/diffusers"
+    ports:
+      - "8000:8000"
+    volumes:
+      # LoRA .safetensors files — place your adapters here
+      - ./loras:/loras
+      # Image outputs (optional convenience mount)
+      - ./outputs:/outputs
+      # Persistent HF model cache — avoids re-downloading on every restart
+      # On RunPod use a Network Volume mounted at /root/.cache/huggingface
+      - hf-cache:/root/.cache/huggingface
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s   # Allow 5 minutes for model download on cold start
+
+volumes:
+  hf-cache:
+    driver: local
