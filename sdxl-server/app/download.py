@@ -99,8 +99,11 @@ def main() -> None:
     if civitai_base:
         log.info("Base model: CivitAI version %s", civitai_base)
         _download(_civitai_url(civitai_base), BASE_PATH, "base model")
-        Path("/tmp/env_extra").write_text(f"BASE_MODEL_PATH={BASE_PATH}\n")
-        log.info("BASE_MODEL_PATH=%s", BASE_PATH)
+        if BASE_PATH.exists():
+            Path("/tmp/env_extra").write_text(f"BASE_MODEL_PATH={BASE_PATH}\n")
+            log.info("BASE_MODEL_PATH=%s", BASE_PATH)
+        else:
+            log.warning("Base download failed — will fall back to HuggingFace")
     else:
         log.info("BASE_CIVITAI_ID not set — server will load from HuggingFace at runtime")
 
