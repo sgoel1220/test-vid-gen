@@ -7,7 +7,9 @@ import base64
 import io
 import logging
 import os
+import subprocess
 import time
+from pathlib import Path
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -208,11 +210,36 @@ def _generate_sync(req: GenerateRequest) -> GenerateResponse:
 # App
 # ---------------------------------------------------------------------------
 
+
+def _download_and_load() -> None:
+    """Run the startup download (if needed) then load models."""
+    try:
+        log.info("Running startup download...")
+        subprocess.run(["python3", "/app/download.py"], check=False)
+        # If download.py wrote a BASE_MODEL_PATH, pick it up
+        env_extra = Path("/tmp/env_extra")
+        if env_extra.exists():
+            for line in env_extra.read_text().strip().splitlines():
+                if "=" in line:
+                    key, val = line.split("=", 1)
+                    os.environ[key] = val
+            # Re-read the config after download sets it
+            global BASE_MODEL_PATH
+            BASE_MODEL_PATH = os.getenv("BASE_MODEL_PATH")
+    except Exception as exc:
+        log.warning("Download failed: %s — will try HuggingFace fallback", exc)
+    _load_models()
+    log.info("Server ready — model loaded.")
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    _load_models()
-    log.info("Server ready.")
+    # Start model loading in a background thread so uvicorn begins
+    # serving /health immediately — prevents RunPod from killing the pod.
+    loop = asyncio.get_running_loop()
+    load_task = loop.run_in_executor(None, _download_and_load)
+    log.info("Server started — model loading in background.")
     yield
+    load_task.cancel()
 
 
 app = FastAPI(title="SDXL RunPod Server", version="2.0.0", lifespan=_lifespan)
