@@ -3,6 +3,7 @@
 import * as workflows from "./pages/workflows.js";
 import * as workflowDetail from "./pages/workflow-detail.js";
 import * as gpuPods from "./pages/gpu-pods.js";
+import * as imageTest from "./pages/image-test.js";
 import * as settings from "./pages/settings.js";
 
 type Page = { mount: (el: HTMLElement, ...args: string[]) => void; unmount: () => void };
@@ -13,6 +14,7 @@ const routes: { pattern: RegExp; page: Page; extractArgs: (m: RegExpMatchArray) 
   { pattern: /^#\/workflows$/, page: workflows, extractArgs: () => [] },
   { pattern: /^#\/workflow\/(.+)$/, page: workflowDetail, extractArgs: (m) => [m[1]] },
   { pattern: /^#\/gpu-pods$/, page: gpuPods, extractArgs: () => [] },
+  { pattern: /^#\/image-test$/, page: imageTest, extractArgs: () => [] },
   { pattern: /^#\/settings$/, page: settings, extractArgs: () => [] },
 ];
 

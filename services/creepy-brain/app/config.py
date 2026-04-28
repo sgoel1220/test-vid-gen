@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     image_width: int = 1280
     image_height: int = 720
 
+    # ComfyUI RunPod Serverless endpoint (image generation)
+    comfyui_endpoint_id: str = "mug4b9qd6t1p1h"
+    comfyui_api_key: str = ""  # Set via COMFYUI_API_KEY env var
+
     # Music server GPU pod configuration
     music_server_image: str = "ghcr.io/sgoel1220/music-server:main"
     music_server_port: int = 8007
