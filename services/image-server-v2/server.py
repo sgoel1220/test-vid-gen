@@ -103,13 +103,8 @@ def _load() -> StableDiffusionXLPipeline:
         timestep_spacing="trailing",
     )
 
-    # Memory optimizations
+    # Memory optimizations (SDPA is default in PyTorch 2.x + diffusers)
     _pipe.set_progress_bar_config(disable=True)
-    try:
-        _pipe.enable_xformers_memory_efficient_attention()
-        logger.info("xformers enabled")
-    except Exception:
-        logger.info("xformers not available, using default attention")
 
     # Clear loading overhead
     torch.cuda.empty_cache()
