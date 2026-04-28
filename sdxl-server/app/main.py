@@ -52,9 +52,9 @@ _gpu_lock = asyncio.Lock()
 class GenerateRequest(BaseModel):
     prompt: str
     negative_prompt: str = ""
-    width: int = 1344
-    height: int = 768
-    steps: int = 35
+    width: int = 1024
+    height: int = 1024
+    steps: int = 25
     cfg: float = 4.5
     seed: Optional[int] = None
     clip_skip: int = 1
@@ -168,6 +168,12 @@ def _generate_sync(req: GenerateRequest) -> GenerateResponse:
         seed, req.width, req.height, req.steps, req.cfg, req.clip_skip,
     )
 
+    # Clear fragmented VRAM before each generation
+    if DEVICE == "cuda":
+        torch.cuda.empty_cache()
+        import gc
+        gc.collect()
+
     generator = torch.Generator(device=DEVICE).manual_seed(seed)
 
     with torch.inference_mode():
@@ -191,7 +197,8 @@ def _generate_sync(req: GenerateRequest) -> GenerateResponse:
     b64 = base64.b64encode(buf.getvalue()).decode()
 
     elapsed = time.perf_counter() - t0
-    log.info("Done in %.1fs", elapsed)
+    log.info("Done in %.1fs  VRAM: %.2f GB", elapsed,
+             torch.cuda.memory_allocated() / 1024**3 if DEVICE == "cuda" else 0)
 
     return GenerateResponse(
         image_b64=b64,
