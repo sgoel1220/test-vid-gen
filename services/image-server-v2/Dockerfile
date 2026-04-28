@@ -45,19 +45,28 @@ RUN mkdir -p /app/hf_cache /app/loras
 
 # ---------------------------------------------------------------------------
 # Bake models into image (avoids download on every cold start)
+# Single RUN layer to minimize image size. Filters to exact files needed.
 # ---------------------------------------------------------------------------
 
-# SDXL 1.0 base (fp16 variant, ~6.5 GB)
-RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('stabilityai/stable-diffusion-xl-base-1.0', allow_patterns=['*.fp16.safetensors', '*.json', '*.txt', 'tokenizer/*', 'tokenizer_2/*'])"
-
-# VAE: fp16-fix
-RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('madebyollin/sdxl-vae-fp16-fix')"
-
-# Lightning 4-step LoRA
-RUN python -c "from huggingface_hub import hf_hub_download; hf_hub_download('ByteDance/SDXL-Lightning', 'sdxl_lightning_4step_lora.safetensors')"
-
-# Impressionism LoRA from CivitAI (55 MB)
-RUN curl -L -o /app/loras/impressionism_sdxl.safetensors \
+RUN python -c "\
+from huggingface_hub import snapshot_download, hf_hub_download; \
+snapshot_download( \
+    'stabilityai/stable-diffusion-xl-base-1.0', \
+    allow_patterns=[ \
+        'model_index.json', \
+        'scheduler/*.json', \
+        'text_encoder/config.json', 'text_encoder/model.fp16.safetensors', \
+        'text_encoder_2/config.json', 'text_encoder_2/model.fp16.safetensors', \
+        'tokenizer/*', 'tokenizer_2/*', \
+        'unet/config.json', 'unet/diffusion_pytorch_model.fp16.safetensors', \
+    ], \
+); \
+snapshot_download( \
+    'madebyollin/sdxl-vae-fp16-fix', \
+    allow_patterns=['config.json', 'diffusion_pytorch_model.safetensors'], \
+); \
+hf_hub_download('ByteDance/SDXL-Lightning', 'sdxl_lightning_4step_lora.safetensors'); \
+" && curl -L -o /app/loras/impressionism_sdxl.safetensors \
     "https://civitai.com/api/download/models/133465?token=${CIVITAI_TOKEN}"
 
 # ---------------------------------------------------------------------------

@@ -60,18 +60,20 @@ def _load() -> StableDiffusionXLPipeline:
 
     logger.info("Loading SDXL 1.0 base + fp16 VAE...")
 
-    # Load VAE separately (fp16-safe)
+    # Load VAE separately (fp16-safe, local only — baked into image)
     vae = AutoencoderKL.from_pretrained(
         _VAE_MODEL,
         torch_dtype=torch.float16,
+        local_files_only=True,
     )
 
-    # Load base pipeline
+    # Load base pipeline (local only — baked into image)
     _pipe = StableDiffusionXLPipeline.from_pretrained(
         _BASE_MODEL,
         vae=vae,
         torch_dtype=torch.float16,
         variant="fp16",
+        local_files_only=True,
     ).to("cuda")
 
     # Load Impressionism style LoRA
@@ -83,7 +85,7 @@ def _load() -> StableDiffusionXLPipeline:
 
     # Load Lightning speed LoRA
     logger.info("Loading SDXL-Lightning 4-step LoRA...")
-    lightning_path = hf_hub_download(_LIGHTNING_REPO, _LIGHTNING_LORA)
+    lightning_path = hf_hub_download(_LIGHTNING_REPO, _LIGHTNING_LORA, local_files_only=True)
     _pipe.load_lora_weights(
         lightning_path,
         adapter_name="lightning",
