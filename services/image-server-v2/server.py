@@ -125,7 +125,15 @@ def _load() -> StableDiffusionXLPipeline:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    _load()
+    if not torch.cuda.is_available():
+        logger.error("CUDA not available — cannot serve. Check GPU/driver.")
+        # Don't crash; start server so /health can report the problem
+        yield
+        return
+    try:
+        _load()
+    except Exception:
+        logger.exception("Model loading failed — server will start but /ready returns 503")
     yield
 
 
@@ -206,16 +214,24 @@ def generate(request: GenerateRequest) -> Response:
     # Clear VRAM fragmentation
     torch.cuda.empty_cache()
 
-    with torch.inference_mode():
-        result = pipe(
-            prompt=request.prompt,
-            negative_prompt=request.negative_prompt,
-            width=request.width,
-            height=request.height,
-            num_inference_steps=request.steps,
-            guidance_scale=request.guidance_scale,
-            generator=generator,
-        )
+    try:
+        with torch.inference_mode():
+            result = pipe(
+                prompt=request.prompt,
+                negative_prompt=request.negative_prompt,
+                width=request.width,
+                height=request.height,
+                num_inference_steps=request.steps,
+                guidance_scale=request.guidance_scale,
+                generator=generator,
+            )
+    except RuntimeError as exc:
+        torch.cuda.empty_cache()
+        gc.collect()
+        if "out of memory" in str(exc).lower():
+            logger.error("CUDA OOM during generation: %s", exc)
+            raise HTTPException(status_code=507, detail="GPU out of memory") from exc
+        raise
 
     torch.cuda.empty_cache()
 
