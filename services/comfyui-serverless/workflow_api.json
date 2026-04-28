@@ -1,0 +1,85 @@
+{
+  "3": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 0,
+      "steps": 4,
+      "cfg": 2.0,
+      "sampler_name": "euler",
+      "scheduler": "sgm_uniform",
+      "denoise": 1.0,
+      "model": ["15", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["5", 0]
+    }
+  },
+  "4": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "sd_xl_base_1.0.safetensors"
+    }
+  },
+  "5": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 1280,
+      "height": 720,
+      "batch_size": 1
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "impressionist painting of a dark forest at twilight, thick brushstrokes, moody atmosphere",
+      "clip": ["14", 1]
+    }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "photorealistic, photograph, blurry, low quality, watermark, text, deformed",
+      "clip": ["14", 1]
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["3", 0],
+      "vae": ["10", 0]
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "output",
+      "images": ["8", 0]
+    }
+  },
+  "10": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "sdxl_vae_fp16_fix.safetensors"
+    }
+  },
+  "14": {
+    "class_type": "LoraLoader",
+    "inputs": {
+      "lora_name": "impressionism_sdxl.safetensors",
+      "strength_model": 0.8,
+      "strength_clip": 0.8,
+      "model": ["4", 0],
+      "clip": ["4", 1]
+    }
+  },
+  "15": {
+    "class_type": "LoraLoader",
+    "inputs": {
+      "lora_name": "sdxl_lightning_4step_lora.safetensors",
+      "strength_model": 1.0,
+      "strength_clip": 1.0,
+      "model": ["14", 0],
+      "clip": ["14", 1]
+    }
+  }
+}
