@@ -121,22 +121,23 @@ def _enable_memory_opts(pipe: StableDiffusionXLPipeline) -> None:
 def _load_models() -> None:
     global base_pipe
 
-    if BASE_MODEL_PATH:
-        log.info("Loading base from local file: %s", BASE_MODEL_PATH)
-        base_pipe = StableDiffusionXLPipeline.from_single_file(
-            BASE_MODEL_PATH,
-            torch_dtype=DTYPE,
-            use_safetensors=True,
-        )
-    else:
-        log.info("Loading base from HuggingFace: %s", BASE_MODEL_ID)
-        base_pipe = StableDiffusionXLPipeline.from_pretrained(
-            BASE_MODEL_ID,
-            torch_dtype=DTYPE,
-            use_safetensors=True,
-            variant="fp16",
-            token=HF_TOKEN,
-        )
+    with torch.inference_mode():
+        if BASE_MODEL_PATH:
+            log.info("Loading base from local file: %s", BASE_MODEL_PATH)
+            base_pipe = StableDiffusionXLPipeline.from_single_file(
+                BASE_MODEL_PATH,
+                torch_dtype=DTYPE,
+                use_safetensors=True,
+            )
+        else:
+            log.info("Loading base from HuggingFace: %s", BASE_MODEL_ID)
+            base_pipe = StableDiffusionXLPipeline.from_pretrained(
+                BASE_MODEL_ID,
+                torch_dtype=DTYPE,
+                use_safetensors=True,
+                variant="fp16",
+                token=HF_TOKEN,
+            )
 
     base_pipe.scheduler = _make_scheduler()
     base_pipe = base_pipe.to(DEVICE)
@@ -144,6 +145,7 @@ def _load_models() -> None:
     base_pipe.set_progress_bar_config(disable=True)
 
     if DEVICE == "cuda":
+        torch.cuda.empty_cache()
         vram_gb = torch.cuda.memory_allocated() / 1024**3
         log.info("Base model loaded. VRAM used: %.2f GB", vram_gb)
     else:
@@ -167,16 +169,17 @@ def _generate_sync(req: GenerateRequest) -> GenerateResponse:
 
     generator = torch.Generator(device=DEVICE).manual_seed(seed)
 
-    result = base_pipe(
-        prompt=req.prompt,
-        negative_prompt=req.negative_prompt or None,
-        width=req.width,
-        height=req.height,
-        num_inference_steps=req.steps,
-        guidance_scale=req.cfg,
-        clip_skip=req.clip_skip,
-        generator=generator,
-    )
+    with torch.inference_mode():
+        result = base_pipe(
+            prompt=req.prompt,
+            negative_prompt=req.negative_prompt or None,
+            width=req.width,
+            height=req.height,
+            num_inference_steps=req.steps,
+            guidance_scale=req.cfg,
+            clip_skip=req.clip_skip,
+            generator=generator,
+        )
     image: Image.Image = result.images[0]
 
     if DEVICE == "cuda":
@@ -235,7 +238,12 @@ async def generate(req: GenerateRequest) -> GenerateResponse:
         raise HTTPException(status_code=503, detail="Model not loaded yet")
     async with _gpu_lock:
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _generate_sync, req)
+        try:
+            result = await loop.run_in_executor(None, _generate_sync, req)
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            log.error("CUDA OOM for %dx%d steps=%d — cleared cache", req.width, req.height, req.steps)
+            raise HTTPException(status_code=503, detail="GPU out of memory — try smaller resolution or fewer steps")
     return result
 
 
@@ -251,7 +259,12 @@ async def generate_preview(req: GenerateRequest) -> Response:
         raise HTTPException(status_code=503, detail="Model not loaded yet")
     async with _gpu_lock:
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _generate_sync, req)
+        try:
+            result = await loop.run_in_executor(None, _generate_sync, req)
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            log.error("CUDA OOM for %dx%d steps=%d — cleared cache", req.width, req.height, req.steps)
+            raise HTTPException(status_code=503, detail="GPU out of memory — try smaller resolution or fewer steps")
     png_bytes = base64.b64decode(result.image_b64)
     return Response(
         content=png_bytes,
