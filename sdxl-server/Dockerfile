@@ -55,4 +55,7 @@ EXPOSE 8000
 # ── Base model: Juggernaut XL Ragnarok (downloaded at first boot) ─────────
 ENV BASE_CIVITAI_ID=1759168
 
+HEALTHCHECK --interval=30s --timeout=10s --start-period=600s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8000/health >/dev/null || exit 1
+
 CMD ["/start.sh"]

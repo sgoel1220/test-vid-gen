@@ -40,12 +40,14 @@ def _download(url: str, dest: Path, label: str) -> None:
     headers = {}
     if "civitai.com" in url and CIVITAI_TOKEN:
         headers["Authorization"] = f"Bearer {CIVITAI_TOKEN}"
+    elif "huggingface.co" in url and os.getenv("HF_TOKEN"):
+        headers["Authorization"] = f"Bearer {os.getenv('HF_TOKEN')}"
 
     log.info("START %s → %s", label, dest)
     t0 = time.monotonic()
 
     try:
-        with requests.get(url, headers=headers, stream=True, timeout=60) as r:
+        with requests.get(url, headers=headers, stream=True, timeout=(60, 300)) as r:
             r.raise_for_status()
             total = int(r.headers.get("content-length", 0))
             log.info("  size: %.2f GB", total / 1024**3 if total else 0)
@@ -78,10 +80,7 @@ def _download(url: str, dest: Path, label: str) -> None:
 
 
 def _civitai_url(version_id: str) -> str:
-    url = CIVITAI_DL.format(id=version_id.strip())
-    if CIVITAI_TOKEN:
-        url += f"?token={CIVITAI_TOKEN}"
-    return url
+    return CIVITAI_DL.format(id=version_id.strip())
 
 
 def _hf_url(repo_path: str) -> str:
@@ -89,8 +88,7 @@ def _hf_url(repo_path: str) -> str:
     if len(parts) < 3:
         raise ValueError(f"HF path must be 'owner/repo/filename', got: {repo_path}")
     owner, repo, filename = parts[0], parts[1], parts[2]
-    token_param = f"?token={os.getenv('HF_TOKEN')}" if os.getenv("HF_TOKEN") else ""
-    return f"https://huggingface.co/{owner}/{repo}/resolve/main/{filename}{token_param}"
+    return f"https://huggingface.co/{owner}/{repo}/resolve/main/{filename}"
 
 
 def main() -> None:

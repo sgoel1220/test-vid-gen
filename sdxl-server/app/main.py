@@ -8,6 +8,8 @@ import io
 import logging
 import os
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Optional
 
 import torch
@@ -203,13 +205,14 @@ def _generate_sync(req: GenerateRequest) -> GenerateResponse:
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="SDXL RunPod Server", version="2.0.0")
-
-
-@app.on_event("startup")
-def startup_event() -> None:
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _load_models()
     log.info("Server ready.")
+    yield
+
+
+app = FastAPI(title="SDXL RunPod Server", version="2.0.0", lifespan=_lifespan)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -231,7 +234,7 @@ async def generate(req: GenerateRequest) -> GenerateResponse:
     if base_pipe is None:
         raise HTTPException(status_code=503, detail="Model not loaded yet")
     async with _gpu_lock:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _generate_sync, req)
     return result
 
@@ -247,7 +250,7 @@ async def generate_preview(req: GenerateRequest) -> Response:
     if base_pipe is None:
         raise HTTPException(status_code=503, detail="Model not loaded yet")
     async with _gpu_lock:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _generate_sync, req)
     png_bytes = base64.b64decode(result.image_b64)
     return Response(
