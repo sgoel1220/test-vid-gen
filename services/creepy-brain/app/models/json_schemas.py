@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models.step_params import BaseStepParams
+from app.models.step_params import BaseStepParams, UIField
 from app.validation_limits import (
     DEFAULT_STORY_TARGET_WORD_COUNT,
     MAX_REVISIONS_MAX,
@@ -25,11 +25,17 @@ class StoryStepParams(BaseStepParams):
     """
 
     enabled: Literal[True] = True
-    max_revisions: int = Field(default=3, ge=MAX_REVISIONS_MIN, le=MAX_REVISIONS_MAX)
-    target_word_count: int = Field(
+    max_revisions: int = UIField(
+        default=3, ge=MAX_REVISIONS_MIN, le=MAX_REVISIONS_MAX,
+        description="Maximum revision passes for story quality",
+        ui_group="generation",
+    )
+    target_word_count: int = UIField(
         default=DEFAULT_STORY_TARGET_WORD_COUNT,
         ge=WORKFLOW_TARGET_WORD_COUNT_MIN,
         le=WORKFLOW_TARGET_WORD_COUNT_MAX,
+        description="Target word count for the generated story",
+        ui_group="generation",
     )
 
 
@@ -45,19 +51,19 @@ class TtsStepParams(BaseStepParams):
 class ImageStepParams(BaseStepParams):
     """Configurable params for the image generation step."""
 
-    enabled: bool = Field(default=False, description="Whether to generate scene images via GPU pod")
+    enabled: bool = UIField(default=False, description="Whether to generate scene images via GPU pod")
 
 
 class StitchStepParams(BaseStepParams):
     """Configurable params for the stitch/video step."""
 
-    enabled: bool = Field(default=False, description="Whether to stitch final video")
+    enabled: bool = UIField(default=False, description="Whether to stitch final video")
 
 
 class MusicStepParams(BaseStepParams):
     """Configurable params for the music generation step."""
 
-    enabled: bool = Field(
+    enabled: bool = UIField(
         default=False, description="Whether to generate background music via GPU pod"
     )
 
@@ -65,7 +71,7 @@ class MusicStepParams(BaseStepParams):
 class SfxStepParams(BaseStepParams):
     """Configurable params for the SFX generation step."""
 
-    enabled: bool = Field(
+    enabled: bool = UIField(
         default=False, description="Whether to generate sound-effect clips for each scene"
     )
 

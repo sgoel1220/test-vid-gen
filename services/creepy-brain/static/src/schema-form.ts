@@ -3,6 +3,12 @@
 import type { StepParamSchemaEntry } from "./api.js";
 import { formatStep, esc } from "./utils.js";
 
+interface UIMetadata {
+  expose?: boolean;
+  group?: string;
+  order?: number;
+}
+
 interface JsonSchemaProperty {
   type?: string;
   const?: unknown;
@@ -13,6 +19,7 @@ interface JsonSchemaProperty {
   multipleOf?: number;
   enum?: string[];
   title?: string;
+  "x-ui"?: UIMetadata;
 }
 
 interface JsonSchema {
@@ -34,11 +41,35 @@ function renderStep(entry: StepParamSchemaEntry): string {
   const title = formatStep(entry.step_name);
   const fieldId = `step-${entry.params_field}`;
 
-  // Fields excluding "enabled" (which goes in the header)
-  const fields = Object.entries(props)
+  // Sort fields by x-ui.order, then alphabetically
+  const sortedEntries = Object.entries(props)
     .filter(([k]) => k !== "enabled")
-    .map(([k, p]) => renderField(fieldId, k, p))
-    .join("");
+    .sort(([aKey, a], [bKey, b]) => {
+      const aOrder = a["x-ui"]?.order ?? 0;
+      const bOrder = b["x-ui"]?.order ?? 0;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return aKey.localeCompare(bKey);
+    });
+
+  // Group fields by x-ui.group
+  const groups = new Map<string, [string, JsonSchemaProperty][]>();
+  for (const entry of sortedEntries) {
+    const group = entry[1]["x-ui"]?.group ?? "";
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group)!.push(entry);
+  }
+
+  // Render grouped fields
+  let fields = "";
+  for (const [group, entries] of groups) {
+    if (group) {
+      fields += `<div class="field-group"><div class="field-group-label">${esc(formatStep(group))}</div>`;
+    }
+    for (const [k, p] of entries) {
+      fields += renderField(fieldId, k, p);
+    }
+    if (group) fields += `</div>`;
+  }
 
   // Steps with only an enabled toggle and no extra fields
   if (!fields) {
@@ -103,6 +134,18 @@ function renderField(parentId: string, key: string, prop: JsonSchemaProperty): s
       </div>`;
   }
 
+  // Number (float) with min/max -> range slider
+  if (prop.type === "number" && prop.minimum != null && prop.maximum != null) {
+    const val = prop.default ?? prop.minimum;
+    const step = prop.multipleOf ?? 0.1;
+    return `
+      <div class="form-field">
+        <label for="${id}">${esc(label)} <span class="muted range-val">${val}</span></label>
+        <input type="range" id="${id}" data-key="${esc(key)}" data-type="number"
+               min="${prop.minimum}" max="${prop.maximum}" step="${step}" value="${val}">
+      </div>`;
+  }
+
   // Fallback: text input
   const val = prop.default != null ? String(prop.default) : "";
   return `
@@ -131,6 +174,7 @@ export function collectParams(container: HTMLElement): Record<string, Record<str
       if (el instanceof HTMLInputElement) {
         if (dtype === "boolean") params[key] = el.checked;
         else if (dtype === "integer") params[key] = parseInt(el.value, 10);
+        else if (dtype === "number") params[key] = parseFloat(el.value);
         else params[key] = el.value;
       } else if (el instanceof HTMLSelectElement) {
         params[key] = el.value;

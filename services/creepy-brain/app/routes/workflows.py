@@ -138,7 +138,7 @@ async def get_pipeline_schema() -> PipelineSchemaResponse:
                 StepParamSchemaEntry(
                     step_name=step.name,
                     params_field=step.params_field,
-                    json_schema=step.params_schema.model_json_schema(),
+                    json_schema=step.params_schema.ui_schema(),
                 )
             )
     return PipelineSchemaResponse(steps=entries)
