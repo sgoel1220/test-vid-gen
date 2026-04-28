@@ -123,23 +123,22 @@ def _enable_memory_opts(pipe: StableDiffusionXLPipeline) -> None:
 def _load_models() -> None:
     global base_pipe
 
-    with torch.inference_mode():
-        if BASE_MODEL_PATH:
-            log.info("Loading base from local file: %s", BASE_MODEL_PATH)
-            base_pipe = StableDiffusionXLPipeline.from_single_file(
-                BASE_MODEL_PATH,
-                torch_dtype=DTYPE,
-                use_safetensors=True,
-            )
-        else:
-            log.info("Loading base from HuggingFace: %s", BASE_MODEL_ID)
-            base_pipe = StableDiffusionXLPipeline.from_pretrained(
-                BASE_MODEL_ID,
-                torch_dtype=DTYPE,
-                use_safetensors=True,
-                variant="fp16",
-                token=HF_TOKEN,
-            )
+    if BASE_MODEL_PATH:
+        log.info("Loading base from local file: %s", BASE_MODEL_PATH)
+        base_pipe = StableDiffusionXLPipeline.from_single_file(
+            BASE_MODEL_PATH,
+            torch_dtype=DTYPE,
+            use_safetensors=True,
+        )
+    else:
+        log.info("Loading base from HuggingFace: %s", BASE_MODEL_ID)
+        base_pipe = StableDiffusionXLPipeline.from_pretrained(
+            BASE_MODEL_ID,
+            torch_dtype=DTYPE,
+            use_safetensors=True,
+            variant="fp16",
+            token=HF_TOKEN,
+        )
 
     base_pipe.scheduler = _make_scheduler()
     base_pipe = base_pipe.to(DEVICE)
