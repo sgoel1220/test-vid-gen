@@ -11,7 +11,6 @@ Staircase quantization gives a pixelated/quantized aesthetic.
 from __future__ import annotations
 
 import asyncio
-import io
 import struct
 import tempfile
 import uuid
@@ -134,8 +133,8 @@ def _compute_frame_amplitudes(
     return [v / max_val for v in amps]
 
 
-def _render_frame(
-    background: np.ndarray[Any, np.dtype[np.uint8]],
+def _render_overlay_frame(
+    video_frame: np.ndarray[Any, np.dtype[np.uint8]],
     coarse_envs: list[float],
     frame_amps: list[float],
     frame_idx: int,
@@ -143,56 +142,55 @@ def _render_frame(
     vid_w: int,
     vid_h: int,
 ) -> np.ndarray[Any, np.dtype[np.uint8]]:
-    """Render one waveform visualization frame.
-
-    Draws full-width symmetric bars centered vertically. Near the playhead,
-    applies a cross/diamond burst whose height scales with per-frame audio
-    amplitude. Staircase quantization gives a pixelated aesthetic.
-    """
-    frame: np.ndarray[Any, np.dtype[np.uint8]] = background.copy()
+    """Composite a semi-transparent waveform line onto a video frame."""
     center_y = vid_h // 2
-    progress = frame_idx / max(1, total_frames - 1)
-    playhead_x = int(progress * vid_w)
+    playhead_x = int(frame_idx / max(total_frames - 1, 1) * vid_w)
+    current_amp = frame_amps[min(frame_idx, len(frame_amps) - 1)]
+    max_disp = vid_h * _WAVE_AMP_MAX
 
-    amp_idx = min(frame_idx, len(frame_amps) - 1)
-    current_amp = frame_amps[amp_idx]
+    # Build y-values for upper and lower waveform edges
+    upper_pts: list[tuple[int, int]] = []
+    lower_pts: list[tuple[int, int]] = []
+    for x in range(vid_w):
+        # Envelope height from coarse envelope
+        env_idx = int(x / vid_w * len(coarse_envs))
+        env_idx = min(env_idx, len(coarse_envs) - 1)
+        env_val = coarse_envs[env_idx]
 
-    n_coarse = len(coarse_envs)
-    stride = _BAR_W + _BAR_GAP
-
-    x = 0
-    while x + _BAR_W <= vid_w:
-        # Background waveform height from coarse envelope
-        coarse_idx = min(n_coarse - 1, int((x / vid_w) * n_coarse))
-        bg_env = coarse_envs[coarse_idx]
-        bg_h = _QUIET_H_MIN + int(bg_env * (_QUIET_H_MAX - _QUIET_H_MIN))
-
-        # Cross/diamond burst near the playhead
-        dist_bars = abs(x - playhead_x) / stride
-        if dist_bars < _BURST_BARS:
-            # Staircase quantization: creates stepped/pixelated diamond shape
-            raw_scale = 1.0 - dist_bars / _BURST_BARS
-            scale = round(raw_scale * _BURST_STEPS) / _BURST_STEPS
-            burst_h = int(scale * _BURST_H_MAX * current_amp)
-            bar_h = max(bg_h, burst_h)
+        # Playhead proximity boost
+        dx = abs(x - playhead_x)
+        if dx < _PLAYHEAD_FALLOFF_PX:
+            t = 1.0 - dx / _PLAYHEAD_FALLOFF_PX
+            amp = env_val + t * (current_amp * _PLAYHEAD_BOOST - env_val)
         else:
-            bar_h = bg_h
+            amp = env_val
 
-        # Drop shadow (drawn first, shifted down)
-        sy0 = max(0, center_y - bar_h + _SHADOW_OFFSET)
-        sy1 = min(vid_h, center_y + bar_h + _SHADOW_OFFSET)
-        if sy1 > sy0:
-            frame[sy0:sy1, x : x + _BAR_W] = _SHADOW_COLOR
+        disp = int(amp * max_disp)
+        upper_pts.append((x, center_y - disp))
+        lower_pts.append((x, center_y + disp))
 
-        # Bar (symmetric above and below center)
-        y0 = max(0, center_y - bar_h)
-        y1 = min(vid_h, center_y + bar_h)
-        if y1 > y0:
-            frame[y0:y1, x : x + _BAR_W] = _BAR_COLOR
+    # Create RGBA overlay for alpha compositing
+    base = Image.fromarray(video_frame, mode="RGB").convert("RGBA")
+    overlay = Image.new("RGBA", (vid_w, vid_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
 
-        x += stride
+    # Draw glow (wider, lower alpha)
+    glow_alpha = int(_GLOW_ALPHA * 255)
+    glow_color = (*_GLOW_COLOR, glow_alpha)
+    if len(upper_pts) >= 2:
+        draw.line(upper_pts, fill=glow_color, width=_LINE_WIDTH + _GLOW_RADIUS * 2)
+        draw.line(lower_pts, fill=glow_color, width=_LINE_WIDTH + _GLOW_RADIUS * 2)
 
-    return frame
+    # Draw main line
+    line_alpha = int(_LINE_ALPHA * 255)
+    line_color = (*_LINE_COLOR, line_alpha)
+    if len(upper_pts) >= 2:
+        draw.line(upper_pts, fill=line_color, width=_LINE_WIDTH)
+        draw.line(lower_pts, fill=line_color, width=_LINE_WIDTH)
+
+    # Composite and convert back to RGB numpy array
+    composited = Image.alpha_composite(base, overlay)
+    return np.array(composited.convert("RGB"), dtype=np.uint8)
 
 
 async def execute(
@@ -277,23 +275,33 @@ async def execute(
         coarse_envs = _compute_envelope(samples, _COARSE_STEPS)
         frame_amps = _compute_frame_amplitudes(samples, fps)
 
-        # Pre-filled background (dark navy, reused every frame)
-        background: np.ndarray[Any, np.dtype[np.uint8]] = np.zeros(
-            (vid_h, vid_w, 3), dtype=np.uint8
-        )
-        background[:] = _BG_COLOR
-
         duration_sec = stitch_out.total_duration_sec
         total_frames = max(1, int(duration_sec * fps))
 
         log.info("waveform_overlay: rendering %d frames", total_frames)
 
-        # Launch ffmpeg: PNG frames on stdin + audio file → output video
+        # -- video reader: decode input video to raw RGB24 frames --
+        reader_cmd = [
+            "ffmpeg", "-y",
+            "-i", str(video_in),
+            "-f", "rawvideo",
+            "-pix_fmt", "rgb24",
+            "-v", "error",
+            "pipe:1",
+        ]
+        reader_proc = await asyncio.create_subprocess_exec(
+            *reader_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        frame_bytes = vid_w * vid_h * 3
+
         ffmpeg_cmd = [
             "ffmpeg", "-y",
-            "-f", "image2pipe",
-            "-framerate", f"{fps:.6f}",
-            "-vcodec", "png",
+            "-f", "rawvideo",
+            "-pix_fmt", "rgb24",
+            "-s", f"{vid_w}x{vid_h}",
+            "-r", f"{fps:.6f}",
             "-i", "pipe:0",
             "-i", str(audio_in),
             "-c:v", "libx264",
@@ -301,31 +309,34 @@ async def execute(
             "-c:a", "copy",
             str(video_out),
         ]
-
-        proc = await asyncio.create_subprocess_exec(
+        writer_proc = await asyncio.create_subprocess_exec(
             *ffmpeg_cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
 
-        assert proc.stdin is not None
+        assert reader_proc.stdout is not None
+        assert writer_proc.stdin is not None
 
-        # Render and stream frames to ffmpeg
         for frame_idx in range(total_frames):
-            frame_arr = _render_frame(
-                background, coarse_envs, frame_amps,
+            raw = await reader_proc.stdout.readexactly(frame_bytes)
+            video_frame = np.frombuffer(raw, dtype=np.uint8).reshape(
+                (vid_h, vid_w, 3)
+            )
+            overlay = _render_overlay_frame(
+                video_frame, coarse_envs, frame_amps,
                 frame_idx, total_frames, vid_w, vid_h,
             )
-            pil_frame = Image.fromarray(frame_arr, mode="RGB")
-            buf = io.BytesIO()
-            pil_frame.save(buf, format="PNG")
-            proc.stdin.write(buf.getvalue())
+            writer_proc.stdin.write(overlay.tobytes())
 
-        proc.stdin.close()
-        _, stderr_bytes = await proc.communicate()
+        writer_proc.stdin.close()
+        _, stderr_bytes = await writer_proc.communicate()
 
-        if proc.returncode != 0:
+        # Clean up reader
+        await reader_proc.communicate()
+
+        if writer_proc.returncode != 0:
             stderr = stderr_bytes.decode("utf-8", errors="replace")
             raise RuntimeError(f"ffmpeg waveform_overlay failed: {stderr}")
 
