@@ -60,21 +60,27 @@ def _load() -> StableDiffusionXLPipeline:
     if _pipe is not None:
         return _pipe
 
-    logger.info("Loading SDXL 1.0 base + fp16 VAE...")
+    t_start = time.perf_counter()
 
-    # Load VAE separately (fp16-safe; downloads from HF on first run)
+    def _elapsed() -> str:
+        return f"{time.perf_counter() - t_start:.1f}s"
+
+    logger.info("[1/7] Loading VAE (madebyollin/sdxl-vae-fp16-fix)...")
     vae = AutoencoderKL.from_pretrained(
         _VAE_MODEL,
         torch_dtype=torch.float16,
     )
+    logger.info("[1/7] VAE loaded. (%s)", _elapsed())
 
-    # Load base pipeline (downloads from HF on first run)
+    logger.info("[2/7] Loading SDXL 1.0 base pipeline...")
     _pipe = StableDiffusionXLPipeline.from_pretrained(
         _BASE_MODEL,
         vae=vae,
         torch_dtype=torch.float16,
         variant="fp16",
     ).to("cuda")
+    logger.info("[2/7] Base pipeline on CUDA. VRAM: %.2f GB (%s)",
+                torch.cuda.memory_allocated() / 1024**3, _elapsed())
 
     # Download Impressionism LoRA from CivitAI if not already cached
     if not os.path.exists(_IMPRESSIONISM_LORA_PATH):
@@ -82,50 +88,50 @@ def _load() -> StableDiffusionXLPipeline:
             raise RuntimeError(
                 "CIVITAI_TOKEN env var required to download Impressionism LoRA"
             )
-        logger.info("Downloading Impressionism LoRA from CivitAI...")
+        logger.info("[3/7] Downloading Impressionism LoRA from CivitAI...")
         os.makedirs(os.path.dirname(_IMPRESSIONISM_LORA_PATH), exist_ok=True)
         url = f"https://civitai.com/api/download/models/133465?token={_CIVITAI_TOKEN}"
         urllib.request.urlretrieve(url, _IMPRESSIONISM_LORA_PATH)
-        logger.info("Impressionism LoRA saved to %s", _IMPRESSIONISM_LORA_PATH)
+        logger.info("[3/7] Impressionism LoRA downloaded. (%s)", _elapsed())
+    else:
+        logger.info("[3/7] Impressionism LoRA already cached, skipping download.")
 
-    # Load Impressionism style LoRA
-    logger.info("Loading Impressionism LoRA (strength=%.2f)...", _IMPRESSIONISM_STRENGTH)
+    logger.info("[4/7] Loading Impressionism LoRA (strength=%.2f)...", _IMPRESSIONISM_STRENGTH)
     _pipe.load_lora_weights(
         _IMPRESSIONISM_LORA_PATH,
         adapter_name="impressionism",
     )
+    logger.info("[4/7] Impressionism LoRA loaded. (%s)", _elapsed())
 
-    # Load Lightning speed LoRA (downloads from HF on first run)
-    logger.info("Loading SDXL-Lightning 4-step LoRA...")
+    logger.info("[5/7] Loading SDXL-Lightning 4-step LoRA...")
     lightning_path = hf_hub_download(_LIGHTNING_REPO, _LIGHTNING_LORA)
     _pipe.load_lora_weights(
         lightning_path,
         adapter_name="lightning",
     )
+    logger.info("[5/7] Lightning LoRA loaded. (%s)", _elapsed())
 
-    # Set LoRA weights and fuse for performance
+    logger.info("[6/7] Fusing LoRAs (impressionism=%.2f, lightning=1.0)...", _IMPRESSIONISM_STRENGTH)
     _pipe.set_adapters(
         ["impressionism", "lightning"],
         adapter_weights=[_IMPRESSIONISM_STRENGTH, 1.0],
     )
     _pipe.fuse_lora()
-    _pipe.unload_lora_weights()  # Free LoRA memory after fusing
+    _pipe.unload_lora_weights()
+    logger.info("[6/7] LoRAs fused and unloaded. VRAM: %.2f GB (%s)",
+                torch.cuda.memory_allocated() / 1024**3, _elapsed())
 
-    # Scheduler: Euler with sgm_uniform (Lightning-optimal)
+    logger.info("[7/7] Configuring scheduler and finalizing...")
     _pipe.scheduler = EulerDiscreteScheduler.from_config(
         _pipe.scheduler.config,
         timestep_spacing="trailing",
     )
-
-    # Memory optimizations (SDPA is default in PyTorch 2.x + diffusers)
     _pipe.set_progress_bar_config(disable=True)
-
-    # Clear loading overhead
     torch.cuda.empty_cache()
     gc.collect()
 
     vram_gb = torch.cuda.memory_allocated() / 1024**3
-    logger.info("Pipeline ready. VRAM: %.2f GB", vram_gb)
+    logger.info("Pipeline ready. VRAM: %.2f GB — total startup: %s", vram_gb, _elapsed())
 
     return _pipe
 
