@@ -151,6 +151,7 @@ class WorkflowResultSchema(BaseModel):
     run_id: uuid.UUID | None = Field(None, description="TTS run ID")
     final_audio_blob_id: uuid.UUID | None = Field(None, description="Final audio blob ID")
     final_video_blob_id: uuid.UUID | None = Field(None, description="Final video blob ID")
+    subtitle_srt_blob_id: uuid.UUID | None = Field(None, description="SRT subtitle blob ID")
     waveform_video_blob_id: uuid.UUID | None = Field(None, description="Waveform overlay video blob ID")
     music_bed_blob_id: uuid.UUID | None = Field(None, description="Background music bed blob ID")
     total_duration_sec: float | None = Field(None, description="Total audio duration")

@@ -34,6 +34,7 @@ from app.services.workflow_service import (
     get_optional_workflow_id,
     get_scenes_for_workflow,
 )
+from app.text.captions import CaptionChunk, generate_srt
 from app.text.scene_grouping import group_chunks_into_scenes
 from app.workflows.db_helpers import get_session_maker
 from app.workflows.steps.image import SceneImageResult
@@ -52,6 +53,9 @@ class StitchStepOutput(BaseModel):
     final_audio_blob_id: str = Field(description="UUID of the final MP3 blob")
     final_video_blob_id: str | None = Field(
         default=None, description="UUID of the final video blob (if created)"
+    )
+    subtitle_srt_blob_id: str | None = Field(
+        default=None, description="UUID of the SRT subtitle blob (if created)"
     )
     chunk_count: int = Field(ge=0, description="Number of audio chunks stitched")
     total_duration_sec: float = Field(ge=0, description="Total audio duration in seconds")
@@ -91,22 +95,24 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
                 WorkflowBlob.blob_type,
             ).where(
                 WorkflowBlob.workflow_id == workflow_id,
-                WorkflowBlob.blob_type.in_([BlobType.FINAL_AUDIO, BlobType.FINAL_VIDEO]),
+                WorkflowBlob.blob_type.in_([BlobType.FINAL_AUDIO, BlobType.FINAL_VIDEO, BlobType.SUBTITLE_SRT]),
             )
         )
         existing_blobs = {row.blob_type: row.id for row in existing_blobs_result.all()}
 
     existing_audio_id: uuid.UUID | None = existing_blobs.get(BlobType.FINAL_AUDIO)
     existing_video_id: uuid.UUID | None = existing_blobs.get(BlobType.FINAL_VIDEO)
+    existing_srt_id: uuid.UUID | None = existing_blobs.get(BlobType.SUBTITLE_SRT)
 
     # If both exist (or audio exists and no video needed), return early
     needs_video = True  # Runner only calls this step when stitch_params.enabled=True
     if existing_audio_id is not None:
         if not needs_video or existing_video_id is not None:
             log.info(
-                "stitch_final: resuming — final blobs already exist (audio=%s, video=%s)",
+                "stitch_final: resuming — final blobs already exist (audio=%s, video=%s, srt=%s)",
                 existing_audio_id,
                 existing_video_id,
+                existing_srt_id,
             )
             async with session_maker() as session:
                 chunk_data = await get_chunks_for_image_step(session, workflow_id)
@@ -117,6 +123,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
             return StitchStepOutput(
                 final_audio_blob_id=str(existing_audio_id),
                 final_video_blob_id=str(existing_video_id) if existing_video_id else None,
+                subtitle_srt_blob_id=str(existing_srt_id) if existing_srt_id else None,
                 chunk_count=chunk_count,
                 total_duration_sec=total_dur,
             )
@@ -229,9 +236,35 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
 
     log.info("stitch_final: saved final audio blob_id=%s", audio_blob_id)
 
+    # --- 4b. Generate and store SRT captions (skip if already stored from a prior attempt) ---
+    caption_chunks = [
+        CaptionChunk(
+            text=chunk.normalized_text or chunk.text,
+            duration_sec=chunk.duration_sec,
+        )
+        for chunk in chunk_data
+        if chunk.duration_sec is not None and chunk.duration_sec > 0
+    ]
+    srt_blob_id: uuid.UUID | None = existing_srt_id
+    if caption_chunks and existing_srt_id is None:
+        srt_content = generate_srt(caption_chunks)
+        log.info("stitch_final: generated SRT captions (%d bytes)", len(srt_content))
+        async with session_maker() as session:
+            srt_blob = await blob_service.store(
+                session=session,
+                data=srt_content.encode("utf-8"),
+                mime_type="text/plain",
+                blob_type=BlobType.SUBTITLE_SRT,
+                workflow_id=workflow_id,
+            )
+            await session.commit()
+            srt_blob_id = srt_blob.id
+        log.info("stitch_final: saved SRT blob_id=%s", srt_blob_id)
+
     output = StitchStepOutput(
         final_audio_blob_id=str(audio_blob_id),
         final_video_blob_id=None,
+        subtitle_srt_blob_id=str(srt_blob_id) if srt_blob_id is not None else None,
         chunk_count=len(chunk_data),
         total_duration_sec=total_duration_sec,
     )
