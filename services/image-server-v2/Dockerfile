@@ -38,8 +38,7 @@ RUN uv pip install --system --no-cache \
     hf_transfer==0.1.9 \
     fastapi==0.115.6 \
     "uvicorn[standard]==0.32.1" \
-    pydantic==2.10.4 \
-    # xformers dropped — PyTorch 2.5 SDPA is default in diffusers
+    pydantic==2.10.4
 
 RUN mkdir -p /app/hf_cache /app/loras
 
