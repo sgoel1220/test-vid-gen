@@ -119,6 +119,24 @@ def _segment_text(full_text: str) -> list[str]:
     return segments
 
 
+def split_into_sentences(text: str) -> list[str]:
+    """Split *text* into individual sentences, preserving non-verbal cues.
+
+    Uses the same sentence-boundary rules as :func:`chunk_text_by_sentences`:
+    period/exclamation/question-mark boundaries while respecting abbreviations,
+    version numbers, and parenthetical cues such as ``(laughs)``.
+
+    Args:
+        text: Raw or normalised caption text for a single chunk.
+
+    Returns:
+        Ordered list of sentence strings.  Returns ``[]`` for blank input.
+    """
+    if not text or text.isspace():
+        return []
+    return _segment_text(text.strip())
+
+
 def chunk_text_by_sentences(full_text: str, chunk_size: int = 1000) -> list[str]:
     """Chunk *full_text* into TTS-ready pieces respecting sentence boundaries.
 

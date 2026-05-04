@@ -52,8 +52,12 @@ RUN mkdir -p /models /outputs
 
 EXPOSE 8000
 
-# ── Base model: Juggernaut XL Ragnarok (downloaded at first boot) ─────────
-ENV BASE_CIVITAI_ID=1759168
+# ── Model config ──────────────────────────────────────────────────────────
+# Default: load SDXL base from HuggingFace (no downloads needed, uses HF cache)
+# Pin a specific commit for reproducibility (override at deploy time):
+#   -e BASE_MODEL_REVISION=<git-sha>
+# To use CivitAI instead, set BASE_CIVITAI_ID=<version_id> at runtime
+# ENV BASE_CIVITAI_ID=1759168
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=600s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/health >/dev/null || exit 1

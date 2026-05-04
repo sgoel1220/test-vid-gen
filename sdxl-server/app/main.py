@@ -35,6 +35,8 @@ DTYPE = torch.float16
 BASE_MODEL_PATH = os.getenv("BASE_MODEL_PATH")
 # HuggingFace fallback (only used if BASE_MODEL_PATH is not set)
 BASE_MODEL_ID = os.getenv("BASE_MODEL_ID", "stabilityai/stable-diffusion-xl-base-1.0")
+# Pin a specific HF commit for reproducibility; override at deploy time if needed
+BASE_MODEL_REVISION = os.getenv("BASE_MODEL_REVISION", "main")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 # ---------------------------------------------------------------------------
@@ -137,6 +139,7 @@ def _load_models() -> None:
             torch_dtype=DTYPE,
             use_safetensors=True,
             variant="fp16",
+            revision=BASE_MODEL_REVISION,
             token=HF_TOKEN,
         )
 
