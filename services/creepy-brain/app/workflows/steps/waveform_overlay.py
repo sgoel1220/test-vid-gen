@@ -20,7 +20,7 @@ from typing import Any
 
 import numpy as np
 import structlog
-from PIL import Image
+from PIL import Image, ImageDraw
 from sqlalchemy import select
 
 from app.engine import SkippedStepOutput, StepContext
@@ -35,17 +35,15 @@ from app.workflows.steps.stitch import StitchStepOutput
 log = structlog.get_logger(__name__)
 
 # --- Visual constants ---
-_BG_COLOR = (26, 32, 48)          # #1a2030  dark navy background
-_BAR_COLOR = (58, 74, 94)         # #3a4a5e  muted blue-grey bars
-_SHADOW_COLOR = (16, 22, 34)      # slightly darker drop shadow
-_BAR_W = 3                        # bar width in pixels
-_BAR_GAP = 1                      # gap between bars (stride = 4px)
-_QUIET_H_MIN = 2                  # minimum nub height during silence
-_QUIET_H_MAX = 14                 # max background waveform shape height
-_BURST_H_MAX = 60                 # peak burst half-height from center line
-_BURST_BARS = 24                  # bars on each side of playhead that taper
-_BURST_STEPS = 8                  # staircase quantization levels
-_SHADOW_OFFSET = 3                # drop shadow y offset in pixels
+_LINE_COLOR = (255, 255, 255)       # white line
+_LINE_ALPHA = 0.6                   # line opacity
+_GLOW_COLOR = (180, 200, 255)       # subtle blue-white glow
+_GLOW_ALPHA = 0.25
+_GLOW_RADIUS = 3
+_LINE_WIDTH = 2
+_WAVE_AMP_MAX = 0.3                 # max displacement as fraction of frame height
+_PLAYHEAD_BOOST = 1.8               # amplitude multiplier near playhead
+_PLAYHEAD_FALLOFF_PX = 200          # fade distance for playhead boost
 _COARSE_STEPS = 400               # envelope resolution for background shape
 _SAMPLE_RATE = 22050              # audio decoding sample rate (Hz)
 
