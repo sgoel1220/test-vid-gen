@@ -9,7 +9,7 @@ from app.workflows.schemas import EmptyWorkflowInput
 async def _step_one(input: EmptyWorkflowInput, ctx: StepContext) -> dict[str, object]:
     """First step — simulates work and returns a value."""
     await asyncio.sleep(2)
-    return StepOneOutput(message="Step one complete", value=42)
+    return {"message": "Step one complete", "value": 42}
 
 
 async def _step_two(input: EmptyWorkflowInput, ctx: StepContext) -> dict[str, object]:

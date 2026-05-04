@@ -1,11 +1,11 @@
 """waveform_overlay step executor.
 
-Generates a standalone animated waveform visualization video.
+Composites a semi-transparent waveform line overlay onto the stitched video.
 
-Dark navy background, full-width symmetric bars above/below a center
-baseline. A cross/diamond burst at the playhead pulses per word based on
-per-frame audio amplitude. Quiet bars render as tiny nubs (dotted rope).
-Staircase quantization gives a pixelated/quantized aesthetic.
+The waveform reacts to narrator audio amplitude near the playhead: a smooth
+upper/lower line pair tracks the coarse amplitude envelope, with a local boost
+around the current playhead position. Glow and line are alpha-composited
+directly onto the original video frames using rawvideo I/O for efficiency.
 """
 
 from __future__ import annotations
@@ -196,11 +196,11 @@ def _render_overlay_frame(
 async def execute(
     input: WorkflowInputSchema, ctx: StepContext
 ) -> WaveformOverlayStepOutput | SkippedStepOutput:
-    """Generate standalone animated waveform visualization video.
+    """Composite a semi-transparent waveform line overlay onto the stitched video.
 
-    Produces a WAVEFORM_VIDEO blob: dark navy full-frame background with
-    symmetric waveform bars and a cross/diamond burst at the playhead that
-    pulses per word based on audio amplitude.
+    Produces a WAVEFORM_VIDEO blob: the original video frames with a
+    waveform line composited on top. The waveform reacts to narrator audio
+    amplitude near the playhead position.
 
     Args:
         input: Workflow input schema.
