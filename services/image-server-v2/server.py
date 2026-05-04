@@ -68,14 +68,13 @@ def _load() -> StableDiffusionXLPipeline:
         torch_dtype=torch.float16,
     )
 
-    # Load base pipeline on CPU first — move to CUDA only after LoRA fusion
-    # to avoid VRAM spike (base 7 GB + two LoRA adapters overhead).
+    # Load base pipeline (downloads from HF on first run)
     _pipe = StableDiffusionXLPipeline.from_pretrained(
         _BASE_MODEL,
         vae=vae,
         torch_dtype=torch.float16,
         variant="fp16",
-    )
+    ).to("cuda")
 
     # Download Impressionism LoRA from CivitAI if not already cached
     if not os.path.exists(_IMPRESSIONISM_LORA_PATH):
@@ -111,9 +110,6 @@ def _load() -> StableDiffusionXLPipeline:
     )
     _pipe.fuse_lora()
     _pipe.unload_lora_weights()  # Free LoRA memory after fusing
-
-    # Move fused pipeline to CUDA in one shot — single peak, no double-load
-    _pipe = _pipe.to("cuda")
 
     # Scheduler: Euler with sgm_uniform (Lightning-optimal)
     _pipe.scheduler = EulerDiscreteScheduler.from_config(
