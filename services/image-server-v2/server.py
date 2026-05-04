@@ -18,6 +18,7 @@ import io
 import logging
 import os
 import time
+import urllib.request
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -45,6 +46,7 @@ _IMPRESSIONISM_LORA_PATH = os.getenv(
     "IMPRESSIONISM_LORA_PATH", "/app/loras/impressionism_sdxl.safetensors"
 )
 _IMPRESSIONISM_STRENGTH = float(os.getenv("IMPRESSIONISM_STRENGTH", "0.8"))
+_CIVITAI_TOKEN = os.getenv("CIVITAI_TOKEN", "")
 
 _pipe: StableDiffusionXLPipeline | None = None
 
@@ -60,21 +62,31 @@ def _load() -> StableDiffusionXLPipeline:
 
     logger.info("Loading SDXL 1.0 base + fp16 VAE...")
 
-    # Load VAE separately (fp16-safe, local only — baked into image)
+    # Load VAE separately (fp16-safe; downloads from HF on first run)
     vae = AutoencoderKL.from_pretrained(
         _VAE_MODEL,
         torch_dtype=torch.float16,
-        local_files_only=True,
     )
 
-    # Load base pipeline (local only — baked into image)
+    # Load base pipeline (downloads from HF on first run)
     _pipe = StableDiffusionXLPipeline.from_pretrained(
         _BASE_MODEL,
         vae=vae,
         torch_dtype=torch.float16,
         variant="fp16",
-        local_files_only=True,
     ).to("cuda")
+
+    # Download Impressionism LoRA from CivitAI if not already cached
+    if not os.path.exists(_IMPRESSIONISM_LORA_PATH):
+        if not _CIVITAI_TOKEN:
+            raise RuntimeError(
+                "CIVITAI_TOKEN env var required to download Impressionism LoRA"
+            )
+        logger.info("Downloading Impressionism LoRA from CivitAI...")
+        os.makedirs(os.path.dirname(_IMPRESSIONISM_LORA_PATH), exist_ok=True)
+        url = f"https://civitai.com/api/download/models/133465?token={_CIVITAI_TOKEN}"
+        urllib.request.urlretrieve(url, _IMPRESSIONISM_LORA_PATH)
+        logger.info("Impressionism LoRA saved to %s", _IMPRESSIONISM_LORA_PATH)
 
     # Load Impressionism style LoRA
     logger.info("Loading Impressionism LoRA (strength=%.2f)...", _IMPRESSIONISM_STRENGTH)
@@ -83,9 +95,9 @@ def _load() -> StableDiffusionXLPipeline:
         adapter_name="impressionism",
     )
 
-    # Load Lightning speed LoRA
+    # Load Lightning speed LoRA (downloads from HF on first run)
     logger.info("Loading SDXL-Lightning 4-step LoRA...")
-    lightning_path = hf_hub_download(_LIGHTNING_REPO, _LIGHTNING_LORA, local_files_only=True)
+    lightning_path = hf_hub_download(_LIGHTNING_REPO, _LIGHTNING_LORA)
     _pipe.load_lora_weights(
         lightning_path,
         adapter_name="lightning",
