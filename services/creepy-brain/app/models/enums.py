@@ -87,6 +87,7 @@ class BlobType(str, Enum):
     MUSIC_AUDIO = "music_audio"
     SFX_AUDIO = "sfx_audio"
     MUSIC_BED = "music_bed"
+    SUBTITLE_SRT = "subtitle_srt"
 
 
 class StoryStatus(str, Enum):
