@@ -9,7 +9,8 @@
 #     -f services/image-server-v2/Dockerfile \
 #     -t ghcr.io/sgoel1220/image-server-v2:main --push .
 
-FROM pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime
+# python:3.11-slim + pip torch (~3.5 GB) vs pytorch/pytorch base (~9 GB)
+FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -27,7 +28,12 @@ ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /app
 
-# Python dependencies
+# PyTorch with bundled CUDA 12.1 runtime (replaces the pytorch/pytorch base image)
+RUN uv pip install --system --no-cache \
+    "torch==2.5.1+cu121" \
+    --index-url https://download.pytorch.org/whl/cu121
+
+# Remaining dependencies
 RUN uv pip install --system --no-cache \
     diffusers==0.37.1 \
     transformers==4.51.3 \
