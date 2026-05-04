@@ -6,9 +6,9 @@ This is the canonical repo instruction file. `CLAUDE.md` is a symlink to this fi
 
 - Keep responses short by default. Expand only when explicitly asked.
 
-## Serana LSP Tools
+## Serena LSP Tools
 
-Use Serana MCP tools for all code navigation and refactoring — never grep/glob for symbols.
+Use Serena MCP tools for all code navigation and refactoring — never grep/glob for symbols.
 
 | Task | Tool |
 |------|------|
@@ -18,7 +18,7 @@ Use Serana MCP tools for all code navigation and refactoring — never grep/glob
 | Overview a file | `mcp__serena__get_symbols_overview` |
 | Search patterns | `mcp__serena__search_for_pattern` |
 
-**Rules:** Always use Serana for refactoring. Use `find_symbol` before editing. Grep misses dynamic references.
+**Rules:** Always use Serena for refactoring. Use `find_symbol` before editing. Grep misses dynamic references.
 
 ## Codex Pair Programming
 
@@ -33,25 +33,12 @@ Claude and Codex work as pair programmers. Use Codex for exploration, review, an
 
 **Don't delegate:** simple single-file reads, questions answerable from current context.
 
-### Invoking Codex (direct bash)
-
 ```bash
-# Resolve companion script (macOS + Linux)
 CODEX_COMPANION=$(find "$HOME/.claude/plugins/cache/openai-codex" -name "codex-companion.mjs" 2>/dev/null | sort -V | tail -1)
-
-# Read-only exploration/review (default)
-node "$CODEX_COMPANION" task "<prompt>"
-
-# Write-capable (only when edits are needed)
-node "$CODEX_COMPANION" task --write "<prompt>"
-
-# Continue prior Codex work
-node "$CODEX_COMPANION" task --resume-last "<follow-up>"
-
-# Background + fetch result
-node "$CODEX_COMPANION" task --background "<prompt>"
-node "$CODEX_COMPANION" status
-node "$CODEX_COMPANION" result <job-id>
+node "$CODEX_COMPANION" task "<prompt>"                   # read-only (default)
+node "$CODEX_COMPANION" task --write "<prompt>"           # write-capable
+node "$CODEX_COMPANION" task --resume-last "<follow-up>"  # continue prior work
+node "$CODEX_COMPANION" task --background "<prompt>"      # background job
 ```
 
 Resolve `$CODEX_COMPANION` fresh each Bash call — never hardcode the path.
@@ -69,7 +56,7 @@ See `docs/PYTHON_STANDARDS.md` for full rules. Summary:
 
 Use `mcp__beads__*` MCP tools directly — never call `bd` via Bash. The `bd` CLI is for you in the terminal.
 
-**Session init (required before any beads operation):** call `mcp__beads__context(workspace_root='.')` once at the start of every session to point beads at the repo's `.beads` database. Without this, beads has no database and all reads/writes fail.
+**Session init (required before any beads operation):** call `mcp__beads__context(workspace_root='.')` once at the start of every session.
 
 | Action | MCP tool |
 |--------|----------|
@@ -79,39 +66,52 @@ Use `mcp__beads__*` MCP tools directly — never call `bd` via Bash. The `bd` CL
 | Claim work | `mcp__beads__claim` |
 | Create issue | `mcp__beads__create` |
 | Update issue | `mcp__beads__update` |
+| Add dependency | `mcp__beads__dep` |
 | Close issue | `mcp__beads__close` |
 
-**Context efficiency rules — always pass these to avoid loading full content into memory:**
+**Context efficiency — always pass these:**
 - `brief=true` on all list/show calls unless you need full detail
 - `max_description_length=200` on list calls
 - `fields=["id","title","status","priority"]` when you only need a summary
 
 **Never use TodoWrite, TaskCreate, or markdown TODO lists.**
 
-### Keeping beads in sync across clones
+### Epic Planning — "Implement X" requests
 
-Beads uses `.beads/issues.jsonl` as source of truth — it travels with `git push/pull`.
+When the user asks to **implement**, **build**, or **add** anything non-trivial:
 
-**After `git pull` in any clone:** hooks auto-run `bd prime` to resync the local DB. This is handled by `.githooks/post-merge` (installed via `bd hooks install`). If a clone is missing hooks, run `bd hooks install` once.
+1. **Create an epic:**
+   ```python
+   mcp__beads__create(title="<Feature>", issue_type="epic", priority=2, description="Goal and scope.")
+   ```
 
-**Manual resync (if hooks are missing or skipped):**
-```bash
-git pull && bd prime
-```
+2. **Create tasks in parallel** (one per sub-task):
+   ```python
+   mcp__beads__create(title="...", issue_type="task", priority=2, description="...")
+   ```
 
-**New clone setup:**
-```bash
-git clone <repo>
-cd <repo>
-bd hooks install   # installs post-merge + post-checkout hooks
-bd prime           # initial DB hydration from issues.jsonl
-```
+3. **Link tasks to the epic** (`parent-child` = task belongs to epic):
+   ```python
+   mcp__beads__dep(issue_id="<task-id>", depends_on_id="<epic-id>", dep_type="parent-child")
+   ```
 
-**Never edit `.beads/issues.jsonl` directly** — always use `bd`/`mcp__beads__*` tools.
+4. **Link ordering within the epic** (task B blocked by task A):
+   ```python
+   mcp__beads__dep(issue_id="<task-b>", depends_on_id="<task-a>")  # default: blocks
+   ```
+
+5. **Confirm the plan** — show the user the epic + task list before implementing.
+
+**"Complete epic X":** `mcp__beads__show(epic-id)` → enumerate child tasks → respect `blocks` order → fan out independent tasks as parallel `pick-bead` agents.
+
+**Rules:**
+- Every "implement X" request gets an epic — no floating tasks
+- Epic closes only after all child tasks are closed
+- Out-of-scope issues discovered mid-work → new bead immediately, linked to same epic
 
 ### Filing beads during implementation
 
-Any out-of-scope issue you discover MUST become a bead immediately — never silently leave it unfiled.
+Any out-of-scope issue discovered MUST become a bead immediately — never silently leave it unfiled.
 
 ```python
 mcp__beads__create(
@@ -128,19 +128,39 @@ mcp__beads__create(
 2. **Explore** — use Codex (read-only) to understand the area before touching code
 3. **Implement** — simplest solution that works; avoid premature abstractions
 4. **Test** — verify thoroughly
-5. **Adversarial review** — run `/adversarial-review` in the **foreground**; apply **all findings immediately without asking**; re-test. When multiple fix options exist, always pick the one that is best for the long term and most consistent with AGENTS.md rules — never ask.
-6. **Commit** — descriptive message
-7. **Close** — `mcp__beads__close` only after successful push
-8. **Push** — `git push origin main`
+5. **Adversarial review** — run `/adversarial-review` in the **foreground**; apply **all findings immediately without asking**; re-test. When multiple fix options exist, pick the best long-term solution consistent with this file's rules — never ask.
+6. **Commit + push** — follow the Git & Deploy flow below
+7. **Close** — `mcp__beads__close` only after push succeeds
 
 **CRITICAL RULES:**
 - ONLY pick `"open"` beads — never `"in_progress"`
 - NEVER use git worktrees — commit directly on main
 - ALWAYS use Codex to explore before implementing
-- NEVER skip `/adversarial-review` — foreground only, apply **all findings without asking** before pushing
+- NEVER skip `/adversarial-review` — foreground only, apply all findings before pushing
 - NEVER mark done before push succeeds
 - NEVER assume — ask if anything is unclear
-- **Adversarial review findings = fix and continue** — implement every finding using the best long-term solution consistent with AGENTS.md rules; never pause to ask
+
+## Git & Deploy
+
+After **any** completed change (fix, feature, refactor, config, docs, etc.), always do this without being asked:
+
+```bash
+git add <files> && git commit -m "<type>(...): ..."
+git pull --rebase && git push
+cd services/creepy-brain && docker compose up -d --build brain
+docker compose ps brain   # verify container is up
+```
+
+**Build commands:**
+```bash
+# Frontend
+cd services/creepy-brain/static && npx esbuild src/main.ts --bundle --outfile=dist/app.js --format=esm --target=es2020
+
+# Docker services: brain, postgres
+cd services/creepy-brain && docker compose up -d --build brain
+```
+
+Compose file: `services/creepy-brain/docker-compose.yml`.
 
 ## Session Completion
 
@@ -149,42 +169,17 @@ Work is NOT complete until `git push` succeeds.
 1. File beads for any remaining issues
 2. Run quality gates if code changed
 3. Close finished beads; update in-progress ones
-4. Push: `git pull --rebase && git push && git status`
+4. `git pull --rebase && git push && git status`
 5. Verify status shows "up to date with origin"
 
 ## Fix It Right
 
 Always fix issues at the source — never apply runtime hacks, container patches, or workarounds.
 
-- **No container-level hotfixes** — if the image is broken, fix the code, commit, rebuild
-- **No monkey-patching** — fix the import, the schema, the config properly
-- **Think long-term** — every hack is debt that compounds; a proper fix pays off on every future deploy
-- **Broken deploy = broken code** — treat import errors, missing modules, and config drift as bugs to fix in source
-
-## Build & Restart
-
-### Frontend (dashboard)
-```bash
-cd services/creepy-brain/static && npx esbuild src/main.ts --bundle --outfile=dist/app.js --format=esm --target=es2020
-```
-
-### Creepy Brain (Docker)
-```bash
-cd services/creepy-brain && docker compose up -d --build brain
-```
-
-The compose file lives at `services/creepy-brain/docker-compose.yml`. Services: `brain`, `postgres`.
-
-### After Any Change (default flow)
-
-After **any** completed change (fix, feature, refactor, config, docs, etc.), **always** do this without being asked:
-
-1. Commit: `git add <files> && git commit -m "<type>(...): ..."`
-2. Push: `git pull --rebase && git push`
-3. Rebuild + restart: `cd services/creepy-brain && docker compose up -d --build brain`
-4. Verify container is up: `docker compose ps brain`
-
-Do **not** wait for the user to ask — commit, push, and rebuild automatically every time a change is complete.
+- **No container-level hotfixes** — fix the code, commit, rebuild
+- **No monkey-patching** — fix the import, schema, config properly
+- **Think long-term** — every hack compounds; a proper fix pays off on every deploy
+- **Broken deploy = broken code** — treat import errors and config drift as bugs to fix in source
 
 ## Architecture Reference
 
