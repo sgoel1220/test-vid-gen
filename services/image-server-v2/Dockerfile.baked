@@ -78,15 +78,15 @@ EOF
 RUN python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download('ByteDance/SDXL-Lightning', 'sdxl_lightning_4step_lora.safetensors')"
 
 # Layer 4: Impressionism LoRA from CivitAI (~55 MB)
-RUN python3 -c "
+RUN python3 <<'EOF'
 import os, urllib.request
-token = os.environ['CIVITAI_TOKEN']
-url = f'https://civitai.com/api/download/models/133465?token={token}'
-req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-with urllib.request.urlopen(req) as resp, open('/app/loras/impressionism_sdxl.safetensors', 'wb') as f:
+token = os.environ["CIVITAI_TOKEN"]
+url = f"https://civitai.com/api/download/models/133465?token={token}"
+req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+with urllib.request.urlopen(req) as resp, open("/app/loras/impressionism_sdxl.safetensors", "wb") as f:
     f.write(resp.read())
-print('Impressionism LoRA downloaded.')
-"
+print("Impressionism LoRA downloaded.")
+EOF
 
 # ---------------------------------------------------------------------------
 # App
