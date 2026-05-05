@@ -61,18 +61,18 @@ RUN python3 -c "from huggingface_hub import snapshot_download; snapshot_download
 # Layer 2: SDXL base fp16 shards only (~7 GB)
 # Skips: single-file models (sd_xl_base_1.0*.safetensors, ~6.5 GB each),
 #        bundled VAE weights (using madebyollin instead), and .bin duplicates
-RUN python3 -c "
+RUN python3 <<'EOF'
 from huggingface_hub import snapshot_download
 snapshot_download(
-    'stabilityai/stable-diffusion-xl-base-1.0',
+    "stabilityai/stable-diffusion-xl-base-1.0",
     ignore_patterns=[
-        '*.ckpt',
-        '*.bin',
-        'sd_xl_base_1.0*.safetensors',
-        'vae/diffusion_pytorch_model*',
+        "*.ckpt",
+        "*.bin",
+        "sd_xl_base_1.0*.safetensors",
+        "vae/diffusion_pytorch_model*",
     ],
 )
-"
+EOF
 
 # Layer 3: Lightning LoRA (~95 MB)
 RUN python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download('ByteDance/SDXL-Lightning', 'sdxl_lightning_4step_lora.safetensors')"
