@@ -70,7 +70,9 @@ hf_hub_download("ByteDance/SDXL-Lightning", "sdxl_lightning_4step_lora.safetenso
 print("[4/4] Downloading Impressionism LoRA from CivitAI...")
 token = os.environ["CIVITAI_TOKEN"]
 url = f"https://civitai.com/api/download/models/133465?token={token}"
-urllib.request.urlretrieve(url, "/app/loras/impressionism_sdxl.safetensors")
+req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+with urllib.request.urlopen(req) as resp, open("/app/loras/impressionism_sdxl.safetensors", "wb") as f:
+    f.write(resp.read())
 
 print("All models baked in.")
 PYEOF

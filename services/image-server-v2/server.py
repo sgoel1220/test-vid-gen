@@ -94,7 +94,9 @@ def _load() -> StableDiffusionXLPipeline:
             logger.info("[3/7] Downloading Impressionism LoRA from CivitAI...")
             os.makedirs(os.path.dirname(_IMPRESSIONISM_LORA_PATH), exist_ok=True)
             url = f"https://civitai.com/api/download/models/133465?token={_CIVITAI_TOKEN}"
-            urllib.request.urlretrieve(url, _IMPRESSIONISM_LORA_PATH)
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req) as resp, open(_IMPRESSIONISM_LORA_PATH, "wb") as f:
+                f.write(resp.read())
             _has_impressionism = True
             logger.info("[3/7] Impressionism LoRA downloaded. (%s)", _elapsed())
         else:
