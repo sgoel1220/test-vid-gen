@@ -1,11 +1,12 @@
 # Image Server v2 — MODELS BAKED IN
-# All models downloaded at build time from HuggingFace (no CivitAI token needed).
-# No Impressionism LoRA — Lightning 4-step only.
+# All models downloaded at build time. No runtime downloads, no CivitAI token at runtime.
 #
-# Final image: ~12 GB. Cold start: ~30-60s (disk load only, no downloads).
+# Final image: ~8 GB (vs ~12 GB before — skips unused single-file SDXL variants).
+# Cold start: ~30-60s (disk load only).
 #
 # Build (from repo root):
 #   docker buildx build --platform linux/amd64 \
+#     --build-arg CIVITAI_TOKEN=<token> \
 #     -f services/image-server-v2/Dockerfile.baked \
 #     -t ghcr.io/sgoel1220/image-server-v2:baked --push .
 
@@ -48,34 +49,44 @@ RUN uv pip install --system --no-cache \
 RUN mkdir -p /app/hf_cache /app/loras
 
 # ---------------------------------------------------------------------------
-# Bake in models at build time (no runtime downloads)
+# Bake in models — each in its own layer for independent cache invalidation
 # ---------------------------------------------------------------------------
 
 ARG CIVITAI_TOKEN
-RUN test -n "$CIVITAI_TOKEN" || (echo "ERROR: CIVITAI_TOKEN build arg is required for Impressionism LoRA" && exit 1)
+RUN test -n "$CIVITAI_TOKEN" || (echo "ERROR: CIVITAI_TOKEN build arg required" && exit 1)
 
-RUN python3 <<'PYEOF'
+# Layer 1: VAE (~160 MB)
+RUN python3 -c "from huggingface_hub import snapshot_download; snapshot_download('madebyollin/sdxl-vae-fp16-fix')"
+
+# Layer 2: SDXL base fp16 shards only (~7 GB)
+# Skips: single-file models (sd_xl_base_1.0*.safetensors, ~6.5 GB each),
+#        bundled VAE weights (using madebyollin instead), and .bin duplicates
+RUN python3 -c "
+from huggingface_hub import snapshot_download
+snapshot_download(
+    'stabilityai/stable-diffusion-xl-base-1.0',
+    ignore_patterns=[
+        '*.ckpt',
+        '*.bin',
+        'sd_xl_base_1.0*.safetensors',
+        'vae/diffusion_pytorch_model*',
+    ],
+)
+"
+
+# Layer 3: Lightning LoRA (~95 MB)
+RUN python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download('ByteDance/SDXL-Lightning', 'sdxl_lightning_4step_lora.safetensors')"
+
+# Layer 4: Impressionism LoRA from CivitAI (~55 MB)
+RUN python3 -c "
 import os, urllib.request
-from huggingface_hub import snapshot_download, hf_hub_download
-
-print("[1/4] Downloading VAE...")
-snapshot_download("madebyollin/sdxl-vae-fp16-fix")
-
-print("[2/4] Downloading SDXL base (fp16)...")
-snapshot_download("stabilityai/stable-diffusion-xl-base-1.0", ignore_patterns=["*.ckpt"])
-
-print("[3/4] Downloading Lightning LoRA...")
-hf_hub_download("ByteDance/SDXL-Lightning", "sdxl_lightning_4step_lora.safetensors")
-
-print("[4/4] Downloading Impressionism LoRA from CivitAI...")
-token = os.environ["CIVITAI_TOKEN"]
-url = f"https://civitai.com/api/download/models/133465?token={token}"
-req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-with urllib.request.urlopen(req) as resp, open("/app/loras/impressionism_sdxl.safetensors", "wb") as f:
+token = os.environ['CIVITAI_TOKEN']
+url = f'https://civitai.com/api/download/models/133465?token={token}'
+req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+with urllib.request.urlopen(req) as resp, open('/app/loras/impressionism_sdxl.safetensors', 'wb') as f:
     f.write(resp.read())
-
-print("All models baked in.")
-PYEOF
+print('Impressionism LoRA downloaded.')
+"
 
 # ---------------------------------------------------------------------------
 # App
