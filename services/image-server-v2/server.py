@@ -88,25 +88,29 @@ def _load() -> StableDiffusionXLPipeline:
                 torch.cuda.memory_allocated() / 1024**3, _elapsed())
 
     # Download Impressionism LoRA from CivitAI if not already cached
-    if not os.path.exists(_IMPRESSIONISM_LORA_PATH):
-        if not _CIVITAI_TOKEN:
-            raise RuntimeError(
-                "CIVITAI_TOKEN env var required to download Impressionism LoRA"
-            )
-        logger.info("[3/7] Downloading Impressionism LoRA from CivitAI...")
-        os.makedirs(os.path.dirname(_IMPRESSIONISM_LORA_PATH), exist_ok=True)
-        url = f"https://civitai.com/api/download/models/133465?token={_CIVITAI_TOKEN}"
-        urllib.request.urlretrieve(url, _IMPRESSIONISM_LORA_PATH)
-        logger.info("[3/7] Impressionism LoRA downloaded. (%s)", _elapsed())
+    _has_impressionism = os.path.exists(_IMPRESSIONISM_LORA_PATH)
+    if not _has_impressionism:
+        if _CIVITAI_TOKEN:
+            logger.info("[3/7] Downloading Impressionism LoRA from CivitAI...")
+            os.makedirs(os.path.dirname(_IMPRESSIONISM_LORA_PATH), exist_ok=True)
+            url = f"https://civitai.com/api/download/models/133465?token={_CIVITAI_TOKEN}"
+            urllib.request.urlretrieve(url, _IMPRESSIONISM_LORA_PATH)
+            _has_impressionism = True
+            logger.info("[3/7] Impressionism LoRA downloaded. (%s)", _elapsed())
+        else:
+            logger.warning("[3/7] CIVITAI_TOKEN not set — skipping Impressionism LoRA. Running Lightning-only.")
     else:
         logger.info("[3/7] Impressionism LoRA already cached, skipping download.")
 
-    logger.info("[4/7] Loading Impressionism LoRA (strength=%.2f)...", _IMPRESSIONISM_STRENGTH)
-    _pipe.load_lora_weights(
-        _IMPRESSIONISM_LORA_PATH,
-        adapter_name="impressionism",
-    )
-    logger.info("[4/7] Impressionism LoRA loaded. (%s)", _elapsed())
+    if _has_impressionism:
+        logger.info("[4/7] Loading Impressionism LoRA (strength=%.2f)...", _IMPRESSIONISM_STRENGTH)
+        _pipe.load_lora_weights(
+            _IMPRESSIONISM_LORA_PATH,
+            adapter_name="impressionism",
+        )
+        logger.info("[4/7] Impressionism LoRA loaded. (%s)", _elapsed())
+    else:
+        logger.info("[4/7] Skipping Impressionism LoRA.")
 
     logger.info("[5/7] Loading SDXL-Lightning 4-step LoRA...")
     lightning_path = hf_hub_download(_LIGHTNING_REPO, _LIGHTNING_LORA)
@@ -116,11 +120,15 @@ def _load() -> StableDiffusionXLPipeline:
     )
     logger.info("[5/7] Lightning LoRA loaded. (%s)", _elapsed())
 
-    logger.info("[6/7] Fusing LoRAs (impressionism=%.2f, lightning=1.0)...", _IMPRESSIONISM_STRENGTH)
-    _pipe.set_adapters(
-        ["impressionism", "lightning"],
-        adapter_weights=[_IMPRESSIONISM_STRENGTH, 1.0],
-    )
+    if _has_impressionism:
+        logger.info("[6/7] Fusing LoRAs (impressionism=%.2f, lightning=1.0)...", _IMPRESSIONISM_STRENGTH)
+        _pipe.set_adapters(
+            ["impressionism", "lightning"],
+            adapter_weights=[_IMPRESSIONISM_STRENGTH, 1.0],
+        )
+    else:
+        logger.info("[6/7] Fusing Lightning LoRA only...")
+        _pipe.set_adapters(["lightning"], adapter_weights=[1.0])
     _pipe.fuse_lora()
     _pipe.unload_lora_weights()
     logger.info("[6/7] LoRAs fused and unloaded. VRAM: %.2f GB (%s)",

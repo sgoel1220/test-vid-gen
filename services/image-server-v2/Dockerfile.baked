@@ -1,0 +1,77 @@
+# Image Server v2 — MODELS BAKED IN
+# All models downloaded at build time from HuggingFace (no CivitAI token needed).
+# No Impressionism LoRA — Lightning 4-step only.
+#
+# Final image: ~12 GB. Cold start: ~30-60s (disk load only, no downloads).
+#
+# Build (from repo root):
+#   docker buildx build --platform linux/amd64 \
+#     -f services/image-server-v2/Dockerfile.baked \
+#     -t ghcr.io/sgoel1220/image-server-v2:baked --push .
+
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
+ENV HF_HOME=/app/hf_cache
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+WORKDIR /app
+
+# PyTorch with bundled CUDA 12.1 runtime
+RUN uv pip install --system --no-cache \
+    "torch==2.5.1+cu121" \
+    --index-url https://download.pytorch.org/whl/cu121
+
+# Remaining dependencies
+RUN uv pip install --system --no-cache \
+    diffusers==0.37.1 \
+    transformers==4.51.3 \
+    accelerate==1.6.0 \
+    safetensors==0.5.3 \
+    Pillow==11.1.0 \
+    huggingface_hub==0.34.1 \
+    hf_transfer==0.1.9 \
+    fastapi==0.115.6 \
+    "uvicorn[standard]==0.32.1" \
+    pydantic==2.10.4
+
+RUN mkdir -p /app/hf_cache /app/loras
+
+# ---------------------------------------------------------------------------
+# Bake in models at build time (no runtime downloads)
+# ---------------------------------------------------------------------------
+
+RUN python3 -c "\
+from huggingface_hub import snapshot_download, hf_hub_download; \
+print('Downloading VAE...'); \
+snapshot_download('madebyollin/sdxl-vae-fp16-fix'); \
+print('Downloading SDXL base (fp16)...'); \
+snapshot_download('stabilityai/stable-diffusion-xl-base-1.0', ignore_patterns=['*.ckpt']); \
+print('Downloading Lightning LoRA...'); \
+hf_hub_download('ByteDance/SDXL-Lightning', 'sdxl_lightning_4step_lora.safetensors'); \
+print('All models downloaded.'); \
+"
+
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
+
+COPY services/image-server-v2/server.py /app/server.py
+
+EXPOSE 8006
+
+# Shorter start-period since models are already on disk
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8006/ready >/dev/null || exit 1
+
+CMD ["python", "server.py"]
