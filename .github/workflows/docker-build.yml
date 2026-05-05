@@ -54,6 +54,10 @@ jobs:
             dockerfile: services/image-server-v2/Dockerfile
             image: image-server-v2
             source_path: services/image-server-v2/
+          - name: image-server-v2-baked
+            dockerfile: services/image-server-v2/Dockerfile.baked
+            image: image-server-v2-baked
+            source_path: services/image-server-v2/
 
     steps:
       - name: Checkout repository
@@ -83,7 +87,7 @@ jobs:
 
       # music-server installs torch 2.10.0+cu128 (~8 GB); free disk space first.
       - name: Free disk space (large GPU images)
-        if: (matrix.service.name == 'music-server' || matrix.service.name == 'sdxl-server' || matrix.service.name == 'comfyui-serverless' || matrix.service.name == 'image-server-v2') && steps.changes.outputs.needed == 'true'
+        if: (matrix.service.name == 'music-server' || matrix.service.name == 'sdxl-server' || matrix.service.name == 'comfyui-serverless' || matrix.service.name == 'image-server-v2' || matrix.service.name == 'image-server-v2-baked') && steps.changes.outputs.needed == 'true'
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: false
@@ -129,7 +133,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            ${{ (matrix.service.name == 'comfyui-serverless' || matrix.service.name == 'image-server-v2') && format('CIVITAI_TOKEN={0}', secrets.CIVITAI_TOKEN) || '' }}
+            ${{ (matrix.service.name == 'comfyui-serverless' || matrix.service.name == 'image-server-v2' || matrix.service.name == 'image-server-v2-baked') && format('CIVITAI_TOKEN={0}', secrets.CIVITAI_TOKEN) || '' }}
           # All GPU services use registry cache: combined layers exceed GHA's 10 GB
           # repo limit, and shared pytorch base layers are deduplicated in GHCR.
           # creepy-brain is CPU-only (~500 MB) so GHA cache is fine there.

@@ -51,16 +51,29 @@ RUN mkdir -p /app/hf_cache /app/loras
 # Bake in models at build time (no runtime downloads)
 # ---------------------------------------------------------------------------
 
-RUN python3 -c "\
-from huggingface_hub import snapshot_download, hf_hub_download; \
-print('Downloading VAE...'); \
-snapshot_download('madebyollin/sdxl-vae-fp16-fix'); \
-print('Downloading SDXL base (fp16)...'); \
-snapshot_download('stabilityai/stable-diffusion-xl-base-1.0', ignore_patterns=['*.ckpt']); \
-print('Downloading Lightning LoRA...'); \
-hf_hub_download('ByteDance/SDXL-Lightning', 'sdxl_lightning_4step_lora.safetensors'); \
-print('All models downloaded.'); \
-"
+ARG CIVITAI_TOKEN
+RUN test -n "$CIVITAI_TOKEN" || (echo "ERROR: CIVITAI_TOKEN build arg is required for Impressionism LoRA" && exit 1)
+
+RUN python3 <<'PYEOF'
+import os, urllib.request
+from huggingface_hub import snapshot_download, hf_hub_download
+
+print("[1/4] Downloading VAE...")
+snapshot_download("madebyollin/sdxl-vae-fp16-fix")
+
+print("[2/4] Downloading SDXL base (fp16)...")
+snapshot_download("stabilityai/stable-diffusion-xl-base-1.0", ignore_patterns=["*.ckpt"])
+
+print("[3/4] Downloading Lightning LoRA...")
+hf_hub_download("ByteDance/SDXL-Lightning", "sdxl_lightning_4step_lora.safetensors")
+
+print("[4/4] Downloading Impressionism LoRA from CivitAI...")
+token = os.environ["CIVITAI_TOKEN"]
+url = f"https://civitai.com/api/download/models/133465?token={token}"
+urllib.request.urlretrieve(url, "/app/loras/impressionism_sdxl.safetensors")
+
+print("All models baked in.")
+PYEOF
 
 # ---------------------------------------------------------------------------
 # App
