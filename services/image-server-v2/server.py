@@ -218,7 +218,11 @@ def ready() -> ReadyResponse:
     raise HTTPException(status_code=503, detail="Model loading")
 
 
-@app.post("/generate", response_class=Response)
+@app.post(
+    "/generate",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}}, "description": "Generated PNG image"}},
+)
 def generate(request: GenerateRequest) -> Response:
     """Generate an impressionist painting and return it as PNG bytes."""
     pipe = _load()
