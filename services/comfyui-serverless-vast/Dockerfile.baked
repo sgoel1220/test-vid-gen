@@ -1,0 +1,115 @@
+# ComfyUI Horror-Painting Server — MODELS BAKED IN
+# AlbedoBase XL v3.1 + 5 LoRAs, 34-step dpmpp_2m/karras
+# For Vast.ai Serverless deployment via PyWorker.
+#
+# Uses vastai/base-image for layer caching — Vast.ai hosts pre-cache these
+# layers, so only model + app layers need downloading on cold start.
+#
+# Models stored in /models/ (NOT /opt/workspace-internal/) to avoid
+# duplication when the base image copies workspace-internal to /workspace.
+# ComfyUI reads models via symlinks.
+#
+# Build (from repo root):
+#   docker buildx build --platform linux/amd64 \
+#     --build-arg CIVITAI_TOKEN=<token> \
+#     -f services/comfyui-serverless-vast/Dockerfile.baked \
+#     -t ghcr.io/sgoel1220/comfyui-serverless-vast:baked --push .
+
+FROM vastai/base-image:cuda-12.1.1-auto
+
+# ---------------------------------------------------------------------------
+# Python deps — install into the base image's venv
+# ---------------------------------------------------------------------------
+
+# ComfyUI from source
+RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git /app/ComfyUI
+
+RUN . /venv/main/bin/activate && \
+    pip install --no-cache-dir \
+        torch==2.5.1 torchvision==0.20.1 \
+        --index-url https://download.pytorch.org/whl/cu121
+
+RUN . /venv/main/bin/activate && \
+    pip install --no-cache-dir -r /app/ComfyUI/requirements.txt
+
+# FastAPI server + PyWorker
+RUN . /venv/main/bin/activate && \
+    pip install --no-cache-dir \
+        fastapi==0.115.6 \
+        "uvicorn[standard]==0.32.1" \
+        pydantic==2.10.4 \
+        httpx==0.28.1 \
+        "vastai-sdk>=0.3.0"
+
+# ---------------------------------------------------------------------------
+# Model storage — /models/ to avoid workspace-internal duplication
+# Symlinked into ComfyUI's expected paths
+# ---------------------------------------------------------------------------
+
+RUN mkdir -p /models/checkpoints /models/loras \
+             /app/ComfyUI/models/checkpoints /app/ComfyUI/models/loras \
+             /app/ComfyUI/output /var/log/portal
+
+ARG CIVITAI_TOKEN
+RUN test -n "$CIVITAI_TOKEN" || (echo "ERROR: CIVITAI_TOKEN build arg required" && exit 1)
+
+# Layer 1: AlbedoBase XL v3.1 checkpoint (~6.5 GB)
+RUN wget -q --show-progress -O /models/checkpoints/albedobase_xl_v31.safetensors \
+    "https://civitai.com/api/download/models/281176?token=${CIVITAI_TOKEN}" \
+    && echo "Checkpoint downloaded." \
+    && ln -sf /models/checkpoints/albedobase_xl_v31.safetensors \
+              /app/ComfyUI/models/checkpoints/albedobase_xl_v31.safetensors
+
+# Layer 2: Detail Tweaker XL LoRA (~370 MB)
+RUN wget -q --show-progress -O /models/loras/detail_tweaker_xl.safetensors \
+    "https://civitai.com/api/download/models/135867?token=${CIVITAI_TOKEN}" \
+    && echo "Detail Tweaker XL downloaded."
+
+# Layer 3: xl_more_art-full LoRA (~370 MB)
+RUN wget -q --show-progress -O /models/loras/xl_more_art_full.safetensors \
+    "https://civitai.com/api/download/models/152309?token=${CIVITAI_TOKEN}" \
+    && echo "xl_more_art-full downloaded."
+
+# Layer 4: Midjourney Mimic LoRA (~370 MB)
+RUN wget -q --show-progress -O /models/loras/midjourney_mimic.safetensors \
+    "https://civitai.com/api/download/models/283697?token=${CIVITAI_TOKEN}" \
+    && echo "Midjourney Mimic downloaded."
+
+# Layer 5: Impressionism LoRA (~55 MB)
+RUN wget -q --show-progress -O /models/loras/impressionism_sdxl.safetensors \
+    "https://civitai.com/api/download/models/323025?token=${CIVITAI_TOKEN}" \
+    && echo "Impressionism LoRA downloaded."
+
+# Layer 6: Andreas Achenbach LoRA (~55 MB)
+RUN wget -q --show-progress -O /models/loras/andreas_achenbach_sdxl.safetensors \
+    "https://civitai.com/api/download/models/510042?token=${CIVITAI_TOKEN}" \
+    && echo "Andreas Achenbach LoRA downloaded."
+
+# Symlink all LoRAs into ComfyUI's expected path
+RUN for f in /models/loras/*.safetensors; do \
+        ln -sf "$f" "/app/ComfyUI/models/loras/$(basename "$f")"; \
+    done
+
+# ---------------------------------------------------------------------------
+# App files
+# ---------------------------------------------------------------------------
+
+COPY services/comfyui-serverless-vast/workflow_api.json /app/workflow_api.json
+COPY services/comfyui-serverless-vast/server.py /app/server.py
+COPY services/comfyui-serverless-vast/worker.py /app/worker.py
+COPY services/comfyui-serverless-vast/start.sh /app/start.sh
+
+RUN chmod +x /app/start.sh
+
+# ---------------------------------------------------------------------------
+# Serverless overrides — bypass base image's supervisor entrypoint
+# PyWorker must be PID 1 (foreground) for Vast.ai serverless
+# ---------------------------------------------------------------------------
+
+EXPOSE 8006
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8006/ready >/dev/null || exit 1
+
+ENTRYPOINT []
+CMD ["/app/start.sh"]

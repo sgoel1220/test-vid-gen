@@ -1,0 +1,145 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "albedobase_xl_v31.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "2": {
+    "inputs": {
+      "lora_name": "detail_tweaker_xl.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": ["1", 0],
+      "clip": ["1", 1]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Detail Tweaker XL (1.0)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "lora_name": "xl_more_art_full.safetensors",
+      "strength_model": 0.7,
+      "strength_clip": 0.7,
+      "model": ["2", 0],
+      "clip": ["2", 1]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "xl_more_art-full (0.7)"
+    }
+  },
+  "4": {
+    "inputs": {
+      "lora_name": "midjourney_mimic.safetensors",
+      "strength_model": 0.6,
+      "strength_clip": 0.6,
+      "model": ["3", 0],
+      "clip": ["3", 1]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Midjourney Mimic (0.6)"
+    }
+  },
+  "5": {
+    "inputs": {
+      "lora_name": "impressionism_sdxl.safetensors",
+      "strength_model": 0.4,
+      "strength_clip": 0.4,
+      "model": ["4", 0],
+      "clip": ["4", 1]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Impressionism (0.4)"
+    }
+  },
+  "6": {
+    "inputs": {
+      "lora_name": "andreas_achenbach_sdxl.safetensors",
+      "strength_model": 0.4,
+      "strength_clip": 0.4,
+      "model": ["5", 0],
+      "clip": ["5", 1]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Andreas Achenbach (0.4)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": "cinematic haunted manor hallway, dusty portraits on walls, single candle flickering, long shadows, loose brushstrokes, impasto texture, vibring color, style of Andreas Achenbach, monet, oil painting",
+      "clip": ["6", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Positive Prompt"
+    }
+  },
+  "8": {
+    "inputs": {
+      "text": "deformed, ng_deepnegative_v1_75t, (deformed, distorted, disfigured:1.5), (mutated hands and fingers:1.5), monochrome background, furry, loli, poorly drawn, bad anatomy, wrong anatomy, extra limbs, missing limb, floating limbs, missing fingers, elongated hands, disconnected limbs, mutation, mutated, ugly, disgusting, blurry, blurry eyes, background characters, muscular, smooth, clean, minimalist, sleek, modern, photorealistic, sharp details, hyperdetailed, fine details, smooth rendering, digital art",
+      "clip": ["6", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Negative Prompt"
+    }
+  },
+  "9": {
+    "inputs": {
+      "width": 1216,
+      "height": 832,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "10": {
+    "inputs": {
+      "seed": 722834740204251,
+      "steps": 34,
+      "cfg": 2,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 1,
+      "model": ["6", 0],
+      "positive": ["7", 0],
+      "negative": ["8", 0],
+      "latent_image": ["9", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "11": {
+    "inputs": {
+      "samples": ["10", 0],
+      "vae": ["1", 2]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "12": {
+    "inputs": {
+      "filename_prefix": "output",
+      "images": ["11", 0]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}
