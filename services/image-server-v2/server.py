@@ -340,43 +340,37 @@ def debug_info() -> dict:
     }
 
     if torch.cuda.is_available():
-        try:
-            props = torch.cuda.get_device_properties(0)
-            info["gpu"] = {
-                "name": torch.cuda.get_device_name(0),
-                "vram_allocated_gb": round(torch.cuda.memory_allocated() / 1024**3, 3),
-                "vram_reserved_gb": round(torch.cuda.memory_reserved() / 1024**3, 3),
-                "vram_total_gb": round(props.total_memory / 1024**3, 2),
-                "max_vram_allocated_gb": round(torch.cuda.max_memory_allocated() / 1024**3, 3),
-            }
-        except Exception as exc:
-            info["gpu"] = {"error": str(exc)}
+        props = torch.cuda.get_device_properties(0)
+        info["gpu"] = {
+            "name": torch.cuda.get_device_name(0),
+            "vram_allocated_gb": round(torch.cuda.memory_allocated() / 1024**3, 3),
+            "vram_reserved_gb": round(torch.cuda.memory_reserved() / 1024**3, 3),
+            "vram_total_gb": round(props.total_memory / 1024**3, 2),
+            "max_vram_allocated_gb": round(torch.cuda.max_memory_allocated() / 1024**3, 3),
+        }
 
     if _pipe is not None:
-        try:
-            sched_cfg = dict(_pipe.scheduler.config) if hasattr(_pipe.scheduler, "config") else {}
-            info["scheduler"] = {
-                "type": type(_pipe.scheduler).__name__,
-                "timestep_spacing": sched_cfg.get("timestep_spacing"),
-                "num_train_timesteps": sched_cfg.get("num_train_timesteps"),
+        sched_cfg = dict(_pipe.scheduler.config) if hasattr(_pipe.scheduler, "config") else {}
+        info["scheduler"] = {
+            "type": type(_pipe.scheduler).__name__,
+            "timestep_spacing": sched_cfg.get("timestep_spacing"),
+            "num_train_timesteps": sched_cfg.get("num_train_timesteps"),
+        }
+        info["dtype"] = str(_pipe.dtype)
+        info["lora"] = {
+            "impressionism_path": _IMPRESSIONISM_LORA_PATH,
+            "impressionism_exists": os.path.exists(_IMPRESSIONISM_LORA_PATH),
+            "impressionism_strength": _IMPRESSIONISM_STRENGTH,
+            "lightning_repo": _LIGHTNING_REPO,
+            "lightning_file": _LIGHTNING_LORA,
+        }
+        if hasattr(_pipe, "unet"):
+            unet = _pipe.unet
+            info["unet"] = {
+                "dtype": str(unet.dtype),
+                "num_parameters_M": round(sum(p.numel() for p in unet.parameters()) / 1e6, 1),
+                "device": str(next(unet.parameters()).device),
             }
-            info["dtype"] = str(_pipe.dtype)
-            info["lora"] = {
-                "impressionism_path": _IMPRESSIONISM_LORA_PATH,
-                "impressionism_exists": os.path.exists(_IMPRESSIONISM_LORA_PATH),
-                "impressionism_strength": _IMPRESSIONISM_STRENGTH,
-                "lightning_repo": _LIGHTNING_REPO,
-                "lightning_file": _LIGHTNING_LORA,
-            }
-            if hasattr(_pipe, "unet"):
-                unet = _pipe.unet
-                info["unet"] = {
-                    "dtype": str(unet.dtype),
-                    "num_parameters_M": round(sum(p.numel() for p in unet.parameters()) / 1e6, 1),
-                    "device": str(next(unet.parameters()).device),
-                }
-        except Exception as exc:
-            info["pipeline_error"] = str(exc)
 
     info["config"] = {
         "impressionism_strength": _IMPRESSIONISM_STRENGTH,
