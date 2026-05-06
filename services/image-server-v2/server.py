@@ -208,6 +208,25 @@ class GenerateRequest(BaseModel):
     seed: int | None = Field(None, ge=0)
 
 
+
+class ConfigResponse(BaseModel):
+    impressionism_strength: float
+    default_steps: int
+    default_guidance_scale: float
+    default_width: int
+    default_height: int
+    default_negative_prompt: str
+
+
+class ConfigUpdate(BaseModel):
+    impressionism_strength: float | None = Field(None, ge=0.0, le=1.0, description="Requires /reload to take effect.")
+    default_steps: int | None = Field(None, ge=1, le=8)
+    default_guidance_scale: float | None = Field(None, ge=0.0, le=5.0)
+    default_width: int | None = Field(None, ge=512, le=1536)
+    default_height: int | None = Field(None, ge=512, le=1536)
+    default_negative_prompt: str | None = None
+
+
 class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
@@ -236,6 +255,114 @@ def ready() -> ReadyResponse:
     if _pipe is not None:
         return ReadyResponse(status="ready")
     raise HTTPException(status_code=503, detail="Model loading")
+
+
+@app.get("/config")
+def get_config() -> ConfigResponse:
+    """Return current tunable defaults."""
+    return ConfigResponse(
+        impressionism_strength=_IMPRESSIONISM_STRENGTH,
+        default_steps=_DEFAULT_STEPS,
+        default_guidance_scale=_DEFAULT_GUIDANCE_SCALE,
+        default_width=_DEFAULT_WIDTH,
+        default_height=_DEFAULT_HEIGHT,
+        default_negative_prompt=_DEFAULT_NEGATIVE_PROMPT,
+    )
+
+
+@app.post("/config")
+def update_config(update: ConfigUpdate) -> ConfigResponse:
+    """Update tunable defaults at runtime. Changes to impressionism_strength require POST /reload."""
+    global _IMPRESSIONISM_STRENGTH, _DEFAULT_STEPS, _DEFAULT_GUIDANCE_SCALE
+    global _DEFAULT_WIDTH, _DEFAULT_HEIGHT, _DEFAULT_NEGATIVE_PROMPT
+
+    if update.impressionism_strength is not None:
+        _IMPRESSIONISM_STRENGTH = update.impressionism_strength
+        logger.info("Updated impressionism_strength=%.2f (POST /reload to apply)", _IMPRESSIONISM_STRENGTH)
+    if update.default_steps is not None:
+        _DEFAULT_STEPS = update.default_steps
+    if update.default_guidance_scale is not None:
+        _DEFAULT_GUIDANCE_SCALE = update.default_guidance_scale
+    if update.default_width is not None:
+        _DEFAULT_WIDTH = update.default_width
+    if update.default_height is not None:
+        _DEFAULT_HEIGHT = update.default_height
+    if update.default_negative_prompt is not None:
+        _DEFAULT_NEGATIVE_PROMPT = update.default_negative_prompt
+
+    logger.info("Config updated: steps=%d cfg=%.1f size=%dx%d",
+                _DEFAULT_STEPS, _DEFAULT_GUIDANCE_SCALE, _DEFAULT_WIDTH, _DEFAULT_HEIGHT)
+    return get_config()
+
+
+@app.post("/reload")
+def reload_pipeline() -> dict[str, str]:
+    """Re-load and re-fuse LoRAs with current impressionism_strength. Takes ~30s."""
+    global _pipe
+    logger.info("Reloading pipeline with impressionism_strength=%.2f ...", _IMPRESSIONISM_STRENGTH)
+    _pipe = None
+    torch.cuda.empty_cache()
+    gc.collect()
+    _load()
+    return {"status": "reloaded", "impressionism_strength": str(_IMPRESSIONISM_STRENGTH)}
+
+
+@app.get("/debug")
+def debug_info() -> dict:
+    """Detailed pipeline debug info — LoRA state, scheduler, VRAM, torch config."""
+    info: dict = {
+        "cuda_available": torch.cuda.is_available(),
+        "torch_version": torch.__version__,
+        "pipeline_loaded": _pipe is not None,
+    }
+
+    if torch.cuda.is_available():
+        info["gpu"] = {
+            "name": torch.cuda.get_device_name(0),
+            "vram_allocated_gb": round(torch.cuda.memory_allocated() / 1024**3, 3),
+            "vram_reserved_gb": round(torch.cuda.memory_reserved() / 1024**3, 3),
+            "vram_total_gb": round(torch.cuda.get_device_properties(0).total_mem / 1024**3, 2),
+            "max_vram_allocated_gb": round(torch.cuda.max_memory_allocated() / 1024**3, 3),
+        }
+
+    if _pipe is not None:
+        # Scheduler info
+        sched_cfg = dict(_pipe.scheduler.config) if hasattr(_pipe.scheduler, "config") else {}
+        info["scheduler"] = {
+            "type": type(_pipe.scheduler).__name__,
+            "timestep_spacing": sched_cfg.get("timestep_spacing"),
+            "num_train_timesteps": sched_cfg.get("num_train_timesteps"),
+        }
+        # Pipeline dtype
+        info["dtype"] = str(_pipe.dtype)
+        # LoRA info
+        info["lora"] = {
+            "impressionism_path": _IMPRESSIONISM_LORA_PATH,
+            "impressionism_exists": os.path.exists(_IMPRESSIONISM_LORA_PATH),
+            "impressionism_strength": _IMPRESSIONISM_STRENGTH,
+            "lightning_repo": _LIGHTNING_REPO,
+            "lightning_file": _LIGHTNING_LORA,
+            "fused": True,  # always fused after _load()
+        }
+        # UNet info
+        if hasattr(_pipe, "unet"):
+            unet = _pipe.unet
+            info["unet"] = {
+                "dtype": str(unet.dtype),
+                "num_parameters_M": round(sum(p.numel() for p in unet.parameters()) / 1e6, 1),
+                "device": str(next(unet.parameters()).device),
+            }
+
+    info["config"] = {
+        "impressionism_strength": _IMPRESSIONISM_STRENGTH,
+        "default_steps": _DEFAULT_STEPS,
+        "default_guidance_scale": _DEFAULT_GUIDANCE_SCALE,
+        "default_width": _DEFAULT_WIDTH,
+        "default_height": _DEFAULT_HEIGHT,
+        "default_negative_prompt": _DEFAULT_NEGATIVE_PROMPT,
+    }
+
+    return info
 
 
 @app.post(
