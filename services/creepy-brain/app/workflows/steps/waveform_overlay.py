@@ -1,11 +1,11 @@
 """waveform_overlay step executor.
 
-Composites a semi-transparent waveform line overlay onto the stitched video.
+Composites animated vertical equalizer bars onto the stitched video.
 
-The waveform reacts to narrator audio amplitude near the playhead: a smooth
-upper/lower line pair tracks the coarse amplitude envelope, with a local boost
-around the current playhead position. Glow and line are alpha-composited
-directly onto the original video frames using rawvideo I/O for efficiency.
+Each bar represents a frequency band derived from the narrator audio via FFT
+analysis.  Bar heights react to per-frame band energy with temporal smoothing.
+A base-to-tip color gradient and a glow halo are alpha-composited directly
+onto the original video frames using rawvideo I/O for efficiency.
 """
 
 from __future__ import annotations
@@ -33,19 +33,22 @@ from app.workflows.steps.stitch import StitchStepOutput
 
 log = structlog.get_logger(__name__)
 
-# --- Visual constants ---
-_LINE_COLOR = (255, 255, 255)       # white line
-_LINE_ALPHA = 0.6                   # line opacity
-_GLOW_COLOR = (180, 200, 255)       # subtle blue-white glow
-_GLOW_ALPHA = 0.25
-_GLOW_RADIUS = 3
-_LINE_WIDTH = 2
-_WAVE_AMP_MAX = 0.3                 # max displacement as fraction of frame height
-_PLAYHEAD_BOOST = 1.8               # amplitude multiplier near playhead
-_PLAYHEAD_FALLOFF_PX = 200          # fade distance for playhead boost
-_SAMPLE_RATE = 22050              # audio decoding sample rate (Hz)
+# --- Audio analysis constants ---
+_SAMPLE_RATE = 22050                # audio decoding sample rate (Hz)
 _N_BANDS = 32                       # number of FFT frequency bands
 _BAND_SMOOTHING = 0.4               # temporal smoothing factor (exponential MA)
+
+# --- Bar renderer constants ---
+_BAR_COUNT = 32                     # number of equalizer bars (matched to _N_BANDS)
+_BAR_WIDTH = 12                     # pixels per bar
+_BAR_GAP = 4                        # pixels between bars
+_BAR_MAX_HEIGHT = 0.42              # max bar height as fraction of frame height
+_BAR_BOTTOM_PAD = 28                # pixels from bottom of frame to bar base
+_BAR_BASE_COLOR = (80, 110, 255)    # gradient base color (bottom of bar)
+_BAR_TIP_COLOR = (200, 235, 255)    # gradient tip color (top of bar)
+_BAR_ALPHA = 0.85                   # bar opacity
+_BAR_GLOW_WIDTH = 5                 # pixels of glow expansion beyond bar edges
+_BAR_GLOW_ALPHA = 0.22              # glow opacity
 
 
 async def _ffprobe_video(path: str) -> tuple[float, int, int]:
@@ -165,83 +168,100 @@ def _compute_fft_bands(
 def _render_overlay_frame(
     video_frame: np.ndarray[Any, np.dtype[np.uint8]],
     band_energies: list[list[float]],
-    clip_env: list[float],
     frame_idx: int,
-    total_frames: int,
     vid_w: int,
     vid_h: int,
 ) -> np.ndarray[Any, np.dtype[np.uint8]]:
-    """Composite a semi-transparent waveform line onto a video frame.
+    """Composite vertical equalizer bars onto a video frame.
 
-    Uses a clip-wide time-domain amplitude envelope (``clip_env``) for the
-    x-axis so the waveform shape represents actual audio loudness across the
-    whole narration.  FFT band energies drive the playhead-local boost.
+    Bars are centered horizontally at the bottom of the frame.  Each bar's
+    height is proportional to the corresponding FFT frequency band energy for
+    the current frame.  A base-to-tip color gradient and a glow halo are
+    alpha-composited on top of the video frame.
 
-    NOTE: This renderer will be replaced by a vertical equalizer bar renderer
-    in the next step (bead arv).  The band_energies / clip_env parameters
-    are the new interface; the waveform logic here is temporary bridging code.
+    Args:
+        video_frame: RGB uint8 array of shape (vid_h, vid_w, 3).
+        band_energies: Per-frame list of per-band energies in [0, 1].
+        frame_idx: Index of the current frame.
+        vid_w: Frame width in pixels.
+        vid_h: Frame height in pixels.
+
+    Returns:
+        RGB uint8 array with bars composited onto the video frame.
     """
     current_bands = band_energies[min(frame_idx, len(band_energies) - 1)]
-    current_amp = float(np.mean(current_bands))
+    n_bars = min(_BAR_COUNT, len(current_bands))
 
-    center_y = vid_h // 2
-    playhead_x = int(frame_idx / max(total_frames - 1, 1) * vid_w)
-    max_disp = vid_h * _WAVE_AMP_MAX
-    n_env = len(clip_env)
+    total_width = n_bars * _BAR_WIDTH + max(0, n_bars - 1) * _BAR_GAP
+    x_start = (vid_w - total_width) // 2
+    bar_max_h = int(vid_h * _BAR_MAX_HEIGHT)
+    y_bottom = vid_h - _BAR_BOTTOM_PAD
 
-    # Build y-values for upper and lower waveform edges
-    upper_pts: list[tuple[int, int]] = []
-    lower_pts: list[tuple[int, int]] = []
-    for x in range(vid_w):
-        # Map x position to clip time for the time-domain amplitude envelope
-        env_idx = min(int(x / vid_w * n_env), n_env - 1)
-        env_val = clip_env[env_idx]
+    # --- Glow pass (PIL draw — wider translucent halo behind each bar) ---
+    glow_overlay = Image.new("RGBA", (vid_w, vid_h), (0, 0, 0, 0))
+    glow_draw = ImageDraw.Draw(glow_overlay)
+    glow_rgba = (*_BAR_TIP_COLOR, int(_BAR_GLOW_ALPHA * 255))
 
-        # Playhead proximity boost — monotonic: amp never drops below env_val
-        dx = abs(x - playhead_x)
-        if dx < _PLAYHEAD_FALLOFF_PX:
-            t = 1.0 - dx / _PLAYHEAD_FALLOFF_PX
-            boost_target = max(env_val, current_amp * _PLAYHEAD_BOOST)
-            amp = env_val + t * (boost_target - env_val)
-        else:
-            amp = env_val
+    # --- Main bar pass (numpy gradient fill for performance) ---
+    bar_arr = np.zeros((vid_h, vid_w, 4), dtype=np.uint8)
 
-        disp = int(amp * max_disp)
-        upper_pts.append((x, center_y - disp))
-        lower_pts.append((x, center_y + disp))
+    for i in range(n_bars):
+        energy = current_bands[i]
+        bar_h = max(2, int(energy * bar_max_h))
 
-    # Create RGBA overlay for alpha compositing
+        x_lo = x_start + i * (_BAR_WIDTH + _BAR_GAP)
+        x_hi = min(vid_w, x_lo + _BAR_WIDTH)
+        y_top = max(0, y_bottom - bar_h)
+
+        if x_lo >= vid_w or x_hi <= x_lo:
+            continue
+        h = y_bottom - y_top
+        if h <= 0:
+            continue
+
+        # Glow: expanded rectangle, lower alpha, tip color
+        gx_lo = max(0, x_lo - _BAR_GLOW_WIDTH)
+        gx_hi = min(vid_w, x_hi + _BAR_GLOW_WIDTH)
+        gy_top = max(0, y_top - _BAR_GLOW_WIDTH)
+        glow_draw.rectangle([gx_lo, gy_top, gx_hi - 1, y_bottom - 1], fill=glow_rgba)
+
+        # Gradient: t=0.0 at bottom (base color), t=1.0 at top (tip color)
+        t = np.linspace(0.0, 1.0, h, dtype=np.float32)[::-1]  # shape (h,)
+
+        r_ch = np.clip(
+            _BAR_BASE_COLOR[0] + t * (_BAR_TIP_COLOR[0] - _BAR_BASE_COLOR[0]), 0, 255
+        ).astype(np.uint8)
+        g_ch = np.clip(
+            _BAR_BASE_COLOR[1] + t * (_BAR_TIP_COLOR[1] - _BAR_BASE_COLOR[1]), 0, 255
+        ).astype(np.uint8)
+        b_ch = np.clip(
+            _BAR_BASE_COLOR[2] + t * (_BAR_TIP_COLOR[2] - _BAR_BASE_COLOR[2]), 0, 255
+        ).astype(np.uint8)
+        a_ch = np.full(h, int(_BAR_ALPHA * 255), dtype=np.uint8)
+
+        # Stack to (h, 4) then broadcast to (h, bar_w, 4)
+        bar_colors = np.stack([r_ch, g_ch, b_ch, a_ch], axis=1)  # (h, 4)
+        bar_w = x_hi - x_lo
+        bar_arr[y_top:y_bottom, x_lo:x_hi] = np.broadcast_to(
+            bar_colors[:, np.newaxis, :], (h, bar_w, 4)
+        )
+
+    # Composite: video base → glow → bars
     base = Image.fromarray(video_frame, mode="RGB").convert("RGBA")
-    overlay = Image.new("RGBA", (vid_w, vid_h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    # Draw glow (wider, lower alpha)
-    glow_alpha = int(_GLOW_ALPHA * 255)
-    glow_color = (*_GLOW_COLOR, glow_alpha)
-    if len(upper_pts) >= 2:
-        draw.line(upper_pts, fill=glow_color, width=_LINE_WIDTH + _GLOW_RADIUS * 2)
-        draw.line(lower_pts, fill=glow_color, width=_LINE_WIDTH + _GLOW_RADIUS * 2)
-
-    # Draw main line
-    line_alpha = int(_LINE_ALPHA * 255)
-    line_color = (*_LINE_COLOR, line_alpha)
-    if len(upper_pts) >= 2:
-        draw.line(upper_pts, fill=line_color, width=_LINE_WIDTH)
-        draw.line(lower_pts, fill=line_color, width=_LINE_WIDTH)
-
-    # Composite and convert back to RGB numpy array
-    composited = Image.alpha_composite(base, overlay)
+    bar_img = Image.fromarray(bar_arr, mode="RGBA")
+    composited = Image.alpha_composite(base, glow_overlay)
+    composited = Image.alpha_composite(composited, bar_img)
     return np.array(composited.convert("RGB"), dtype=np.uint8)
 
 
 async def execute(
     input: WorkflowInputSchema, ctx: StepContext
 ) -> WaveformOverlayStepOutput | SkippedStepOutput:
-    """Composite a semi-transparent waveform line overlay onto the stitched video.
+    """Composite animated vertical equalizer bars onto the stitched video.
 
-    Produces a WAVEFORM_VIDEO blob: the original video frames with a
-    waveform line composited on top. The waveform reacts to narrator audio
-    amplitude near the playhead position.
+    Produces a WAVEFORM_VIDEO blob: the original video frames with
+    equalizer bars composited at the bottom-center.  Bar heights react to
+    narrator audio frequency band energy derived via per-frame FFT analysis.
 
     Args:
         input: Workflow input schema.
@@ -314,10 +334,6 @@ async def execute(
         # Decode audio and compute per-frame FFT frequency bands
         samples = await _decode_audio_f32(str(audio_in))
         band_energies = _compute_fft_bands(samples, fps)
-        # Clip-wide time-domain amplitude envelope (mean of all bands per frame)
-        # used by _render_overlay_frame for the x-axis shape.  Pre-computed
-        # once here to avoid O(n_frames²) work inside the per-frame loop.
-        clip_env: list[float] = [float(np.mean(bands)) for bands in band_energies]
 
         duration_sec = stitch_out.total_duration_sec
         total_frames = max(1, int(duration_sec * fps))
@@ -369,8 +385,7 @@ async def execute(
                 (vid_h, vid_w, 3)
             )
             overlay = _render_overlay_frame(
-                video_frame, band_energies, clip_env,
-                frame_idx, total_frames, vid_w, vid_h,
+                video_frame, band_energies, frame_idx, vid_w, vid_h,
             )
             writer_proc.stdin.write(overlay.tobytes())
 

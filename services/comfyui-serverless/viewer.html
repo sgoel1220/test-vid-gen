@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ComfyUI Response Viewer</title>
+<style>
+  body { font-family: system-ui; max-width: 800px; margin: 40px auto; padding: 0 20px; background: #1a1a1a; color: #eee; }
+  h1 { font-size: 1.3em; }
+  textarea { width: 100%; height: 200px; background: #2a2a2a; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 13px; resize: vertical; }
+  button { background: #4a9eff; color: #fff; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 14px; margin-top: 10px; }
+  button:hover { background: #3a8eef; }
+  #output { margin-top: 20px; }
+  #output img { max-width: 100%; border-radius: 6px; border: 1px solid #444; }
+  .error { color: #ff6b6b; margin-top: 10px; }
+  .info { color: #aaa; margin-top: 10px; font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>ComfyUI Response Viewer</h1>
+  <p style="color:#aaa; font-size:13px;">Paste the full RunPod JSON response below:</p>
+  <textarea id="json-input" placeholder='{"id":"...","status":"COMPLETED","output":{"images":[...]}}'></textarea>
+  <br>
+  <button onclick="render()">Render Image</button>
+  <div id="output"></div>
+
+<script>
+function setError(out, msg) {
+  const p = document.createElement('p');
+  p.className = 'error';
+  p.textContent = msg;
+  out.appendChild(p);
+}
+
+function setInfo(out, msg) {
+  const p = document.createElement('p');
+  p.className = 'info';
+  p.textContent = msg;
+  out.appendChild(p);
+}
+
+function render() {
+  const out = document.getElementById('output');
+  const raw = document.getElementById('json-input').value.trim();
+  out.textContent = '';
+
+  if (!raw) { setError(out, 'Paste a JSON response first.'); return; }
+
+  let data;
+  try { data = JSON.parse(raw); } catch(e) { setError(out, 'Invalid JSON: ' + e.message); return; }
+
+  const status = typeof data.status === 'string' ? data.status : 'unknown';
+  if (status !== 'COMPLETED') {
+    const p = document.createElement('p');
+    p.className = 'info';
+    p.textContent = 'Status: ';
+    const strong = document.createElement('strong');
+    strong.textContent = status;
+    p.appendChild(strong);
+    p.appendChild(document.createTextNode(' — not completed yet.'));
+    out.appendChild(p);
+    return;
+  }
+
+  const output = data.output;
+  if (!output) { setError(out, 'No "output" field in response.'); return; }
+
+  // Try multiple formats the worker might return
+  let images = [];
+
+  // Format 1: output.images array with {image: base64} objects
+  if (Array.isArray(output.images)) {
+    for (const img of output.images) {
+      if (typeof img === 'string') images.push(img);
+      else if (img && typeof img.image === 'string') images.push(img.image);
+    }
+  }
+  // Format 2: output.message with base64 string
+  if (output.message && typeof output.message === 'string' && output.message.length > 100) {
+    images.push(output.message);
+  }
+  // Format 3: output directly is a base64 string
+  if (typeof output === 'string' && output.length > 100) {
+    images.push(output);
+  }
+
+  if (images.length === 0) {
+    setError(out, 'No images found in response.');
+    const pre = document.createElement('pre');
+    pre.style.cssText = 'color:#aaa;font-size:12px;';
+    pre.textContent = JSON.stringify(output, null, 2).slice(0, 500);
+    out.appendChild(pre);
+    return;
+  }
+
+  for (const b64 of images) {
+    const img = document.createElement('img');
+    // Only allow data: URLs with expected image MIME types
+    if (b64.startsWith('data:image/')) {
+      img.src = b64;
+    } else {
+      img.src = 'data:image/png;base64,' + b64;
+    }
+    out.appendChild(img);
+  }
+  setInfo(out, images.length + ' image(s) rendered.');
+}
+</script>
+</body>
+</html>
