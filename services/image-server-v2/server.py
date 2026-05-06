@@ -426,7 +426,7 @@ def debug_info() -> dict:
             "name": torch.cuda.get_device_name(0),
             "vram_allocated_gb": round(torch.cuda.memory_allocated() / 1024**3, 3),
             "vram_reserved_gb": round(torch.cuda.memory_reserved() / 1024**3, 3),
-            "vram_total_gb": round(torch.cuda.get_device_properties(0).total_mem / 1024**3, 2),
+            "vram_total_gb": round(torch.cuda.get_device_properties(0).total_memory / 1024**3, 2),
             "max_vram_allocated_gb": round(torch.cuda.max_memory_allocated() / 1024**3, 3),
         }
 
