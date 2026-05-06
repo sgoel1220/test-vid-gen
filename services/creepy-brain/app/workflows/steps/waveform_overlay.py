@@ -43,8 +43,9 @@ _LINE_WIDTH = 2
 _WAVE_AMP_MAX = 0.3                 # max displacement as fraction of frame height
 _PLAYHEAD_BOOST = 1.8               # amplitude multiplier near playhead
 _PLAYHEAD_FALLOFF_PX = 200          # fade distance for playhead boost
-_COARSE_STEPS = 400               # envelope resolution for background shape
 _SAMPLE_RATE = 22050              # audio decoding sample rate (Hz)
+_N_BANDS = 32                       # number of FFT frequency bands
+_BAND_SMOOTHING = 0.4               # temporal smoothing factor (exponential MA)
 
 
 async def _ffprobe_video(path: str) -> tuple[float, int, int]:
@@ -95,73 +96,113 @@ async def _decode_audio_f32(audio_path: str) -> np.ndarray[Any, np.dtype[np.floa
     return np.array(samples, dtype=np.float32)
 
 
-def _compute_envelope(
-    samples: np.ndarray[Any, np.dtype[np.float32]], n_steps: int
-) -> list[float]:
-    """Compute RMS envelope across n_steps segments, normalized 0→1."""
-    seg_len = max(1, len(samples) // n_steps)
-    envs: list[float] = []
-    for i in range(n_steps):
-        seg = samples[i * seg_len : (i + 1) * seg_len]
-        rms = float(np.sqrt(np.mean(seg**2))) if len(seg) > 0 else 0.0
-        envs.append(rms)
-    max_val = max(envs) if any(envs) else 1.0
-    if max_val < 1e-9:
-        max_val = 1.0
-    return [v / max_val for v in envs]
+def _compute_fft_bands(
+    samples: np.ndarray[Any, np.dtype[np.float32]],
+    fps: float,
+    n_bands: int = _N_BANDS,
+) -> list[list[float]]:
+    """Compute per-frame energy in n_bands frequency bands via numpy FFT.
 
+    Each video frame's audio window is transformed to the frequency domain.
+    The positive-frequency spectrum is split into n_bands equal-width bins
+    and mean energy per bin is computed.  Temporal smoothing via exponential
+    moving average is applied across frames to produce natural bar movement.
 
-def _compute_frame_amplitudes(
-    samples: np.ndarray[Any, np.dtype[np.float32]], fps: float
-) -> list[float]:
-    """Compute per-frame RMS amplitude normalized 0→1.
-
-    One value per video frame — gives per-word/syllable reactivity since
-    amplitude naturally rises during stressed syllables and drops in pauses.
+    Returns:
+        List of length total_frames, each entry is a list of n_bands values
+        in [0, 1] representing globally-normalized energy per frequency band.
     """
     samples_per_frame = max(1, int(_SAMPLE_RATE / fps))
     total_frames = (len(samples) + samples_per_frame - 1) // samples_per_frame
-    amps: list[float] = []
+
+    all_bands: list[list[float]] = []
+    prev_bands: list[float] = [0.0] * n_bands
+
     for i in range(total_frames):
         start = i * samples_per_frame
         seg = samples[start : start + samples_per_frame]
-        rms = float(np.sqrt(np.mean(seg**2))) if len(seg) > 0 else 0.0
-        amps.append(rms)
-    max_val = max(amps) if any(amps) else 1.0
-    if max_val < 1e-9:
-        max_val = 1.0
-    return [v / max_val for v in amps]
+        if len(seg) == 0:
+            all_bands.append(list(prev_bands))
+            continue
+
+        # Nearest power-of-two pad for FFT efficiency
+        fft_size = 1
+        while fft_size < len(seg):
+            fft_size <<= 1
+        padded = np.zeros(fft_size, dtype=np.float32)
+        padded[: len(seg)] = seg
+
+        # Hann window to reduce spectral leakage
+        padded[: len(seg)] *= np.hanning(len(seg)).astype(np.float32)
+
+        # Positive-frequency magnitude spectrum
+        spectrum = np.abs(np.fft.rfft(padded))
+        n_bins = len(spectrum)
+
+        # Equal-width frequency bands
+        raw_bands: list[float] = []
+        for b in range(n_bands):
+            lo = int(b * n_bins / n_bands)
+            hi = max(int((b + 1) * n_bins / n_bands), lo + 1)
+            raw_bands.append(float(np.mean(spectrum[lo:hi])))
+
+        # Exponential moving average for smooth bar animation
+        smoothed = [
+            _BAND_SMOOTHING * p + (1.0 - _BAND_SMOOTHING) * c
+            for p, c in zip(prev_bands, raw_bands)
+        ]
+        prev_bands = smoothed
+        all_bands.append(smoothed)
+
+    # Global normalization so the loudest band/frame == 1.0
+    flat = [v for frame in all_bands for v in frame]
+    global_max = max(flat) if flat else 1.0
+    if global_max < 1e-9:
+        global_max = 1.0
+    return [[v / global_max for v in frame] for frame in all_bands]
 
 
 def _render_overlay_frame(
     video_frame: np.ndarray[Any, np.dtype[np.uint8]],
-    coarse_envs: list[float],
-    frame_amps: list[float],
+    band_energies: list[list[float]],
+    clip_env: list[float],
     frame_idx: int,
     total_frames: int,
     vid_w: int,
     vid_h: int,
 ) -> np.ndarray[Any, np.dtype[np.uint8]]:
-    """Composite a semi-transparent waveform line onto a video frame."""
+    """Composite a semi-transparent waveform line onto a video frame.
+
+    Uses a clip-wide time-domain amplitude envelope (``clip_env``) for the
+    x-axis so the waveform shape represents actual audio loudness across the
+    whole narration.  FFT band energies drive the playhead-local boost.
+
+    NOTE: This renderer will be replaced by a vertical equalizer bar renderer
+    in the next step (bead arv).  The band_energies / clip_env parameters
+    are the new interface; the waveform logic here is temporary bridging code.
+    """
+    current_bands = band_energies[min(frame_idx, len(band_energies) - 1)]
+    current_amp = float(np.mean(current_bands))
+
     center_y = vid_h // 2
     playhead_x = int(frame_idx / max(total_frames - 1, 1) * vid_w)
-    current_amp = frame_amps[min(frame_idx, len(frame_amps) - 1)]
     max_disp = vid_h * _WAVE_AMP_MAX
+    n_env = len(clip_env)
 
     # Build y-values for upper and lower waveform edges
     upper_pts: list[tuple[int, int]] = []
     lower_pts: list[tuple[int, int]] = []
     for x in range(vid_w):
-        # Envelope height from coarse envelope
-        env_idx = int(x / vid_w * len(coarse_envs))
-        env_idx = min(env_idx, len(coarse_envs) - 1)
-        env_val = coarse_envs[env_idx]
+        # Map x position to clip time for the time-domain amplitude envelope
+        env_idx = min(int(x / vid_w * n_env), n_env - 1)
+        env_val = clip_env[env_idx]
 
-        # Playhead proximity boost
+        # Playhead proximity boost — monotonic: amp never drops below env_val
         dx = abs(x - playhead_x)
         if dx < _PLAYHEAD_FALLOFF_PX:
             t = 1.0 - dx / _PLAYHEAD_FALLOFF_PX
-            amp = env_val + t * (current_amp * _PLAYHEAD_BOOST - env_val)
+            boost_target = max(env_val, current_amp * _PLAYHEAD_BOOST)
+            amp = env_val + t * (boost_target - env_val)
         else:
             amp = env_val
 
@@ -270,10 +311,13 @@ async def execute(
         fps, vid_w, vid_h = await _ffprobe_video(str(video_in))
         log.info("waveform_overlay: video %dx%d @%.2ffps", vid_w, vid_h, fps)
 
-        # Decode audio and compute envelopes
+        # Decode audio and compute per-frame FFT frequency bands
         samples = await _decode_audio_f32(str(audio_in))
-        coarse_envs = _compute_envelope(samples, _COARSE_STEPS)
-        frame_amps = _compute_frame_amplitudes(samples, fps)
+        band_energies = _compute_fft_bands(samples, fps)
+        # Clip-wide time-domain amplitude envelope (mean of all bands per frame)
+        # used by _render_overlay_frame for the x-axis shape.  Pre-computed
+        # once here to avoid O(n_frames²) work inside the per-frame loop.
+        clip_env: list[float] = [float(np.mean(bands)) for bands in band_energies]
 
         duration_sec = stitch_out.total_duration_sec
         total_frames = max(1, int(duration_sec * fps))
@@ -325,7 +369,7 @@ async def execute(
                 (vid_h, vid_w, 3)
             )
             overlay = _render_overlay_frame(
-                video_frame, coarse_envs, frame_amps,
+                video_frame, band_energies, clip_env,
                 frame_idx, total_frames, vid_w, vid_h,
             )
             writer_proc.stdin.write(overlay.tobytes())
