@@ -180,91 +180,6 @@ def _load() -> StableDiffusionXLPipeline:
 
     return _pipe
 
-    t_start = time.perf_counter()
-
-    def _elapsed() -> str:
-        return f"{time.perf_counter() - t_start:.1f}s"
-
-    logger.info("[1/7] Loading VAE (madebyollin/sdxl-vae-fp16-fix)...")
-    vae = AutoencoderKL.from_pretrained(
-        _VAE_MODEL,
-        torch_dtype=torch.float16,
-    )
-    logger.info("[1/7] VAE loaded. (%s)", _elapsed())
-
-    logger.info("[2/7] Loading SDXL 1.0 base pipeline...")
-    _pipe = StableDiffusionXLPipeline.from_pretrained(
-        _BASE_MODEL,
-        vae=vae,
-        torch_dtype=torch.float16,
-        variant="fp16",
-    ).to("cuda")
-    logger.info("[2/7] Base pipeline on CUDA. VRAM: %.2f GB (%s)",
-                torch.cuda.memory_allocated() / 1024**3, _elapsed())
-
-    # Download Impressionism LoRA from CivitAI if not already cached
-    _has_impressionism = os.path.exists(_IMPRESSIONISM_LORA_PATH)
-    if not _has_impressionism:
-        if _CIVITAI_TOKEN:
-            logger.info("[3/7] Downloading Impressionism LoRA from CivitAI...")
-            os.makedirs(os.path.dirname(_IMPRESSIONISM_LORA_PATH), exist_ok=True)
-            url = f"https://civitai.com/api/download/models/133465?token={_CIVITAI_TOKEN}"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req) as resp, open(_IMPRESSIONISM_LORA_PATH, "wb") as f:
-                f.write(resp.read())
-            _has_impressionism = True
-            logger.info("[3/7] Impressionism LoRA downloaded. (%s)", _elapsed())
-        else:
-            logger.warning("[3/7] CIVITAI_TOKEN not set — skipping Impressionism LoRA. Running Lightning-only.")
-    else:
-        logger.info("[3/7] Impressionism LoRA already cached, skipping download.")
-
-    if _has_impressionism:
-        logger.info("[4/7] Loading Impressionism LoRA (strength=%.2f)...", _IMPRESSIONISM_STRENGTH)
-        _pipe.load_lora_weights(
-            _IMPRESSIONISM_LORA_PATH,
-            adapter_name="impressionism",
-        )
-        logger.info("[4/7] Impressionism LoRA loaded. (%s)", _elapsed())
-    else:
-        logger.info("[4/7] Skipping Impressionism LoRA.")
-
-    logger.info("[5/7] Loading SDXL-Lightning 4-step LoRA...")
-    lightning_path = hf_hub_download(_LIGHTNING_REPO, _LIGHTNING_LORA)
-    _pipe.load_lora_weights(
-        lightning_path,
-        adapter_name="lightning",
-    )
-    logger.info("[5/7] Lightning LoRA loaded. (%s)", _elapsed())
-
-    if _has_impressionism:
-        logger.info("[6/7] Fusing LoRAs (impressionism=%.2f, lightning=1.0)...", _IMPRESSIONISM_STRENGTH)
-        _pipe.set_adapters(
-            ["impressionism", "lightning"],
-            adapter_weights=[_IMPRESSIONISM_STRENGTH, 1.0],
-        )
-    else:
-        logger.info("[6/7] Fusing Lightning LoRA only...")
-        _pipe.set_adapters(["lightning"], adapter_weights=[1.0])
-    _pipe.fuse_lora()
-    _pipe.unload_lora_weights()
-    logger.info("[6/7] LoRAs fused and unloaded. VRAM: %.2f GB (%s)",
-                torch.cuda.memory_allocated() / 1024**3, _elapsed())
-
-    logger.info("[7/7] Configuring scheduler and finalizing...")
-    _pipe.scheduler = EulerDiscreteScheduler.from_config(
-        _pipe.scheduler.config,
-        timestep_spacing="trailing",
-    )
-    _pipe.set_progress_bar_config(disable=True)
-    torch.cuda.empty_cache()
-    gc.collect()
-
-    vram_gb = torch.cuda.memory_allocated() / 1024**3
-    logger.info("Pipeline ready. VRAM: %.2f GB — total startup: %s", vram_gb, _elapsed())
-
-    return _pipe
-
 
 # ---------------------------------------------------------------------------
 # App
@@ -421,48 +336,47 @@ def debug_info() -> dict:
         "cuda_available": torch.cuda.is_available(),
         "torch_version": torch.__version__,
         "pipeline_loaded": _pipe is not None,
+        "load_state": dict(_load_state),
     }
 
     if torch.cuda.is_available():
-        info["gpu"] = {
-            "name": torch.cuda.get_device_name(0),
-            "vram_allocated_gb": round(torch.cuda.memory_allocated() / 1024**3, 3),
-            "vram_reserved_gb": round(torch.cuda.memory_reserved() / 1024**3, 3),
-            "vram_total_gb": round(torch.cuda.get_device_properties(0).total_memory / 1024**3, 2),
-            "max_vram_allocated_gb": round(torch.cuda.max_memory_allocated() / 1024**3, 3),
-        }
+        try:
+            props = torch.cuda.get_device_properties(0)
+            info["gpu"] = {
+                "name": torch.cuda.get_device_name(0),
+                "vram_allocated_gb": round(torch.cuda.memory_allocated() / 1024**3, 3),
+                "vram_reserved_gb": round(torch.cuda.memory_reserved() / 1024**3, 3),
+                "vram_total_gb": round(props.total_memory / 1024**3, 2),
+                "max_vram_allocated_gb": round(torch.cuda.max_memory_allocated() / 1024**3, 3),
+            }
+        except Exception as exc:
+            info["gpu"] = {"error": str(exc)}
 
     if _pipe is not None:
-        # Scheduler info
-        sched_cfg = dict(_pipe.scheduler.config) if hasattr(_pipe.scheduler, "config") else {}
-        info["scheduler"] = {
-            "type": type(_pipe.scheduler).__name__,
-            "timestep_spacing": sched_cfg.get("timestep_spacing"),
-            "num_train_timesteps": sched_cfg.get("num_train_timesteps"),
-        }
-        # Pipeline dtype
-        info["dtype"] = str(_pipe.dtype)
-        # LoRA info
-        info["lora"] = {
-            "impressionism_path": _IMPRESSIONISM_LORA_PATH,
-            "impressionism_exists": os.path.exists(_IMPRESSIONISM_LORA_PATH),
-            "impressionism_strength": _IMPRESSIONISM_STRENGTH,
-            "lightning_repo": _LIGHTNING_REPO,
-            "lightning_file": _LIGHTNING_LORA,
-            "impressionism_loaded": _load_state["impressionism_loaded"],
-            "lightning_loaded": _load_state["lightning_loaded"],
-            "fused": _load_state["fused"],
-            "load_error": _load_state["load_error"],
-            "load_time_s": _load_state["load_time_s"],
-        }
-        # UNet info
-        if hasattr(_pipe, "unet"):
-            unet = _pipe.unet
-            info["unet"] = {
-                "dtype": str(unet.dtype),
-                "num_parameters_M": round(sum(p.numel() for p in unet.parameters()) / 1e6, 1),
-                "device": str(next(unet.parameters()).device),
+        try:
+            sched_cfg = dict(_pipe.scheduler.config) if hasattr(_pipe.scheduler, "config") else {}
+            info["scheduler"] = {
+                "type": type(_pipe.scheduler).__name__,
+                "timestep_spacing": sched_cfg.get("timestep_spacing"),
+                "num_train_timesteps": sched_cfg.get("num_train_timesteps"),
             }
+            info["dtype"] = str(_pipe.dtype)
+            info["lora"] = {
+                "impressionism_path": _IMPRESSIONISM_LORA_PATH,
+                "impressionism_exists": os.path.exists(_IMPRESSIONISM_LORA_PATH),
+                "impressionism_strength": _IMPRESSIONISM_STRENGTH,
+                "lightning_repo": _LIGHTNING_REPO,
+                "lightning_file": _LIGHTNING_LORA,
+            }
+            if hasattr(_pipe, "unet"):
+                unet = _pipe.unet
+                info["unet"] = {
+                    "dtype": str(unet.dtype),
+                    "num_parameters_M": round(sum(p.numel() for p in unet.parameters()) / 1e6, 1),
+                    "device": str(next(unet.parameters()).device),
+                }
+        except Exception as exc:
+            info["pipeline_error"] = str(exc)
 
     info["config"] = {
         "impressionism_strength": _IMPRESSIONISM_STRENGTH,
