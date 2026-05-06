@@ -1,0 +1,106 @@
+# Image Server v2 Serverless — MODELS BAKED IN
+# All models downloaded at build time. No runtime downloads, no CivitAI token at runtime.
+# For Vast.ai Serverless deployment via PyWorker.
+#
+# Build (from repo root):
+#   docker buildx build --platform linux/amd64 \
+#     --build-arg CIVITAI_TOKEN=<token> \
+#     -f services/image-server-v2-serverless/Dockerfile.baked \
+#     -t ghcr.io/sgoel1220/image-server-v2-serverless:baked --push .
+
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
+ENV HF_HOME=/app/hf_cache
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+WORKDIR /app
+
+# PyTorch with bundled CUDA 12.1 runtime
+RUN uv pip install --system --no-cache \
+    "torch==2.5.1+cu121" \
+    --index-url https://download.pytorch.org/whl/cu121
+
+# Model server dependencies
+RUN uv pip install --system --no-cache \
+    diffusers==0.37.1 \
+    transformers==4.51.3 \
+    accelerate==1.6.0 \
+    safetensors==0.5.3 \
+    Pillow==11.1.0 \
+    huggingface_hub==0.34.1 \
+    hf_transfer==0.1.9 \
+    fastapi==0.115.6 \
+    "uvicorn[standard]==0.32.1" \
+    pydantic==2.10.4
+
+# PyWorker dependency
+RUN uv pip install --system --no-cache "vastai-sdk>=0.3.0"
+
+RUN mkdir -p /app/hf_cache /app/loras /var/log/portal
+
+# ---------------------------------------------------------------------------
+# Bake in models — each in its own layer for independent cache invalidation
+# ---------------------------------------------------------------------------
+
+ARG CIVITAI_TOKEN
+RUN test -n "$CIVITAI_TOKEN" || (echo "ERROR: CIVITAI_TOKEN build arg required" && exit 1)
+
+# Layer 1: VAE (~160 MB)
+RUN python3 -c "from huggingface_hub import snapshot_download; snapshot_download('madebyollin/sdxl-vae-fp16-fix')"
+
+# Layer 2: SDXL base fp16 shards only (~7 GB)
+RUN python3 <<'EOF'
+from huggingface_hub import snapshot_download
+snapshot_download(
+    "stabilityai/stable-diffusion-xl-base-1.0",
+    ignore_patterns=[
+        "*.ckpt",
+        "*.bin",
+        "sd_xl_base_1.0*.safetensors",
+        "vae/diffusion_pytorch_model*",
+    ],
+)
+EOF
+
+# Layer 3: Lightning LoRA (~95 MB)
+RUN python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download('ByteDance/SDXL-Lightning', 'sdxl_lightning_4step_lora.safetensors')"
+
+# Layer 4: Impressionism LoRA from CivitAI (~55 MB)
+RUN python3 <<'EOF'
+import os, urllib.request
+token = os.environ["CIVITAI_TOKEN"]
+url = f"https://civitai.com/api/download/models/133465?token={token}"
+req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+with urllib.request.urlopen(req) as resp, open("/app/loras/impressionism_sdxl.safetensors", "wb") as f:
+    f.write(resp.read())
+print("Impressionism LoRA downloaded.")
+EOF
+
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
+
+COPY services/image-server-v2-serverless/server.py /app/server.py
+COPY services/image-server-v2-serverless/worker.py /app/worker.py
+COPY services/image-server-v2-serverless/start.sh /app/start.sh
+
+RUN chmod +x /app/start.sh
+
+EXPOSE 8006
+
+# Shorter start-period since models are already on disk
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8006/ready >/dev/null || exit 1
+
+CMD ["/app/start.sh"]
