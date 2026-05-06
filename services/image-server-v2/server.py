@@ -53,6 +53,16 @@ _IMPRESSIONISM_LORA_PATH = os.getenv(
 _IMPRESSIONISM_STRENGTH = float(os.getenv("IMPRESSIONISM_STRENGTH", "0.8"))
 _CIVITAI_TOKEN = os.getenv("CIVITAI_TOKEN", "")
 
+# Tunable generation defaults (override via env to avoid rebuilds)
+_DEFAULT_STEPS = int(os.getenv("DEFAULT_STEPS", "4"))
+_DEFAULT_GUIDANCE_SCALE = float(os.getenv("DEFAULT_GUIDANCE_SCALE", "2.0"))
+_DEFAULT_WIDTH = int(os.getenv("DEFAULT_WIDTH", "1280"))
+_DEFAULT_HEIGHT = int(os.getenv("DEFAULT_HEIGHT", "720"))
+_DEFAULT_NEGATIVE_PROMPT = os.getenv(
+    "DEFAULT_NEGATIVE_PROMPT",
+    "photorealistic, photograph, blurry, low quality, watermark, text, deformed",
+)
+
 _pipe: StableDiffusionXLPipeline | None = None
 
 # ---------------------------------------------------------------------------
@@ -188,13 +198,13 @@ app = FastAPI(
 class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, description="Image prompt.")
     negative_prompt: str = Field(
-        "photorealistic, photograph, blurry, low quality, watermark, text, deformed",
+        default_factory=lambda: _DEFAULT_NEGATIVE_PROMPT,
         description="Negative prompt.",
     )
-    width: int = Field(1280, ge=512, le=1536)
-    height: int = Field(720, ge=512, le=1536)
-    steps: int = Field(4, ge=1, le=8)
-    guidance_scale: float = Field(2.0, ge=0.0, le=5.0)
+    width: int = Field(default_factory=lambda: _DEFAULT_WIDTH, ge=512, le=1536)
+    height: int = Field(default_factory=lambda: _DEFAULT_HEIGHT, ge=512, le=1536)
+    steps: int = Field(default_factory=lambda: _DEFAULT_STEPS, ge=1, le=8)
+    guidance_scale: float = Field(default_factory=lambda: _DEFAULT_GUIDANCE_SCALE, ge=0.0, le=5.0)
     seed: int | None = Field(None, ge=0)
 
 
