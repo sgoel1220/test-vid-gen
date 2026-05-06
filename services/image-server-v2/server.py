@@ -405,7 +405,9 @@ def reload_pipeline() -> dict[str, str]:
     """Re-load and re-fuse LoRAs with current impressionism_strength. Takes ~30s."""
     global _pipe
     logger.info("Reloading pipeline with impressionism_strength=%.2f ...", _IMPRESSIONISM_STRENGTH)
+    old = _pipe
     _pipe = None
+    del old
     torch.cuda.empty_cache()
     gc.collect()
     _load()
