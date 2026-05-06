@@ -65,6 +65,15 @@ _DEFAULT_NEGATIVE_PROMPT = os.getenv(
 
 _pipe: StableDiffusionXLPipeline | None = None
 
+# Runtime loading state — populated by _load()
+_load_state: dict[str, object] = {
+    "impressionism_loaded": False,
+    "lightning_loaded": False,
+    "fused": False,
+    "load_error": None,
+    "load_time_s": None,
+}
+
 # ---------------------------------------------------------------------------
 # Model loading
 # ---------------------------------------------------------------------------
@@ -74,6 +83,102 @@ def _load() -> StableDiffusionXLPipeline:
     global _pipe
     if _pipe is not None:
         return _pipe
+
+    _load_state.update(impressionism_loaded=False, lightning_loaded=False, fused=False, load_error=None, load_time_s=None)
+    t_start = time.perf_counter()
+
+    def _elapsed() -> str:
+        return f"{time.perf_counter() - t_start:.1f}s"
+
+    try:
+        logger.info("[1/7] Loading VAE (madebyollin/sdxl-vae-fp16-fix)...")
+        vae = AutoencoderKL.from_pretrained(
+            _VAE_MODEL,
+            torch_dtype=torch.float16,
+        )
+        logger.info("[1/7] VAE loaded. (%s)", _elapsed())
+
+        logger.info("[2/7] Loading SDXL 1.0 base pipeline...")
+        _pipe = StableDiffusionXLPipeline.from_pretrained(
+            _BASE_MODEL,
+            vae=vae,
+            torch_dtype=torch.float16,
+            variant="fp16",
+        ).to("cuda")
+        logger.info("[2/7] Base pipeline on CUDA. VRAM: %.2f GB (%s)",
+                    torch.cuda.memory_allocated() / 1024**3, _elapsed())
+
+        # Download Impressionism LoRA from CivitAI if not already cached
+        _has_impressionism = os.path.exists(_IMPRESSIONISM_LORA_PATH)
+        if not _has_impressionism:
+            if _CIVITAI_TOKEN:
+                logger.info("[3/7] Downloading Impressionism LoRA from CivitAI...")
+                os.makedirs(os.path.dirname(_IMPRESSIONISM_LORA_PATH), exist_ok=True)
+                url = f"https://civitai.com/api/download/models/133465?token={_CIVITAI_TOKEN}"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req) as resp, open(_IMPRESSIONISM_LORA_PATH, "wb") as f:
+                    f.write(resp.read())
+                _has_impressionism = True
+                logger.info("[3/7] Impressionism LoRA downloaded. (%s)", _elapsed())
+            else:
+                logger.warning("[3/7] CIVITAI_TOKEN not set — skipping Impressionism LoRA. Running Lightning-only.")
+        else:
+            logger.info("[3/7] Impressionism LoRA already cached, skipping download.")
+
+        if _has_impressionism:
+            logger.info("[4/7] Loading Impressionism LoRA (strength=%.2f)...", _IMPRESSIONISM_STRENGTH)
+            _pipe.load_lora_weights(
+                _IMPRESSIONISM_LORA_PATH,
+                adapter_name="impressionism",
+            )
+            _load_state["impressionism_loaded"] = True
+            logger.info("[4/7] Impressionism LoRA loaded. (%s)", _elapsed())
+        else:
+            logger.info("[4/7] Skipping Impressionism LoRA.")
+
+        logger.info("[5/7] Loading SDXL-Lightning 4-step LoRA...")
+        lightning_path = hf_hub_download(_LIGHTNING_REPO, _LIGHTNING_LORA)
+        _pipe.load_lora_weights(
+            lightning_path,
+            adapter_name="lightning",
+        )
+        _load_state["lightning_loaded"] = True
+        logger.info("[5/7] Lightning LoRA loaded. (%s)", _elapsed())
+
+        if _has_impressionism:
+            logger.info("[6/7] Fusing LoRAs (impressionism=%.2f, lightning=1.0)...", _IMPRESSIONISM_STRENGTH)
+            _pipe.set_adapters(
+                ["impressionism", "lightning"],
+                adapter_weights=[_IMPRESSIONISM_STRENGTH, 1.0],
+            )
+        else:
+            logger.info("[6/7] Fusing Lightning LoRA only...")
+            _pipe.set_adapters(["lightning"], adapter_weights=[1.0])
+        _pipe.fuse_lora()
+        _pipe.unload_lora_weights()
+        _load_state["fused"] = True
+        logger.info("[6/7] LoRAs fused and unloaded. VRAM: %.2f GB (%s)",
+                    torch.cuda.memory_allocated() / 1024**3, _elapsed())
+
+        logger.info("[7/7] Configuring scheduler and finalizing...")
+        _pipe.scheduler = EulerDiscreteScheduler.from_config(
+            _pipe.scheduler.config,
+            timestep_spacing="trailing",
+        )
+        _pipe.set_progress_bar_config(disable=True)
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        _load_state["load_time_s"] = round(time.perf_counter() - t_start, 1)
+        vram_gb = torch.cuda.memory_allocated() / 1024**3
+        logger.info("Pipeline ready. VRAM: %.2f GB — total startup: %s", vram_gb, _elapsed())
+
+    except Exception as exc:
+        _load_state["load_error"] = str(exc)
+        logger.exception("Pipeline loading failed")
+        raise
+
+    return _pipe
 
     t_start = time.perf_counter()
 
@@ -342,7 +447,11 @@ def debug_info() -> dict:
             "impressionism_strength": _IMPRESSIONISM_STRENGTH,
             "lightning_repo": _LIGHTNING_REPO,
             "lightning_file": _LIGHTNING_LORA,
-            "fused": True,  # always fused after _load()
+            "impressionism_loaded": _load_state["impressionism_loaded"],
+            "lightning_loaded": _load_state["lightning_loaded"],
+            "fused": _load_state["fused"],
+            "load_error": _load_state["load_error"],
+            "load_time_s": _load_state["load_time_s"],
         }
         # UNet info
         if hasattr(_pipe, "unet"):
