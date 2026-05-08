@@ -75,7 +75,7 @@
   },
   "7": {
     "inputs": {
-      "text": "cinematic haunted manor hallway, dusty portraits on walls, single candle flickering, long shadows, loose brushstrokes, impasto texture, vibring color, style of Andreas Achenbach, monet, oil painting",
+      "text": "cinematic haunted manor hallway, dusty portraits on walls, single candle flickering, long shadows, loose brushstrokes, impasto texture, vibrant color, style of Andreas Achenbach, monet, oil painting",
       "clip": ["6", 1]
     },
     "class_type": "CLIPTextEncode",

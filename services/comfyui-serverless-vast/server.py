@@ -9,7 +9,7 @@ Stack:
 
 ~10-12 GB VRAM peak. Needs RTX A5000/A6000 (24 GB) or similar.
 
-This variant runs ComfyUI headless, proxied by the Vast.ai PyWorker.
+This variant runs ComfyUI headless with a direct FastAPI server (no PyWorker).
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ import logging
 import os
 import random
 import subprocess
+import sys
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -74,7 +75,7 @@ def _start_comfyui() -> subprocess.Popen[bytes]:
     """Start ComfyUI server as a subprocess."""
     global _comfyui_process
     cmd = [
-        "python", f"{_COMFYUI_DIR}/main.py",
+        sys.executable, f"{_COMFYUI_DIR}/main.py",
         "--listen", "127.0.0.1",
         "--port", "8188",
         "--preview-method", "none",
@@ -92,24 +93,27 @@ def _wait_for_comfyui(timeout: float = 600) -> None:
     """Poll ComfyUI until it responds or timeout."""
     global _ready
     t0 = time.monotonic()
-    client = httpx.Client(timeout=5)
-    while time.monotonic() - t0 < timeout:
-        try:
-            resp = client.get(f"{_COMFYUI_URL}/system_stats")
-            if resp.status_code == 200:
-                _ready = True
-                logger.info(
-                    "ComfyUI ready after %.1fs. System stats: %s",
-                    time.monotonic() - t0,
-                    resp.text[:200],
+    with httpx.Client(timeout=5) as client:
+        while time.monotonic() - t0 < timeout:
+            # Fail fast if ComfyUI process died
+            if _comfyui_process and _comfyui_process.poll() is not None:
+                raise RuntimeError(
+                    f"ComfyUI process exited with code {_comfyui_process.returncode}"
                 )
-                # Signal to PyWorker that we're ready
-                logger.info("Application startup complete.")
-                return
-        except httpx.ConnectError:
-            pass
-        time.sleep(2)
-    client.close()
+            try:
+                resp = client.get(f"{_COMFYUI_URL}/system_stats")
+                if resp.status_code == 200:
+                    _ready = True
+                    logger.info(
+                        "ComfyUI ready after %.1fs. System stats: %s",
+                        time.monotonic() - t0,
+                        resp.text[:200],
+                    )
+                    logger.info("Application startup complete.")
+                    return
+            except httpx.ConnectError:
+                pass
+            time.sleep(2)
     raise RuntimeError(f"ComfyUI did not start within {timeout}s")
 
 
@@ -168,24 +172,21 @@ def _submit_prompt(workflow: dict[str, object]) -> str:
 def _poll_result(prompt_id: str, timeout: float = _TIMEOUT) -> list[dict[str, str]]:
     """Poll /history until the prompt completes. Returns output image info."""
     t0 = time.monotonic()
-    client = httpx.Client(timeout=10)
-    while time.monotonic() - t0 < timeout:
-        resp = client.get(f"{_COMFYUI_URL}/history/{prompt_id}")
-        if resp.status_code == 200:
-            data = resp.json()
-            if prompt_id in data:
-                history = data[prompt_id]
-                if history.get("status", {}).get("completed", False) or "outputs" in history:
-                    outputs = history.get("outputs", {})
-                    # Find SaveImage node output (node 12)
-                    for node_id, node_out in outputs.items():
-                        if "images" in node_out:
-                            client.close()
-                            return node_out["images"]  # type: ignore[no-any-return]
-                    client.close()
-                    raise RuntimeError(f"No image output in prompt {prompt_id}")
-        time.sleep(_POLL_INTERVAL)
-    client.close()
+    with httpx.Client(timeout=10) as client:
+        while time.monotonic() - t0 < timeout:
+            resp = client.get(f"{_COMFYUI_URL}/history/{prompt_id}")
+            if resp.status_code == 200:
+                data = resp.json()
+                if prompt_id in data:
+                    history = data[prompt_id]
+                    if history.get("status", {}).get("completed", False) or "outputs" in history:
+                        outputs = history.get("outputs", {})
+                        # Find SaveImage node output (node 12)
+                        for node_id, node_out in outputs.items():
+                            if "images" in node_out:
+                                return node_out["images"]  # type: ignore[no-any-return]
+                        raise RuntimeError(f"No image output in prompt {prompt_id}")
+            time.sleep(_POLL_INTERVAL)
     raise TimeoutError(f"ComfyUI did not complete prompt {prompt_id} within {timeout}s")
 
 
