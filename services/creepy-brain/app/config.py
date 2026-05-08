@@ -40,7 +40,13 @@ class Settings(BaseSettings):
     db_echo: bool = False
 
     # GPU provider settings
+    gpu_provider: str = "runpod"
     runpod_api_key: str = ""
+    vastai_api_key: str = ""
+    vastai_min_reliability: float = 0.99
+    vastai_max_dph: float = 2.0
+    vastai_geo: str = ""
+    vastai_cuda_min: float = 12.0
 
     # GPU pod configuration
     gpu_type: str = "NVIDIA RTX A4000"

@@ -61,6 +61,7 @@ class GpuProvider(str, Enum):
     RUNPOD = "runpod"
     LOCAL = "local"
     MODAL = "modal"
+    VASTAI = "vastai"
 
 
 class GpuPodStatus(str, Enum):
