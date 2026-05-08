@@ -603,6 +603,8 @@ async def _create_video(
             str(mp3_path),
             "-c:v",
             "libx264",
+            "-r",
+            "24",
             "-pix_fmt",
             "yuv420p",
             "-vf",
