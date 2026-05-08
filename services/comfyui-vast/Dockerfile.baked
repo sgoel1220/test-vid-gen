@@ -13,6 +13,7 @@
 #     -t ghcr.io/sgoel1220/comfyui-vast:main --push .
 
 FROM ghcr.io/sgoel1220/comfyui-vast-base:latest
+# Note: base image is built first by CI (build-and-push job), this job runs after (needs: build-and-push)
 
 # ---------------------------------------------------------------------------
 # App files — the only layer that changes between deploys
