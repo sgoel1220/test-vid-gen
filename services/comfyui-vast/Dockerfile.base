@@ -29,10 +29,14 @@ ENV PATH="/venv/bin:$PATH"
 RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git /app/ComfyUI
 
 RUN pip install --no-cache-dir \
-        torch==2.5.1 torchvision==0.20.1 \
+        torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
         --index-url https://download.pytorch.org/whl/cu121
 
-RUN pip install --no-cache-dir -r /app/ComfyUI/requirements.txt
+# Install ComfyUI deps but prevent PyPI from overwriting our cu121 torch stack
+# (ComfyUI lists torch/torchvision/torchaudio unpinned — PyPI wheels link CUDA 13)
+RUN printf "torch==2.5.1\ntorchvision==0.20.1\ntorchaudio==2.5.1\n" > /tmp/cu121.constraints \
+    && pip install --no-cache-dir -r /app/ComfyUI/requirements.txt -c /tmp/cu121.constraints \
+    && rm /tmp/cu121.constraints
 
 RUN pip install --no-cache-dir \
         fastapi==0.115.6 \
