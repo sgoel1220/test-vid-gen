@@ -83,8 +83,6 @@ def _start_comfyui() -> subprocess.Popen[bytes]:
     logger.info("Starting ComfyUI: %s", " ".join(cmd))
     _comfyui_process = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
         cwd=_COMFYUI_DIR,
     )
     return _comfyui_process
