@@ -14,6 +14,7 @@ from app.services.workflow_lifecycle_service import PIPELINE_STEP_ORDER
 
 _enums: Any = import_module("app.models.enums")
 _workflow_models: Any = import_module("app.models.workflow")
+ChunkStatus: Any = _enums.ChunkStatus
 StepName: Any = _enums.StepName
 StepStatus: Any = _enums.StepStatus
 WorkflowStatus: Any = _enums.WorkflowStatus
@@ -90,8 +91,25 @@ class WorkflowForkService:
 
         await self._session.flush()
 
-        needs_chunks = fork_idx >= PIPELINE_STEP_ORDER.index(StepName.IMAGE_GENERATION)
-        needs_scenes = fork_idx >= PIPELINE_STEP_ORDER.index(StepName.STITCH_FINAL)
+        tts_idx = PIPELINE_STEP_ORDER.index(StepName.TTS_SYNTHESIS)
+        image_idx = PIPELINE_STEP_ORDER.index(StepName.IMAGE_GENERATION)
+        stitch_idx = PIPELINE_STEP_ORDER.index(StepName.STITCH_FINAL)
+
+        # Chunks are only pre-copied when IMAGE or a later step is the fork point:
+        # TTS forks must not receive pre-copied chunk rows because TTS will upsert
+        # a fresh chunk set and any stale extra rows would survive and be synthesised.
+        needs_chunks = fork_idx >= image_idx
+
+        # Scenes are only pre-copied when STITCH or a later step is the fork point.
+        # IMAGE forks must not receive copied scene rows + old chunk→scene links because
+        # any change in scene grouping would attach regenerated images to the wrong spans.
+        needs_scenes = fork_idx >= stitch_idx
+
+        # Defensive: if either condition is ever relaxed above, blob IDs produced by a
+        # step AT or AFTER the fork point are cleared so those steps re-run rather than
+        # being short-circuited by per-record resume checks.
+        clear_tts_blobs = fork_idx <= tts_idx
+        clear_image_blobs = fork_idx <= image_idx
 
         if needs_chunks:
             chunks_result = await self._session.execute(
@@ -117,9 +135,9 @@ class WorkflowForkService:
                         scene_index=sc.scene_index,
                         image_prompt=sc.image_prompt,
                         image_negative_prompt=sc.image_negative_prompt,
-                        image_status=sc.image_status,
-                        image_blob_id=sc.image_blob_id,
-                        image_completed_at=sc.image_completed_at,
+                        image_status=ChunkStatus.PENDING if clear_image_blobs else sc.image_status,
+                        image_blob_id=None if clear_image_blobs else sc.image_blob_id,
+                        image_completed_at=None if clear_image_blobs else sc.image_completed_at,
                     )
                     self._session.add(new_scene)
                     await self._session.flush()
@@ -134,11 +152,11 @@ class WorkflowForkService:
                     workflow_id=new_id,
                     chunk_index=ch.chunk_index,
                     chunk_text=ch.chunk_text,
-                    tts_status=ch.tts_status,
-                    tts_audio_blob_id=ch.tts_audio_blob_id,
-                    tts_mp3_blob_id=ch.tts_mp3_blob_id,
-                    tts_duration_sec=ch.tts_duration_sec,
-                    tts_completed_at=ch.tts_completed_at,
+                    tts_status=ChunkStatus.PENDING if clear_tts_blobs else ch.tts_status,
+                    tts_audio_blob_id=None if clear_tts_blobs else ch.tts_audio_blob_id,
+                    tts_mp3_blob_id=None if clear_tts_blobs else ch.tts_mp3_blob_id,
+                    tts_duration_sec=None if clear_tts_blobs else ch.tts_duration_sec,
+                    tts_completed_at=None if clear_tts_blobs else ch.tts_completed_at,
                     scene_id=new_scene_id,
                 )
                 self._session.add(new_chunk)

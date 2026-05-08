@@ -671,15 +671,21 @@ class TestWorkflowForkServiceHelper:
         copied_scenes = [item for item in added if isinstance(item, WorkflowScene)]
         copied_chunks = [item for item in added if isinstance(item, WorkflowChunk)]
 
+        # STITCH_FINAL is at index 5; all 5 preceding steps are seeded as COMPLETED.
         assert [step.step_name for step in seeded_steps] == [
             StepName.GENERATE_STORY,
             StepName.TTS_SYNTHESIS,
             StepName.IMAGE_GENERATION,
+            StepName.MUSIC_GENERATION,
+            StepName.SFX_GENERATION,
         ]
+        # Only steps that had completed source rows carry output_json; the rest get None.
         assert [step.output_json for step in seeded_steps] == [
             generate_output_latest,
             tts_output,
             image_output,
+            None,  # MUSIC_GENERATION had no completed source step
+            None,  # SFX_GENERATION had no completed source step
         ]
         assert all(step.workflow_id == new_workflow_id for step in seeded_steps)
         assert all(step.status == StepStatus.COMPLETED for step in seeded_steps)
@@ -705,3 +711,135 @@ class TestWorkflowForkServiceHelper:
         assert copied_chunk.tts_duration_sec == source_chunk.tts_duration_sec
         assert copied_chunk.scene_id == new_scene_id
         assert session.flush.await_count == 4
+
+    async def test_fork_from_image_generation_copies_chunks_no_scenes(
+        self,
+    ) -> None:
+        """Fork from IMAGE_GENERATION: chunks copied with TTS blobs preserved
+        (TTS is a predecessor step), but NO scenes are pre-copied.
+
+        Scenes are intentionally omitted so that IMAGE_GENERATION creates a
+        fresh scene set matching the current chunk grouping, avoiding stale
+        chunk→scene links if grouping has changed since the source run.
+        """
+        source_id = uuid.uuid4()
+        new_workflow_id = uuid.uuid4()
+        old_scene_id = uuid.uuid4()
+        wav_blob_id = uuid.uuid4()
+        mp3_blob_id = uuid.uuid4()
+
+        source_workflow = _workflow(source_id, status=WorkflowStatus.COMPLETED)
+        generate_output = GenerateStoryStepOutput(
+            story_id=uuid.uuid4(),
+            title="A Story",
+            word_count=500,
+            act_count=3,
+        )
+        tts_output = TtsSynthesisStepOutput(
+            run_id=uuid.uuid4(),
+            chunk_count=1,
+            total_duration_sec=5.0,
+            gpu_pod_id="tts-pod",
+        )
+        completed_steps = [
+            _step(source_id, StepName.GENERATE_STORY, status=StepStatus.COMPLETED,
+                  attempt_number=1, output_json=generate_output),
+            _step(source_id, StepName.TTS_SYNTHESIS, status=StepStatus.COMPLETED,
+                  attempt_number=1, output_json=tts_output),
+        ]
+
+        source_chunk = _chunk(
+            source_id,
+            chunk_index=0,
+            chunk_text="Text chunk.",
+            tts_status=ChunkStatus.COMPLETED,
+            scene_id=old_scene_id,
+        )
+        source_chunk.tts_audio_blob_id = wav_blob_id
+        source_chunk.tts_mp3_blob_id = mp3_blob_id
+        source_chunk.tts_duration_sec = 5.0
+        source_chunk.tts_completed_at = datetime.now(timezone.utc)
+
+        session = _mock_session()
+        session.execute.side_effect = [
+            _scalar_result(source_workflow),
+            _scalars_result(completed_steps),
+            _scalars_result([source_chunk]),
+            # No scene query: needs_scenes is False when fork_idx < STITCH_FINAL
+        ]
+
+        with patch("app.services.workflow_service.uuid.uuid4", return_value=new_workflow_id):
+            forked = await fork_workflow(session, source_id, StepName.IMAGE_GENERATION)
+
+        added = [call.args[0] for call in session.add.call_args_list]
+        seeded_steps = [item for item in added if isinstance(item, WorkflowStep)]
+        copied_scenes = [item for item in added if isinstance(item, WorkflowScene)]
+        copied_chunks = [item for item in added if isinstance(item, WorkflowChunk)]
+
+        # GENERATE_STORY and TTS_SYNTHESIS are predecessors of IMAGE_GENERATION.
+        assert [step.step_name for step in seeded_steps] == [
+            StepName.GENERATE_STORY,
+            StepName.TTS_SYNTHESIS,
+        ]
+
+        # No scenes pre-copied — IMAGE_GENERATION creates a fresh set.
+        assert len(copied_scenes) == 0
+
+        # Chunks are copied with TTS blobs intact (TTS precedes the fork point).
+        assert len(copied_chunks) == 1
+        copied_chunk = copied_chunks[0]
+        assert copied_chunk.tts_audio_blob_id == wav_blob_id
+        assert copied_chunk.tts_mp3_blob_id == mp3_blob_id
+        assert copied_chunk.tts_status == ChunkStatus.COMPLETED
+        assert copied_chunk.tts_duration_sec == source_chunk.tts_duration_sec
+        # scene_id is null — no scenes were pre-copied
+        assert copied_chunk.scene_id is None
+        assert forked.id == new_workflow_id
+
+    async def test_fork_from_tts_synthesis_copies_no_chunks_or_scenes(
+        self,
+    ) -> None:
+        """Fork from TTS_SYNTHESIS: neither chunks nor scenes are pre-copied.
+
+        Chunks are intentionally omitted so that TTS_SYNTHESIS creates a fresh
+        chunk set from the current story text, avoiding stale rows if chunk
+        boundaries have changed since the source run.
+        """
+        source_id = uuid.uuid4()
+        new_workflow_id = uuid.uuid4()
+
+        source_workflow = _workflow(source_id, status=WorkflowStatus.COMPLETED)
+        generate_output = GenerateStoryStepOutput(
+            story_id=uuid.uuid4(),
+            title="A Story",
+            word_count=500,
+            act_count=3,
+        )
+        completed_steps = [
+            _step(source_id, StepName.GENERATE_STORY, status=StepStatus.COMPLETED,
+                  attempt_number=1, output_json=generate_output),
+        ]
+
+        session = _mock_session()
+        session.execute.side_effect = [
+            _scalar_result(source_workflow),
+            _scalars_result(completed_steps),
+            # No chunk or scene queries: needs_chunks is False when fork_idx < IMAGE_GENERATION
+        ]
+
+        with patch("app.services.workflow_service.uuid.uuid4", return_value=new_workflow_id):
+            forked = await fork_workflow(session, source_id, StepName.TTS_SYNTHESIS)
+
+        added = [call.args[0] for call in session.add.call_args_list]
+        seeded_steps = [item for item in added if isinstance(item, WorkflowStep)]
+        copied_scenes = [item for item in added if isinstance(item, WorkflowScene)]
+        copied_chunks = [item for item in added if isinstance(item, WorkflowChunk)]
+
+        # Only GENERATE_STORY is a predecessor of TTS_SYNTHESIS.
+        assert [step.step_name for step in seeded_steps] == [StepName.GENERATE_STORY]
+
+        # TTS_SYNTHESIS creates its own chunks; none pre-copied.
+        assert len(copied_chunks) == 0
+        # No scenes either — IMAGE hasn't run at this fork point.
+        assert len(copied_scenes) == 0
+        assert forked.id == new_workflow_id
