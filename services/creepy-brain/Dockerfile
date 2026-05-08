@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y \
 COPY services/creepy-brain/pyproject.toml ./
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e ".[vastai]"
 
 # Copy application code
 COPY services/creepy-brain/app/ ./app/
