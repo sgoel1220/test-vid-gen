@@ -35,20 +35,23 @@ log = structlog.get_logger(__name__)
 
 # --- Audio analysis constants ---
 _SAMPLE_RATE = 22050                # audio decoding sample rate (Hz)
-_N_BANDS = 32                       # number of FFT frequency bands
-_BAND_SMOOTHING = 0.4               # temporal smoothing factor (exponential MA)
+_N_BANDS = 48                       # number of FFT frequency bands
+_BAND_SMOOTHING = 0.35              # temporal smoothing factor (exponential MA)
+_FREQ_MIN = 60.0                    # Hz — log-scale lower bound (sub-bass)
+_FREQ_MAX = 9000.0                  # Hz — log-scale upper bound (presence/air)
 
 # --- Bar renderer constants ---
-_BAR_COUNT = 32                     # number of equalizer bars (matched to _N_BANDS)
-_BAR_WIDTH = 12                     # pixels per bar
-_BAR_GAP = 4                        # pixels between bars
-_BAR_MAX_HEIGHT = 0.42              # max bar height as fraction of frame height
-_BAR_BOTTOM_PAD = 28                # pixels from bottom of frame to bar base
-_BAR_BASE_COLOR = (80, 110, 255)    # gradient base color (bottom of bar)
-_BAR_TIP_COLOR = (200, 235, 255)    # gradient tip color (top of bar)
-_BAR_ALPHA = 0.85                   # bar opacity
-_BAR_GLOW_WIDTH = 5                 # pixels of glow expansion beyond bar edges
-_BAR_GLOW_ALPHA = 0.22              # glow opacity
+_BAR_COUNT = 48                     # number of equalizer bars (matched to _N_BANDS)
+_BAR_WIDTH = 10                     # pixels per bar
+_BAR_GAP = 3                        # pixels between bars
+_BAR_MAX_HEIGHT = 0.50              # max bar height as fraction of frame height
+_BAR_BOTTOM_PAD = 22                # pixels from bottom of frame to bar base
+_BAR_BASE_COLOR = (0, 230, 160)     # gradient base color — neon teal
+_BAR_TIP_COLOR = (200, 80, 255)     # gradient tip color — vivid purple
+_BAR_ALPHA = 0.92                   # bar opacity
+_BAR_GLOW_WIDTH = 7                 # pixels of glow expansion beyond bar edges
+_BAR_GLOW_ALPHA = 0.32              # glow opacity
+_BAR_CAP_RADIUS = 4                 # radius of rounded cap circle at bar tip
 
 
 async def _ffprobe_video(path: str) -> tuple[float, int, int]:
@@ -142,12 +145,19 @@ def _compute_fft_bands(
         spectrum = np.abs(np.fft.rfft(padded))
         n_bins = len(spectrum)
 
-        # Equal-width frequency bands
-        raw_bands: list[float] = []
+        # Log-spaced frequency bands for perceptual spread across the bar set
+        hz_per_bin = _SAMPLE_RATE / (2.0 * (n_bins - 1)) if n_bins > 1 else 1.0
+        log_edges = np.logspace(
+            np.log10(max(_FREQ_MIN, hz_per_bin)),
+            np.log10(min(_FREQ_MAX, _SAMPLE_RATE / 2.0)),
+            n_bands + 1,
+        )
+        raw_bands = []
         for b in range(n_bands):
-            lo = int(b * n_bins / n_bands)
-            hi = max(int((b + 1) * n_bins / n_bands), lo + 1)
-            raw_bands.append(float(np.mean(spectrum[lo:hi])))
+            lo_bin = max(0, int(log_edges[b] / hz_per_bin))
+            hi_bin = max(int(log_edges[b + 1] / hz_per_bin), lo_bin + 1)
+            hi_bin = min(hi_bin, n_bins)
+            raw_bands.append(float(np.mean(spectrum[lo_bin:hi_bin])))
 
         # Exponential moving average for smooth bar animation
         smoothed = [
@@ -202,6 +212,11 @@ def _render_overlay_frame(
     glow_draw = ImageDraw.Draw(glow_overlay)
     glow_rgba = (*_BAR_TIP_COLOR, int(_BAR_GLOW_ALPHA * 255))
 
+    # --- Cap pass (PIL draw — rounded circle at tip of each bar) ---
+    cap_overlay = Image.new("RGBA", (vid_w, vid_h), (0, 0, 0, 0))
+    cap_draw = ImageDraw.Draw(cap_overlay)
+    cap_rgba = (255, 255, 255, int(0.90 * 255))
+
     # --- Main bar pass (numpy gradient fill for performance) ---
     bar_arr = np.zeros((vid_h, vid_w, 4), dtype=np.uint8)
 
@@ -225,6 +240,14 @@ def _render_overlay_frame(
         gy_top = max(0, y_top - _BAR_GLOW_WIDTH)
         glow_draw.rectangle([gx_lo, gy_top, gx_hi - 1, y_bottom - 1], fill=glow_rgba)
 
+        # Rounded cap: white circle centred at bar tip
+        cx = (x_lo + x_hi) // 2
+        r = _BAR_CAP_RADIUS
+        cap_draw.ellipse(
+            [cx - r, y_top - r, cx + r, y_top + r],
+            fill=cap_rgba,
+        )
+
         # Gradient: t=0.0 at bottom (base color), t=1.0 at top (tip color)
         t = np.linspace(0.0, 1.0, h, dtype=np.float32)[::-1]  # shape (h,)
 
@@ -246,11 +269,12 @@ def _render_overlay_frame(
             bar_colors[:, np.newaxis, :], (h, bar_w, 4)
         )
 
-    # Composite: video base → glow → bars
+    # Composite: video base → glow → bars → caps
     base = Image.fromarray(video_frame, mode="RGB").convert("RGBA")
     bar_img = Image.fromarray(bar_arr, mode="RGBA")
     composited = Image.alpha_composite(base, glow_overlay)
     composited = Image.alpha_composite(composited, bar_img)
+    composited = Image.alpha_composite(composited, cap_overlay)
     return np.array(composited.convert("RGB"), dtype=np.uint8)
 
 
