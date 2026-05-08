@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
 from app.engine import StepContext, StepDef, WorkflowDef, engine
-from app.gpu import GpuProvider, get_provider
+from app.gpu import GpuPod as GpuPodBase, GpuProvider, get_provider_from_settings
 from app.models.enums import GpuPodStatus, WorkflowStatus
 from app.models.gpu_pod import GpuPod
 from app.models.workflow import Workflow
@@ -47,7 +47,6 @@ async def _recon_orphaned_pods(
     session_maker = get_session_maker()
 
     now = datetime.now(timezone.utc)
-    provider = get_provider(settings.runpod_api_key)
     terminated = 0
 
     # ── Phase 1: DB sweep ───────────────────────────────────────────────
@@ -76,14 +75,23 @@ async def _recon_orphaned_pods(
         if reason is None:
             continue
 
-        terminated += await _terminate_pod(provider, pod.id, reason, now, session_maker)
+        # Use the provider the pod was created with, not the current config.
+        pod_provider = get_provider_from_settings(pod.provider.value)
+        terminated += await _terminate_pod(pod_provider, pod.id, reason, now, session_maker)
 
     # ── Phase 2: Provider sweep ─────────────────────────────────────────
-    try:
-        live_pods = await provider.list_active_pods()
-    except Exception:
-        log.exception("recon: failed to list active pods from provider")
-        live_pods = []
+    # Sweep every provider that has tracked DB pods (handles config migrations).
+    providers_to_sweep: set[str] = {settings.gpu_provider}
+    for pod in db_pods:
+        providers_to_sweep.add(pod.provider.value)
+
+    live_pods: list[GpuPodBase] = []
+    for provider_name in providers_to_sweep:
+        sweep_provider = get_provider_from_settings(provider_name)
+        try:
+            live_pods.extend(await sweep_provider.list_active_pods())
+        except Exception:
+            log.exception("recon: failed to list active pods from provider=%s", provider_name)
 
     untracked = 0
     for live_pod in live_pods:
@@ -111,7 +119,8 @@ async def _recon_orphaned_pods(
             continue
 
         untracked += 1
-        terminated += await _terminate_pod(provider, live_pod.id, reason, now, session_maker)
+        live_pod_provider = get_provider_from_settings(live_pod.provider)
+        terminated += await _terminate_pod(live_pod_provider, live_pod.id, reason, now, session_maker)
 
     log.info(
         "recon: db_checked=%d provider_untracked=%d terminated=%d",

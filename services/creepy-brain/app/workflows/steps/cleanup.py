@@ -10,8 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.engine import SkippedStepOutput, StepContext
 from sqlalchemy import select
 
-from app.config import settings
-from app.gpu import get_provider
+from app.gpu import get_provider_from_settings
 from app.gpu.lifecycle import terminate_and_finalize
 from app.models.enums import GpuPodStatus
 from app.models.gpu_pod import GpuPod
@@ -75,12 +74,12 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> CleanupStepOu
         log.info("cleanup_gpu_pod: no active pods for workflow %s", workflow_id)
         return SkippedStepOutput(reason="no_active_pods")
 
-    provider = get_provider(settings.runpod_api_key)
     pod_results: list[PodCleanupResult] = []
 
     for pod in pods:
         pod_id: str = pod.id
         try:
+            provider = get_provider_from_settings(pod.provider.value)
             await terminate_and_finalize(
                 provider, pod_id, session_maker, reason="workflow_failure"
             )

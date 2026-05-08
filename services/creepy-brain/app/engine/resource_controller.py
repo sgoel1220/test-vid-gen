@@ -87,8 +87,7 @@ class WorkflowResourceController:
             return
         try:
             GpuPod = _gpu_pod_model()
-            settings = getattr(import_module("app.config"), "settings")
-            get_provider = getattr(import_module("app.gpu"), "get_provider")
+            get_provider_from_settings = getattr(import_module("app.gpu"), "get_provider_from_settings")
             terminate_and_finalize = getattr(
                 import_module("app.gpu.lifecycle"),
                 "terminate_and_finalize",
@@ -108,9 +107,9 @@ class WorkflowResourceController:
             if not pods:
                 return
 
-            provider = get_provider(settings.runpod_api_key)
             for pod in pods:
                 try:
+                    provider = get_provider_from_settings(pod.provider.value)
                     await terminate_and_finalize(
                         provider,
                         pod.id,
