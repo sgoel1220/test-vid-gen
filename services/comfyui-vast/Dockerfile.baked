@@ -1,91 +1,21 @@
-# ComfyUI Horror-Painting Server — MODELS BAKED IN
-# AlbedoBase XL v3.1 + 5 LoRAs, 34-step dpmpp_2m/karras
-# For regular Vast.ai instances (persistent GPU server, no PyWorker).
+# ComfyUI Horror-Painting Server — app image (code only, models in base).
+# Builds in seconds. Rebuild on every code/workflow change.
 #
-# Build (from repo root):
+# Requires base image to exist first:
 #   docker buildx build --platform linux/amd64 \
 #     --build-arg CIVITAI_TOKEN=<token> \
+#     -f services/comfyui-vast/Dockerfile.base \
+#     -t ghcr.io/sgoel1220/comfyui-vast-base:latest --push .
+#
+# Then build app image:
+#   docker buildx build --platform linux/amd64 \
 #     -f services/comfyui-vast/Dockerfile.baked \
-#     -t ghcr.io/sgoel1220/comfyui-vast:baked --push .
+#     -t ghcr.io/sgoel1220/comfyui-vast:main --push .
 
-FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
-
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
+FROM ghcr.io/sgoel1220/comfyui-vast-base:latest
 
 # ---------------------------------------------------------------------------
-# System deps
-# ---------------------------------------------------------------------------
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv git wget curl \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN python3 -m venv /venv
-ENV PATH="/venv/bin:$PATH"
-
-# ---------------------------------------------------------------------------
-# Python deps
-# ---------------------------------------------------------------------------
-
-RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git /app/ComfyUI
-
-RUN pip install --no-cache-dir \
-        torch==2.5.1 torchvision==0.20.1 \
-        --index-url https://download.pytorch.org/whl/cu121
-
-RUN pip install --no-cache-dir -r /app/ComfyUI/requirements.txt
-
-RUN pip install --no-cache-dir \
-        fastapi==0.115.6 \
-        "uvicorn[standard]==0.32.1" \
-        pydantic==2.10.4 \
-        httpx==0.28.1
-
-# ---------------------------------------------------------------------------
-# Models — baked into the image
-# ---------------------------------------------------------------------------
-
-RUN mkdir -p /models/checkpoints /models/loras \
-             /app/ComfyUI/models/checkpoints /app/ComfyUI/models/loras \
-             /app/ComfyUI/output
-
-ARG CIVITAI_TOKEN
-RUN test -n "$CIVITAI_TOKEN" || (echo "ERROR: CIVITAI_TOKEN build arg required" && exit 1)
-
-# Layer 1: AlbedoBase XL v3.1 checkpoint (~6.5 GB)
-RUN wget -q --show-progress -O /models/checkpoints/albedobase_xl_v31.safetensors \
-    "https://civitai.com/api/download/models/281176?token=${CIVITAI_TOKEN}" \
-    && ln -sf /models/checkpoints/albedobase_xl_v31.safetensors \
-              /app/ComfyUI/models/checkpoints/albedobase_xl_v31.safetensors
-
-# Layer 2: Detail Tweaker XL LoRA (~370 MB)
-RUN wget -q --show-progress -O /models/loras/detail_tweaker_xl.safetensors \
-    "https://civitai.com/api/download/models/135867?token=${CIVITAI_TOKEN}"
-
-# Layer 3: xl_more_art-full LoRA (~370 MB)
-RUN wget -q --show-progress -O /models/loras/xl_more_art_full.safetensors \
-    "https://civitai.com/api/download/models/152309?token=${CIVITAI_TOKEN}"
-
-# Layer 4: Midjourney Mimic LoRA (~370 MB)
-RUN wget -q --show-progress -O /models/loras/midjourney_mimic.safetensors \
-    "https://civitai.com/api/download/models/283697?token=${CIVITAI_TOKEN}"
-
-# Layer 5: Impressionism LoRA (~55 MB)
-RUN wget -q --show-progress -O /models/loras/impressionism_sdxl.safetensors \
-    "https://civitai.com/api/download/models/133465?token=${CIVITAI_TOKEN}"
-
-# Layer 6: Andreas Achenbach LoRA (~55 MB)
-RUN wget -q --show-progress -O /models/loras/andreas_achenbach_sdxl.safetensors \
-    "https://civitai.com/api/download/models/510042?token=${CIVITAI_TOKEN}"
-
-# Symlink all LoRAs into ComfyUI's expected path
-RUN for f in /models/loras/*.safetensors; do \
-        ln -sf "$f" "/app/ComfyUI/models/loras/$(basename "$f")"; \
-    done
-
-# ---------------------------------------------------------------------------
-# App files
+# App files — the only layer that changes between deploys
 # ---------------------------------------------------------------------------
 
 COPY services/comfyui-serverless-vast/workflow_api.json /app/workflow_api.json
@@ -95,7 +25,7 @@ COPY services/comfyui-vast/start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 # ---------------------------------------------------------------------------
-# Runtime — direct FastAPI server, no PyWorker
+# Runtime
 # ---------------------------------------------------------------------------
 
 EXPOSE 8006
