@@ -126,7 +126,12 @@ async def terminate_and_finalize(
     Raises:
         Any exception from the provider or DB is propagated.
     """
-    await provider.terminate_pod(pod_id)
+    terminated = await provider.terminate_pod(pod_id)
+    if not terminated:
+        raise RuntimeError(
+            f"provider.terminate_pod returned False for pod {pod_id}; "
+            "cost record not finalized — pod may still be running"
+        )
     async with session_maker() as session:
         total_cost = await CostService(session).finalize_cost(pod_id, reason=reason)
     log.info("pod terminated pod_id=%s cost_cents=%d reason=%s", pod_id, total_cost, reason)
