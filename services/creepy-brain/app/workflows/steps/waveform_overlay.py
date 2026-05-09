@@ -1,16 +1,15 @@
 """waveform_overlay step executor.
 
-Generates a standalone animated waveform visualization video.
+Composites an animated waveform onto the stitched video.
 
-Black background. Static symmetric dark-grey bars represent the full audio
-timeline across the bottom strip of the frame. A playhead moves left-to-right
-as the audio plays.
+Static symmetric dark-grey bars represent the full audio timeline across the
+bottom strip of the frame. A playhead moves left-to-right as the audio plays.
+Bars are drawn directly onto the video frames.
 """
 
 from __future__ import annotations
 
 import asyncio
-import io
 import struct
 import tempfile
 import uuid
@@ -19,7 +18,6 @@ from typing import Any
 
 import numpy as np
 import structlog
-from PIL import Image
 from sqlalchemy import select
 
 from app.engine import SkippedStepOutput, StepContext
@@ -34,7 +32,6 @@ from app.workflows.steps.stitch import StitchStepOutput
 log = structlog.get_logger(__name__)
 
 # --- Visual constants ---
-_BG_COLOR = (0, 0, 0)              # Black background
 _BAR_COLOR = (80, 80, 80)          # Dark grey bars
 _BAR_W = 2                         # Bar width in pixels
 _BAR_GAP = 2                       # Gap between bars (stride = 4px)
@@ -109,20 +106,20 @@ def _compute_envelope(
 
 
 def _render_frame(
-    background: np.ndarray[Any, np.dtype[np.uint8]],
+    video_frame: np.ndarray[Any, np.dtype[np.uint8]],
     coarse_envs: list[float],
     frame_idx: int,
     total_frames: int,
     vid_w: int,
     vid_h: int,
 ) -> np.ndarray[Any, np.dtype[np.uint8]]:
-    """Render one waveform frame.
+    """Composite waveform bars onto a video frame.
 
     Static bars span the full width representing the entire audio timeline.
     The playhead moves left-to-right. Bars are confined to a bottom strip
     centered at _BAR_CENTER_Y_FRAC with half-height _BAR_ZONE_HALF_FRAC.
     """
-    frame: np.ndarray[Any, np.dtype[np.uint8]] = background.copy()
+    frame: np.ndarray[Any, np.dtype[np.uint8]] = video_frame.copy()
 
     center_y = int(vid_h * _BAR_CENTER_Y_FRAC)
     zone_half_h = int(vid_h * _BAR_ZONE_HALF_FRAC)
@@ -229,23 +226,34 @@ async def execute(
         samples = await _decode_audio_f32(str(audio_in))
         coarse_envs = _compute_envelope(samples, _COARSE_STEPS)
 
-        # Pre-filled background (near-black, reused every frame)
-        background: np.ndarray[Any, np.dtype[np.uint8]] = np.zeros(
-            (vid_h, vid_w, 3), dtype=np.uint8
-        )
-        background[:] = _BG_COLOR
-
         duration_sec = stitch_out.total_duration_sec
         total_frames = max(1, int(duration_sec * fps))
+        frame_bytes = vid_w * vid_h * 3
 
         log.info("waveform_overlay: rendering %d frames", total_frames)
 
-        # Launch ffmpeg: PNG frames on stdin + audio file → output video
-        ffmpeg_cmd = [
+        # Reader: decode input video to raw RGB24 frames
+        reader_cmd = [
             "ffmpeg", "-y",
-            "-f", "image2pipe",
-            "-framerate", f"{fps:.6f}",
-            "-vcodec", "png",
+            "-i", str(video_in),
+            "-f", "rawvideo",
+            "-pix_fmt", "rgb24",
+            "-v", "error",
+            "pipe:1",
+        ]
+        reader_proc = await asyncio.create_subprocess_exec(
+            *reader_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        # Writer: raw RGB24 frames + audio → output video
+        writer_cmd = [
+            "ffmpeg", "-y",
+            "-f", "rawvideo",
+            "-pix_fmt", "rgb24",
+            "-s", f"{vid_w}x{vid_h}",
+            "-r", f"{fps:.6f}",
             "-i", "pipe:0",
             "-i", str(audio_in),
             "-c:v", "libx264",
@@ -253,31 +261,30 @@ async def execute(
             "-c:a", "copy",
             str(video_out),
         ]
-
-        proc = await asyncio.create_subprocess_exec(
-            *ffmpeg_cmd,
+        writer_proc = await asyncio.create_subprocess_exec(
+            *writer_cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
 
-        assert proc.stdin is not None
+        assert reader_proc.stdout is not None
+        assert writer_proc.stdin is not None
 
-        # Render and stream frames to ffmpeg
         for frame_idx in range(total_frames):
-            frame_arr = _render_frame(
-                background, coarse_envs,
+            raw = await reader_proc.stdout.readexactly(frame_bytes)
+            video_frame = np.frombuffer(raw, dtype=np.uint8).reshape((vid_h, vid_w, 3))
+            composited = _render_frame(
+                video_frame, coarse_envs,
                 frame_idx, total_frames, vid_w, vid_h,
             )
-            pil_frame = Image.fromarray(frame_arr, mode="RGB")
-            buf = io.BytesIO()
-            pil_frame.save(buf, format="PNG")
-            proc.stdin.write(buf.getvalue())
+            writer_proc.stdin.write(composited.tobytes())
 
-        proc.stdin.close()
-        _, stderr_bytes = await proc.communicate()
+        writer_proc.stdin.close()
+        _, stderr_bytes = await writer_proc.communicate()
+        await reader_proc.communicate()
 
-        if proc.returncode != 0:
+        if writer_proc.returncode != 0:
             stderr = stderr_bytes.decode("utf-8", errors="replace")
             raise RuntimeError(f"ffmpeg waveform_overlay failed: {stderr}")
 
