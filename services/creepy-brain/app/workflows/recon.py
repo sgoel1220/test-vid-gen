@@ -14,9 +14,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.config import settings
 from app.engine import StepContext, StepDef, WorkflowDef, engine
-from app.gpu import GpuProvider, get_provider
+from app.gpu import GpuProvider, get_provider_from_settings
 from app.models.enums import GpuPodStatus, WorkflowStatus
 from app.models.gpu_pod import GpuPod
 from app.models.workflow import Workflow
@@ -47,7 +46,7 @@ async def _recon_orphaned_pods(
     session_maker = get_session_maker()
 
     now = datetime.now(timezone.utc)
-    provider = get_provider(settings.runpod_api_key)
+    provider = get_provider_from_settings()
     terminated = 0
 
     # ── Phase 1: DB sweep ───────────────────────────────────────────────
