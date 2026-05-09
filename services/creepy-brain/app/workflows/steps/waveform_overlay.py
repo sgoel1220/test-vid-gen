@@ -42,13 +42,13 @@ _BAND_SMOOTHING = 0.4               # temporal smoothing factor (exponential MA)
 _BAR_COUNT = 32                     # number of equalizer bars (matched to _N_BANDS)
 _BAR_WIDTH = 12                     # pixels per bar
 _BAR_GAP = 4                        # pixels between bars
-_BAR_MAX_HEIGHT = 0.42              # max bar height as fraction of frame height
+_BAR_MAX_HEIGHT = 0.22              # max bar height as fraction of frame height
 _BAR_BOTTOM_PAD = 28                # pixels from bottom of frame to bar base
-_BAR_BASE_COLOR = (80, 110, 255)    # gradient base color (bottom of bar)
-_BAR_TIP_COLOR = (200, 235, 255)    # gradient tip color (top of bar)
-_BAR_ALPHA = 0.85                   # bar opacity
+_BAR_BASE_COLOR = (0, 0, 0)         # gradient base color (center of bar)
+_BAR_TIP_COLOR = (30, 30, 30)       # gradient tip color (edges of bar)
+_BAR_ALPHA = 1.0                    # bar opacity
 _BAR_GLOW_WIDTH = 5                 # pixels of glow expansion beyond bar edges
-_BAR_GLOW_ALPHA = 0.22              # glow opacity
+_BAR_GLOW_ALPHA = 0.0               # glow opacity (disabled for black bars)
 
 
 async def _ffprobe_video(path: str) -> tuple[float, int, int]:
@@ -195,7 +195,7 @@ def _render_overlay_frame(
     total_width = n_bars * _BAR_WIDTH + max(0, n_bars - 1) * _BAR_GAP
     x_start = (vid_w - total_width) // 2
     bar_max_h = int(vid_h * _BAR_MAX_HEIGHT)
-    y_bottom = vid_h - _BAR_BOTTOM_PAD
+    y_bottom = int(vid_h * 0.75)
 
     # --- Glow pass (PIL draw — wider translucent halo behind each bar) ---
     glow_overlay = Image.new("RGBA", (vid_w, vid_h), (0, 0, 0, 0))
@@ -204,6 +204,13 @@ def _render_overlay_frame(
 
     # --- Main bar pass (numpy gradient fill for performance) ---
     bar_arr = np.zeros((vid_h, vid_w, 4), dtype=np.uint8)
+
+    def _gradient(t: np.ndarray[Any, np.dtype[np.float32]]) -> np.ndarray[Any, np.dtype[np.uint8]]:
+        r = np.clip(_BAR_BASE_COLOR[0] + t * (_BAR_TIP_COLOR[0] - _BAR_BASE_COLOR[0]), 0, 255).astype(np.uint8)
+        g = np.clip(_BAR_BASE_COLOR[1] + t * (_BAR_TIP_COLOR[1] - _BAR_BASE_COLOR[1]), 0, 255).astype(np.uint8)
+        b = np.clip(_BAR_BASE_COLOR[2] + t * (_BAR_TIP_COLOR[2] - _BAR_BASE_COLOR[2]), 0, 255).astype(np.uint8)
+        a = np.full(len(t), int(_BAR_ALPHA * 255), dtype=np.uint8)
+        return np.stack([r, g, b, a], axis=1)
 
     for i in range(n_bars):
         energy = current_bands[i]
@@ -225,26 +232,28 @@ def _render_overlay_frame(
         gy_top = max(0, y_top - _BAR_GLOW_WIDTH)
         glow_draw.rectangle([gx_lo, gy_top, gx_hi - 1, y_bottom - 1], fill=glow_rgba)
 
-        # Gradient: t=0.0 at bottom (base color), t=1.0 at top (tip color)
-        t = np.linspace(0.0, 1.0, h, dtype=np.float32)[::-1]  # shape (h,)
+        # --- Upward bar: gradient t=0 at bottom (base), t=1 at top (tip) ---
+        t_up = np.linspace(0.0, 1.0, h, dtype=np.float32)[::-1]  # shape (h,)
 
-        r_ch = np.clip(
-            _BAR_BASE_COLOR[0] + t * (_BAR_TIP_COLOR[0] - _BAR_BASE_COLOR[0]), 0, 255
-        ).astype(np.uint8)
-        g_ch = np.clip(
-            _BAR_BASE_COLOR[1] + t * (_BAR_TIP_COLOR[1] - _BAR_BASE_COLOR[1]), 0, 255
-        ).astype(np.uint8)
-        b_ch = np.clip(
-            _BAR_BASE_COLOR[2] + t * (_BAR_TIP_COLOR[2] - _BAR_BASE_COLOR[2]), 0, 255
-        ).astype(np.uint8)
-        a_ch = np.full(h, int(_BAR_ALPHA * 255), dtype=np.uint8)
-
-        # Stack to (h, 4) then broadcast to (h, bar_w, 4)
-        bar_colors = np.stack([r_ch, g_ch, b_ch, a_ch], axis=1)  # (h, 4)
         bar_w = x_hi - x_lo
+        up_colors = _gradient(t_up)
         bar_arr[y_top:y_bottom, x_lo:x_hi] = np.broadcast_to(
-            bar_colors[:, np.newaxis, :], (h, bar_w, 4)
+            up_colors[:, np.newaxis, :], (h, bar_w, 4)
         )
+
+        # --- Downward bar: mirror below y_bottom ---
+        y_bot_down = min(vid_h, y_bottom + bar_h)
+        h_down = y_bot_down - y_bottom
+        if h_down > 0:
+            # t=0 at top (center/base color), t=1 at bottom (tip color)
+            t_down = np.linspace(0.0, 1.0, h_down, dtype=np.float32)
+            down_colors = _gradient(t_down)
+            bar_arr[y_bottom:y_bot_down, x_lo:x_hi] = np.broadcast_to(
+                down_colors[:, np.newaxis, :], (h_down, bar_w, 4)
+            )
+            # Glow below
+            gy_bot_down = min(vid_h, y_bot_down + _BAR_GLOW_WIDTH)
+            glow_draw.rectangle([gx_lo, y_bottom, gx_hi - 1, gy_bot_down - 1], fill=glow_rgba)
 
     # Composite: video base → glow → bars
     base = Image.fromarray(video_frame, mode="RGB").convert("RGBA")
