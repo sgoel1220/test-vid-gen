@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1
+# ComfyUI-Bare Horror-Painting Server — app image (code only, models in base).
+# Builds in seconds. Rebuild on every code change.
+#
+# COPY --link makes app file layers independent of base image changes.
+# If only server.py changes, only the server.py COPY layer is re-run.
+#
+# Build base first:
+#   export CIVITAI_TOKEN=<token>
+#   docker buildx build --platform linux/amd64 \
+#     --secret id=civitai_token,env=CIVITAI_TOKEN \
+#     -f services/comfyui-bare/Dockerfile.base \
+#     -t ghcr.io/sgoel1220/comfyui-bare-base:latest --push .
+#
+# Then build app image:
+#   docker buildx build --platform linux/amd64 \
+#     -f services/comfyui-bare/Dockerfile.baked \
+#     -t ghcr.io/sgoel1220/comfyui-bare:main --push .
+
+# Pin to a specific digest after first base push for reproducible builds:
+#   docker pull ghcr.io/sgoel1220/comfyui-bare-base:latest
+#   docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/sgoel1220/comfyui-bare-base:latest
+#   Then replace :latest below with @sha256:<digest>
+FROM ghcr.io/sgoel1220/comfyui-bare-base:latest
+
+RUN mkdir -p /app
+
+# ---------------------------------------------------------------------------
+# App files — COPY --link makes each file's cache independent of base changes
+# ---------------------------------------------------------------------------
+COPY --link services/comfyui-bare/server.py /app/server.py
+COPY --link services/comfyui-bare/start.sh /app/start.sh
+
+RUN chmod +x /app/start.sh
+
+# ---------------------------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------------------------
+
+EXPOSE 8006
+
+# 180s start-period (vs 600s for ComfyUI) — diffusers loads much faster
+HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8006/ready >/dev/null || exit 1
+
+CMD ["/app/start.sh"]
