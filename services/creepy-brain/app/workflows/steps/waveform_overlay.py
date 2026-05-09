@@ -44,11 +44,11 @@ _BAR_WIDTH = 12                     # pixels per bar
 _BAR_GAP = 4                        # pixels between bars
 _BAR_MAX_HEIGHT = 0.22              # max bar height as fraction of frame height
 _BAR_BOTTOM_PAD = 28                # pixels from bottom of frame to bar base
-_BAR_BASE_COLOR = (80, 110, 255)    # gradient base color (bottom of bar)
-_BAR_TIP_COLOR = (200, 235, 255)    # gradient tip color (top of bar)
-_BAR_ALPHA = 0.85                   # bar opacity
+_BAR_BASE_COLOR = (0, 0, 0)         # gradient base color (center of bar)
+_BAR_TIP_COLOR = (30, 30, 30)       # gradient tip color (edges of bar)
+_BAR_ALPHA = 1.0                    # bar opacity
 _BAR_GLOW_WIDTH = 5                 # pixels of glow expansion beyond bar edges
-_BAR_GLOW_ALPHA = 0.22              # glow opacity
+_BAR_GLOW_ALPHA = 0.0               # glow opacity (disabled for black bars)
 
 
 async def _ffprobe_video(path: str) -> tuple[float, int, int]:
