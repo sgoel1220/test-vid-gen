@@ -1,9 +1,6 @@
 services:
   brain:
-    build:
-      context: ../..
-      dockerfile: services/creepy-brain/Dockerfile
-    image: creepy-brain:latest
+    image: ghcr.io/sgoel1220/creepy-brain:latest
     container_name: creepy-brain
     ports:
       - "8006:8006"
