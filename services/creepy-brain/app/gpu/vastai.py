@@ -296,6 +296,7 @@ class VastAIProvider:
                 image=spec.image,
                 disk=float(spec.disk_size_gb),
                 label=idempotency_key,
+                runtype="direct",
             )
             if env_dict:
                 kwargs["env"] = env_dict
