@@ -42,7 +42,7 @@ _BAND_SMOOTHING = 0.4               # temporal smoothing factor (exponential MA)
 _BAR_COUNT = 32                     # number of equalizer bars (matched to _N_BANDS)
 _BAR_WIDTH = 12                     # pixels per bar
 _BAR_GAP = 4                        # pixels between bars
-_BAR_MAX_HEIGHT = 0.42              # max bar height as fraction of frame height
+_BAR_MAX_HEIGHT = 0.22              # max bar height as fraction of frame height
 _BAR_BOTTOM_PAD = 28                # pixels from bottom of frame to bar base
 _BAR_BASE_COLOR = (80, 110, 255)    # gradient base color (bottom of bar)
 _BAR_TIP_COLOR = (200, 235, 255)    # gradient tip color (top of bar)
@@ -195,7 +195,7 @@ def _render_overlay_frame(
     total_width = n_bars * _BAR_WIDTH + max(0, n_bars - 1) * _BAR_GAP
     x_start = (vid_w - total_width) // 2
     bar_max_h = int(vid_h * _BAR_MAX_HEIGHT)
-    y_bottom = vid_h - _BAR_BOTTOM_PAD
+    y_bottom = int(vid_h * 0.75)
 
     # --- Glow pass (PIL draw — wider translucent halo behind each bar) ---
     glow_overlay = Image.new("RGBA", (vid_w, vid_h), (0, 0, 0, 0))
