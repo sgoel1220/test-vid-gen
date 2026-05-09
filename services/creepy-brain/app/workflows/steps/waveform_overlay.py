@@ -2,11 +2,9 @@
 
 Generates a standalone animated waveform visualization video.
 
-Near-black background. Symmetric white bars in the lower half of the frame
-scroll continuously from right to left past a fixed playhead position. Bar
-heights are driven by audio amplitude from a high-resolution envelope. At
-peak amplitude, bars span the full height of the lower zone (mid-frame to
-bottom edge).
+Black background. Static symmetric dark-grey bars represent the full audio
+timeline across the bottom strip of the frame. A playhead moves left-to-right
+as the audio plays.
 """
 
 from __future__ import annotations
@@ -36,14 +34,13 @@ from app.workflows.steps.stitch import StitchStepOutput
 log = structlog.get_logger(__name__)
 
 # --- Visual constants ---
-_BG_COLOR = (10, 10, 10)           # Near-black background
+_BG_COLOR = (0, 0, 0)              # Black background
 _BAR_COLOR = (80, 80, 80)          # Dark grey bars
 _BAR_W = 2                         # Bar width in pixels
 _BAR_GAP = 2                       # Gap between bars (stride = 4px)
-_WAVEFORM_CENTER_FRAC = 0.75       # Waveform center line at 75% of frame height
-_PLAYHEAD_X_FRAC = 0.33            # Fixed playhead position (left-third of frame)
-_VISIBLE_SECONDS = 8.0             # Seconds of audio visible at once
-_COARSE_STEPS = 10000              # High-res envelope for smooth scrolling
+_BAR_CENTER_Y_FRAC = 0.88          # Center line of bar strip (bottom 25%)
+_BAR_ZONE_HALF_FRAC = 0.10         # Half-height of bar zone as fraction of frame
+_COARSE_STEPS = 10000              # Envelope resolution
 _SAMPLE_RATE = 22050               # Audio decoding sample rate (Hz)
 
 
@@ -116,37 +113,27 @@ def _render_frame(
     coarse_envs: list[float],
     frame_idx: int,
     total_frames: int,
-    total_duration_sec: float,
     vid_w: int,
     vid_h: int,
 ) -> np.ndarray[Any, np.dtype[np.uint8]]:
-    """Render one scrolling waveform frame.
+    """Render one waveform frame.
 
-    The waveform is positioned in the lower half of the frame. Bars are
-    symmetric around a center line at _WAVEFORM_CENTER_FRAC of the frame
-    height. The playhead is fixed at _PLAYHEAD_X_FRAC; the audio data scrolls
-    right-to-left. At peak amplitude, bars span from mid-frame to the bottom
-    edge.
+    Static bars span the full width representing the entire audio timeline.
+    The playhead moves left-to-right. Bars are confined to a bottom strip
+    centered at _BAR_CENTER_Y_FRAC with half-height _BAR_ZONE_HALF_FRAC.
     """
     frame: np.ndarray[Any, np.dtype[np.uint8]] = background.copy()
 
-    center_y = int(vid_h * _WAVEFORM_CENTER_FRAC)
-    # Lower zone: center_y ± zone_half_h covers [50%..100%] of frame height
-    zone_half_h = vid_h // 4
+    center_y = int(vid_h * _BAR_CENTER_Y_FRAC)
+    zone_half_h = int(vid_h * _BAR_ZONE_HALF_FRAC)
 
-    playhead_x = int(vid_w * _PLAYHEAD_X_FRAC)
-    current_frac = frame_idx / max(1, total_frames - 1)
-    visible_frac = _VISIBLE_SECONDS / total_duration_sec
     n_envs = len(coarse_envs)
     stride = _BAR_W + _BAR_GAP
 
     x = 0
     while x + _BAR_W <= vid_w:
-        # Map bar x position to audio fraction (scrolling window)
-        x_offset_frac = (x - playhead_x) / vid_w
-        audio_frac = current_frac + x_offset_frac * visible_frac
-        audio_frac = max(0.0, min(1.0, audio_frac))
-
+        # Each bar maps to a fixed position in the audio timeline
+        audio_frac = x / vid_w
         env_idx = min(n_envs - 1, int(audio_frac * n_envs))
         amplitude = coarse_envs[env_idx]
 
@@ -280,7 +267,7 @@ async def execute(
         for frame_idx in range(total_frames):
             frame_arr = _render_frame(
                 background, coarse_envs,
-                frame_idx, total_frames, duration_sec, vid_w, vid_h,
+                frame_idx, total_frames, vid_w, vid_h,
             )
             pil_frame = Image.fromarray(frame_arr, mode="RGB")
             buf = io.BytesIO()
