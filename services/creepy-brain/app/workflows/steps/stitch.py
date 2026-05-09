@@ -45,6 +45,50 @@ log = structlog.get_logger(__name__)
 _VIDEO_SCALE = "1280:720"  # output dimensions (W:H)
 
 
+def _crossfade_concat(
+    chunks: list[np.ndarray[Any, np.dtype[np.float32]]],
+    sample_rate: int,
+) -> np.ndarray[Any, np.dtype[np.float32]]:
+    """Concatenate audio chunks with a 30ms linear crossfade at each boundary.
+
+    Args:
+        chunks: Non-empty list of float32 audio arrays (1-D mono or 2-D stereo).
+        sample_rate: Sample rate in Hz, used to compute crossfade length.
+
+    Returns:
+        Single concatenated float32 array with crossfaded boundaries.
+
+    Raises:
+        ValueError: If chunks is empty.
+    """
+    if not chunks:
+        raise ValueError("chunks must be non-empty")
+    if len(chunks) == 1:
+        return chunks[0]
+
+    xfade_samples = max(1, int(sample_rate * 0.030))  # 30ms
+
+    result: np.ndarray[Any, np.dtype[np.float32]] = chunks[0]
+    for nxt in chunks[1:]:
+        fade_len = min(xfade_samples, len(result), len(nxt))
+        if fade_len < 2:
+            result = np.concatenate([result, nxt])
+            continue
+
+        fade_out = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)
+        fade_in = np.linspace(0.0, 1.0, fade_len, dtype=np.float32)
+        # Broadcast fade envelopes over channel dimension for stereo arrays
+        if result.ndim > 1:
+            fade_out = fade_out[:, np.newaxis]
+            fade_in = fade_in[:, np.newaxis]
+        overlap: np.ndarray[Any, np.dtype[np.float32]] = (
+            result[-fade_len:] * fade_out + nxt[:fade_len] * fade_in
+        )
+        result = np.concatenate([result[:-fade_len], overlap, nxt[fade_len:]])
+
+    return result
+
+
 class StitchStepOutput(BaseModel):
     """Output of the stitch_final step."""
 
@@ -188,8 +232,13 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
     if sample_rate is None:
         raise ValueError("No audio data found in chunks")
 
-    stitched = np.concatenate(arrays)
+    stitched = _crossfade_concat(arrays, sample_rate)
     total_duration_sec = len(stitched) / sample_rate
+
+    # Actual crossfade window in seconds — one boundary removed per chunk join.
+    # Used to adjust downstream timing so SRT and SFX stay in sync with the
+    # shorter stitched audio.
+    actual_xfade_sec: float = max(1, int(sample_rate * 0.030)) / sample_rate
 
     log.info(
         "stitch_final: stitched %d chunks, duration=%.1fs, sr=%d",
@@ -215,6 +264,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
             chunk_data=chunk_data,
             ctx=ctx,
             session_maker=session_maker,
+            xfade_sec=actual_xfade_sec,
         )
 
     # --- 4. Encode to MP3 and store ---
@@ -237,14 +287,24 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
     log.info("stitch_final: saved final audio blob_id=%s", audio_blob_id)
 
     # --- 4b. Generate and store SRT captions (skip if already stored from a prior attempt) ---
-    caption_chunks = [
-        CaptionChunk(
-            text=chunk.normalized_text or chunk.text,
-            duration_sec=chunk.duration_sec,
+    # Adjust per-chunk durations for the crossfade shortening so captions stay
+    # in sync: each boundary removes actual_xfade_sec, attributed to the earlier chunk.
+    caption_chunks: list[CaptionChunk] = []
+    for cap_i, cap_chunk in enumerate(chunk_data):
+        if cap_chunk.duration_sec is None or cap_chunk.duration_sec <= 0:
+            continue
+        is_last_chunk = cap_i == len(chunk_data) - 1
+        cap_dur = (
+            cap_chunk.duration_sec
+            if is_last_chunk
+            else max(0.001, cap_chunk.duration_sec - actual_xfade_sec)
         )
-        for chunk in chunk_data
-        if chunk.duration_sec is not None and chunk.duration_sec > 0
-    ]
+        caption_chunks.append(
+            CaptionChunk(
+                text=cap_chunk.normalized_text or cap_chunk.text,
+                duration_sec=cap_dur,
+            )
+        )
     srt_blob_id: uuid.UUID | None = existing_srt_id
     if caption_chunks and existing_srt_id is None:
         srt_content = generate_srt(caption_chunks)
@@ -368,6 +428,7 @@ async def _mix_with_music_and_sfx(
     chunk_data: list[ChunkForImageStep],
     ctx: StepContext,
     session_maker: async_sessionmaker[AsyncSession],
+    xfade_sec: float = 0.0,
 ) -> np.ndarray[Any, np.dtype[np.float32]]:
     """Mix music bed and SFX clips into the narration array.
 
@@ -385,6 +446,8 @@ async def _mix_with_music_and_sfx(
         chunk_data: Completed chunks (used to compute per-scene start times).
         ctx: Step context with parent outputs.
         session_maker: DB session factory.
+        xfade_sec: Crossfade window in seconds applied during stitching. Used to
+            compute adjusted chunk start times so SFX placement stays in sync.
 
     Returns:
         Mixed float32 array, clipped to [-1, 1].
@@ -444,12 +507,15 @@ async def _mix_with_music_and_sfx(
             chunks_per_scene=settings.chunks_per_scene,
         )
 
-        # Accumulate per-chunk start times (positional, matching sorted_chunks)
+        # Accumulate per-chunk start times (positional, matching sorted_chunks).
+        # Subtract xfade_sec at each boundary to match the crossfade-shortened timeline.
         chunk_start_sec: list[float] = []
         t = 0.0
-        for c in sorted_chunks:
+        for sfx_i, c in enumerate(sorted_chunks):
             chunk_start_sec.append(t)
             t += c.duration_sec or 0.0
+            if sfx_i < len(sorted_chunks) - 1:
+                t -= xfade_sec
 
         scene_start_by_idx: dict[int, float] = {}
         scene_dur_by_idx: dict[int, float] = {}
@@ -459,10 +525,15 @@ async def _mix_with_music_and_sfx(
                 scene_start_by_idx[scene.scene_index] = (
                     chunk_start_sec[first] if first < len(chunk_start_sec) else 0.0
                 )
-                scene_dur_by_idx[scene.scene_index] = sum(
+                n_scene_chunks = sum(1 for ci in scene.chunk_indices if ci < len(sorted_chunks))
+                raw_scene_dur = sum(
                     sorted_chunks[ci].duration_sec or 0.0
                     for ci in scene.chunk_indices
                     if ci < len(sorted_chunks)
+                )
+                # Subtract crossfade for internal boundaries within the scene
+                scene_dur_by_idx[scene.scene_index] = max(
+                    0.0, raw_scene_dur - max(0, n_scene_chunks - 1) * xfade_sec
                 )
 
         sfx_gain = 10.0 ** (settings.sfx_volume_db / 20.0)

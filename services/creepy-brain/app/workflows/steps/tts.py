@@ -62,6 +62,24 @@ log = logging.getLogger(__name__)
 
 _SYNTHESIZE_PATH = "/synthesize"
 
+
+def _intensity_to_tts_params(intensity: float) -> tuple[float, float]:
+    """Map scene intensity [0, 1] to (exaggeration, cfg_weight).
+
+    At intensity=0.0: minimal exaggeration, moderate cfg_weight (calm).
+    At intensity=1.0: max exaggeration, low cfg_weight (desperate, fast-paced).
+
+    Args:
+        intensity: Scene intensity in [0.0, 1.0].
+
+    Returns:
+        Tuple of (exaggeration, cfg_weight).
+    """
+    t = max(0.0, min(1.0, intensity))
+    exaggeration = 0.25 + t * (0.85 - 0.25)  # 0.25 → 0.85
+    cfg_weight = 0.40 - t * (0.40 - 0.15)  # 0.40 → 0.15
+    return round(exaggeration, 3), round(cfg_weight, 3)
+
 # Synthesis parameters (timeouts and retries only - TTS params come from config)
 _MAX_CHUNK_RETRIES = 2  # up to 3 total attempts per chunk
 _MAX_REQUEUE_ROUNDS = 2  # additional retry rounds for failed chunks

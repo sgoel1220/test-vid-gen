@@ -79,6 +79,17 @@ class MusicMoodResult(BaseModel):
         le=10,
         description="Emotional intensity of the scene on a 1-10 scale",
     )
+    tts_intensity: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Narration intensity for this scene. "
+            "0.0 = calm/atmospheric (slow build), "
+            "0.5 = neutral/moderate tension, "
+            "1.0 = peak horror/climax (urgent, fearful)"
+        ),
+    )
 
     @field_validator("prompt")
     @classmethod
@@ -166,7 +177,13 @@ Guidelines:
 - Sparse, minimal arrangements sit cleanly under narration without masking the voice
 - STRICTLY instrumental — no vocals, choir, choral, or singing of any kind
 
-Output format: JSON object with "prompt" (string) and "intensity" (integer 1-10) keys."""
+TTS intensity — also output `tts_intensity` (float 0.0–1.0) for narrator expressiveness:
+- 0.0–0.3: Calm atmospheric build. Measured narration. (e.g., describing an eerie location)
+- 0.3–0.6: Rising tension. Slightly urgent. (e.g., protagonist investigates something wrong)
+- 0.6–0.85: High tension or confrontation. Urgent and strained. (e.g., monster appears, chase)
+- 0.85–1.0: Peak horror climax. Desperate, fearful. (e.g., death, revelation, final scare)
+
+Output format: JSON object with "prompt" (string), "intensity" (integer 1-10), and "tts_intensity" (float 0.0-1.0) keys."""
 
 _MUSIC_MOOD_USER = """\
 Scene text:
