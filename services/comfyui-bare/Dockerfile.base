@@ -1,0 +1,102 @@
+# syntax=docker/dockerfile:1
+# ComfyUI-Bare Horror-Painting BASE image — models only, no app code.
+# Build this ONCE. Rebuild only when models change.
+#
+# Differences from comfyui-vast/Dockerfile.base:
+#   - No ComfyUI clone (not needed)
+#   - Replaces httpx with diffusers/transformers/accelerate/safetensors stack
+#   - No ComfyUI symlinks — diffusers loads models by path directly
+#   - CivitAI token passed as BuildKit secret (never embedded in layers)
+#
+#   export CIVITAI_TOKEN=<token>
+#   docker buildx build --platform linux/amd64 \
+#     --secret id=civitai_token,env=CIVITAI_TOKEN \
+#     -f services/comfyui-bare/Dockerfile.base \
+#     -t ghcr.io/sgoel1220/comfyui-bare-base:latest --push .
+
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# ---------------------------------------------------------------------------
+# System deps (layer 1 — changes rarely)
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-venv python-is-python3 wget curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /venv
+ENV PATH="/venv/bin:$PATH"
+
+# ---------------------------------------------------------------------------
+# Python deps — ordered by change frequency (least → most)
+# Each group is a separate layer; BuildKit cache mount avoids re-downloading
+# ---------------------------------------------------------------------------
+
+# Layer: torch (~2 GB, pinned, changes at most monthly)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir \
+        torch==2.5.1 torchvision==0.20.1 \
+        --index-url https://download.pytorch.org/whl/cu121
+
+# Layer: diffusers stack (pinned for reproducibility; separate from torch so
+# bumping diffusers doesn't invalidate the 2 GB torch layer)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir \
+        diffusers==0.31.0 \
+        transformers==4.45.2 \
+        accelerate==0.34.2 \
+        safetensors==0.4.5
+
+# Layer: server deps (small, separate so upgrading fastapi doesn't touch torch)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir \
+        fastapi==0.115.6 \
+        "uvicorn[standard]==0.32.1" \
+        pydantic==2.10.4
+
+# ---------------------------------------------------------------------------
+# Models — each model is its own RUN layer for maximum cache reuse.
+# If one model URL changes, only that layer re-downloads.
+# The CivitAI token is injected via BuildKit secret — it is never written
+# into a layer, image history, or build cache entry.
+# ---------------------------------------------------------------------------
+
+RUN mkdir -p /models/checkpoints /models/loras
+
+# Layer 1: AlbedoBase XL v3.1 checkpoint (~6.5 GB)
+RUN --mount=type=secret,id=civitai_token \
+    wget -q --show-progress \
+         -O /models/checkpoints/albedobase_xl_v31.safetensors \
+         "https://civitai.com/api/download/models/281176?token=$(cat /run/secrets/civitai_token)"
+
+# Layer 2: Detail Tweaker XL LoRA (~370 MB)
+RUN --mount=type=secret,id=civitai_token \
+    wget -q --show-progress \
+         -O /models/loras/detail_tweaker_xl.safetensors \
+         "https://civitai.com/api/download/models/135867?token=$(cat /run/secrets/civitai_token)"
+
+# Layer 3: xl_more_art-full LoRA (~370 MB)
+RUN --mount=type=secret,id=civitai_token \
+    wget -q --show-progress \
+         -O /models/loras/xl_more_art_full.safetensors \
+         "https://civitai.com/api/download/models/152309?token=$(cat /run/secrets/civitai_token)"
+
+# Layer 4: Midjourney Mimic LoRA (~370 MB)
+RUN --mount=type=secret,id=civitai_token \
+    wget -q --show-progress \
+         -O /models/loras/midjourney_mimic.safetensors \
+         "https://civitai.com/api/download/models/283697?token=$(cat /run/secrets/civitai_token)"
+
+# Layer 5: Impressionism LoRA (~55 MB)
+RUN --mount=type=secret,id=civitai_token \
+    wget -q --show-progress \
+         -O /models/loras/impressionism_sdxl.safetensors \
+         "https://civitai.com/api/download/models/133465?token=$(cat /run/secrets/civitai_token)"
+
+# Layer 6: Andreas Achenbach LoRA (~55 MB)
+RUN --mount=type=secret,id=civitai_token \
+    wget -q --show-progress \
+         -O /models/loras/andreas_achenbach_sdxl.safetensors \
+         "https://civitai.com/api/download/models/510042?token=$(cat /run/secrets/civitai_token)"
