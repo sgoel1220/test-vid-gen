@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     music_server_port: int = 8007
     sfx_server_image: str = "ghcr.io/sgoel1220/sfx-server:main"
     sfx_server_port: int = 8008
-    music_volume_db: float = -12.0  # static duck level under narration
+    music_volume_db: float = -20.0  # static duck level under narration
     sfx_volume_db: float = -6.0  # SFX louder than music bed
 
     # GPU pod lifecycle
