@@ -72,7 +72,7 @@ class Settings(BaseSettings):
     chunks_per_scene: Annotated[int, Field(ge=1)] = 7  # Number of TTS chunks per image scene
 
     # Image server GPU pod configuration (separate from TTS)
-    image_server_image: str = "ghcr.io/sgoel1220/image-server:main"
+    image_server_image: str = "ghcr.io/sgoel1220/comfyui-vast:main"
     image_server_port: int = 8006
     image_width: int = 1280
     image_height: int = 720
