@@ -386,7 +386,7 @@ function mount(container) {
     <div class="section">
       <h2>New Workflow</h2>
       <form id="wf-create" class="create-form">
-        <div class="form-row">
+        <div class="form-row" id="wf-premise-row">
           <label for="wf-premise">Premise</label>
           <textarea id="wf-premise" rows="2" placeholder="A house at the edge of town..." required></textarea>
         </div>
@@ -428,9 +428,13 @@ function mount(container) {
   const storyModeEl = document.getElementById("wf-story-mode");
   const manualRowEl = document.getElementById("wf-manual-row");
   const stepParamsEl = document.getElementById("wf-step-params");
+  const premiseRowEl = document.getElementById("wf-premise-row");
+  const premiseEl = document.getElementById("wf-premise");
   storyModeEl.addEventListener("change", () => {
     const isManual = storyModeEl.value === "manual";
     manualRowEl.style.display = isManual ? "" : "none";
+    premiseRowEl.style.display = isManual ? "none" : "";
+    premiseEl.required = !isManual;
     const storySection = stepParamsEl.querySelector(".step-section[data-step='story_params']");
     if (storySection) storySection.style.display = isManual ? "none" : "";
   });
@@ -488,7 +492,8 @@ async function handleCreate(e) {
   const btn = document.getElementById("wf-submit");
   const storyMode = document.getElementById("wf-story-mode").value;
   const manualStoryText = storyMode === "manual" ? document.getElementById("wf-manual-story").value.trim() : void 0;
-  if (!premise || !voice || !schemaReady) return;
+  if (storyMode !== "manual" && !premise) return;
+  if (!voice || !schemaReady) return;
   if (storyMode === "manual" && !manualStoryText) return;
   btn.disabled = true;
   btn.textContent = "Creating...";
@@ -500,8 +505,9 @@ async function handleCreate(e) {
     const imageP = stepParams["image_params"];
     const stitchP = stepParams["stitch_params"];
     const sfxP = stepParams["sfx_params"];
+    const effectivePremise = premise || (manualStoryText ? manualStoryText.slice(0, 120).split("\n")[0] : "");
     const req = {
-      premise,
+      premise: effectivePremise,
       voice_name: voice,
       manual_story_text: manualStoryText,
       ...stepParams,
