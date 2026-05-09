@@ -1,16 +1,18 @@
 """waveform_overlay step executor.
 
-Composites animated vertical equalizer bars onto the stitched video.
+Generates a standalone animated waveform visualization video.
 
-Each bar represents a frequency band derived from the narrator audio via FFT
-analysis.  Bar heights react to per-frame band energy with temporal smoothing.
-A base-to-tip color gradient and a glow halo are alpha-composited directly
-onto the original video frames using rawvideo I/O for efficiency.
+Near-black background. Symmetric white bars in the lower half of the frame
+scroll continuously from right to left past a fixed playhead position. Bar
+heights are driven by audio amplitude from a high-resolution envelope. At
+peak amplitude, bars span the full height of the lower zone (mid-frame to
+bottom edge).
 """
 
 from __future__ import annotations
 
 import asyncio
+import io
 import struct
 import tempfile
 import uuid
@@ -19,7 +21,7 @@ from typing import Any
 
 import numpy as np
 import structlog
-from PIL import Image, ImageDraw
+from PIL import Image
 from sqlalchemy import select
 
 from app.engine import SkippedStepOutput, StepContext
@@ -33,22 +35,16 @@ from app.workflows.steps.stitch import StitchStepOutput
 
 log = structlog.get_logger(__name__)
 
-# --- Audio analysis constants ---
-_SAMPLE_RATE = 22050                # audio decoding sample rate (Hz)
-_N_BANDS = 32                       # number of FFT frequency bands
-_BAND_SMOOTHING = 0.4               # temporal smoothing factor (exponential MA)
-
-# --- Bar renderer constants ---
-_BAR_COUNT = 32                     # number of equalizer bars (matched to _N_BANDS)
-_BAR_WIDTH = 12                     # pixels per bar
-_BAR_GAP = 4                        # pixels between bars
-_BAR_MAX_HEIGHT = 0.42              # max bar height as fraction of frame height
-_BAR_BOTTOM_PAD = 28                # pixels from bottom of frame to bar base
-_BAR_BASE_COLOR = (80, 110, 255)    # gradient base color (bottom of bar)
-_BAR_TIP_COLOR = (200, 235, 255)    # gradient tip color (top of bar)
-_BAR_ALPHA = 0.85                   # bar opacity
-_BAR_GLOW_WIDTH = 5                 # pixels of glow expansion beyond bar edges
-_BAR_GLOW_ALPHA = 0.22              # glow opacity
+# --- Visual constants ---
+_BG_COLOR = (10, 10, 10)           # Near-black background
+_BAR_COLOR = (80, 80, 80)          # Dark grey bars
+_BAR_W = 2                         # Bar width in pixels
+_BAR_GAP = 2                       # Gap between bars (stride = 4px)
+_WAVEFORM_CENTER_FRAC = 0.75       # Waveform center line at 75% of frame height
+_PLAYHEAD_X_FRAC = 0.33            # Fixed playhead position (left-third of frame)
+_VISIBLE_SECONDS = 8.0             # Seconds of audio visible at once
+_COARSE_STEPS = 10000              # High-res envelope for smooth scrolling
+_SAMPLE_RATE = 22050               # Audio decoding sample rate (Hz)
 
 
 async def _ffprobe_video(path: str) -> tuple[float, int, int]:
@@ -99,169 +95,80 @@ async def _decode_audio_f32(audio_path: str) -> np.ndarray[Any, np.dtype[np.floa
     return np.array(samples, dtype=np.float32)
 
 
-def _compute_fft_bands(
-    samples: np.ndarray[Any, np.dtype[np.float32]],
-    fps: float,
-    n_bands: int = _N_BANDS,
-) -> list[list[float]]:
-    """Compute per-frame energy in n_bands frequency bands via numpy FFT.
-
-    Each video frame's audio window is transformed to the frequency domain.
-    The positive-frequency spectrum is split into n_bands equal-width bins
-    and mean energy per bin is computed.  Temporal smoothing via exponential
-    moving average is applied across frames to produce natural bar movement.
-
-    Returns:
-        List of length total_frames, each entry is a list of n_bands values
-        in [0, 1] representing globally-normalized energy per frequency band.
-    """
-    samples_per_frame = max(1, int(_SAMPLE_RATE / fps))
-    total_frames = (len(samples) + samples_per_frame - 1) // samples_per_frame
-
-    all_bands: list[list[float]] = []
-    prev_bands: list[float] = [0.0] * n_bands
-
-    for i in range(total_frames):
-        start = i * samples_per_frame
-        seg = samples[start : start + samples_per_frame]
-        if len(seg) == 0:
-            all_bands.append(list(prev_bands))
-            continue
-
-        # Nearest power-of-two pad for FFT efficiency
-        fft_size = 1
-        while fft_size < len(seg):
-            fft_size <<= 1
-        padded = np.zeros(fft_size, dtype=np.float32)
-        padded[: len(seg)] = seg
-
-        # Hann window to reduce spectral leakage
-        padded[: len(seg)] *= np.hanning(len(seg)).astype(np.float32)
-
-        # Positive-frequency magnitude spectrum
-        spectrum = np.abs(np.fft.rfft(padded))
-        n_bins = len(spectrum)
-
-        # Equal-width frequency bands
-        raw_bands: list[float] = []
-        for b in range(n_bands):
-            lo = int(b * n_bins / n_bands)
-            hi = max(int((b + 1) * n_bins / n_bands), lo + 1)
-            raw_bands.append(float(np.mean(spectrum[lo:hi])))
-
-        # Exponential moving average for smooth bar animation
-        smoothed = [
-            _BAND_SMOOTHING * p + (1.0 - _BAND_SMOOTHING) * c
-            for p, c in zip(prev_bands, raw_bands)
-        ]
-        prev_bands = smoothed
-        all_bands.append(smoothed)
-
-    # Global normalization so the loudest band/frame == 1.0
-    flat = [v for frame in all_bands for v in frame]
-    global_max = max(flat) if flat else 1.0
-    if global_max < 1e-9:
-        global_max = 1.0
-    return [[v / global_max for v in frame] for frame in all_bands]
+def _compute_envelope(
+    samples: np.ndarray[Any, np.dtype[np.float32]], n_steps: int
+) -> list[float]:
+    """Compute RMS envelope across n_steps segments, normalized 0→1."""
+    seg_len = max(1, len(samples) // n_steps)
+    envs: list[float] = []
+    for i in range(n_steps):
+        seg = samples[i * seg_len : (i + 1) * seg_len]
+        rms = float(np.sqrt(np.mean(seg**2))) if len(seg) > 0 else 0.0
+        envs.append(rms)
+    max_val = max(envs) if any(envs) else 1.0
+    if max_val < 1e-9:
+        max_val = 1.0
+    return [v / max_val for v in envs]
 
 
-def _render_overlay_frame(
-    video_frame: np.ndarray[Any, np.dtype[np.uint8]],
-    band_energies: list[list[float]],
+def _render_frame(
+    background: np.ndarray[Any, np.dtype[np.uint8]],
+    coarse_envs: list[float],
     frame_idx: int,
+    total_frames: int,
+    total_duration_sec: float,
     vid_w: int,
     vid_h: int,
 ) -> np.ndarray[Any, np.dtype[np.uint8]]:
-    """Composite vertical equalizer bars onto a video frame.
+    """Render one scrolling waveform frame.
 
-    Bars are centered horizontally at the bottom of the frame.  Each bar's
-    height is proportional to the corresponding FFT frequency band energy for
-    the current frame.  A base-to-tip color gradient and a glow halo are
-    alpha-composited on top of the video frame.
-
-    Args:
-        video_frame: RGB uint8 array of shape (vid_h, vid_w, 3).
-        band_energies: Per-frame list of per-band energies in [0, 1].
-        frame_idx: Index of the current frame.
-        vid_w: Frame width in pixels.
-        vid_h: Frame height in pixels.
-
-    Returns:
-        RGB uint8 array with bars composited onto the video frame.
+    The waveform is positioned in the lower half of the frame. Bars are
+    symmetric around a center line at _WAVEFORM_CENTER_FRAC of the frame
+    height. The playhead is fixed at _PLAYHEAD_X_FRAC; the audio data scrolls
+    right-to-left. At peak amplitude, bars span from mid-frame to the bottom
+    edge.
     """
-    current_bands = band_energies[min(frame_idx, len(band_energies) - 1)]
-    n_bars = min(_BAR_COUNT, len(current_bands))
+    frame: np.ndarray[Any, np.dtype[np.uint8]] = background.copy()
 
-    total_width = n_bars * _BAR_WIDTH + max(0, n_bars - 1) * _BAR_GAP
-    x_start = (vid_w - total_width) // 2
-    bar_max_h = int(vid_h * _BAR_MAX_HEIGHT)
-    y_bottom = vid_h - _BAR_BOTTOM_PAD
+    center_y = int(vid_h * _WAVEFORM_CENTER_FRAC)
+    # Lower zone: center_y ± zone_half_h covers [50%..100%] of frame height
+    zone_half_h = vid_h // 4
 
-    # --- Glow pass (PIL draw — wider translucent halo behind each bar) ---
-    glow_overlay = Image.new("RGBA", (vid_w, vid_h), (0, 0, 0, 0))
-    glow_draw = ImageDraw.Draw(glow_overlay)
-    glow_rgba = (*_BAR_TIP_COLOR, int(_BAR_GLOW_ALPHA * 255))
+    playhead_x = int(vid_w * _PLAYHEAD_X_FRAC)
+    current_frac = frame_idx / max(1, total_frames - 1)
+    visible_frac = _VISIBLE_SECONDS / total_duration_sec
+    n_envs = len(coarse_envs)
+    stride = _BAR_W + _BAR_GAP
 
-    # --- Main bar pass (numpy gradient fill for performance) ---
-    bar_arr = np.zeros((vid_h, vid_w, 4), dtype=np.uint8)
+    x = 0
+    while x + _BAR_W <= vid_w:
+        # Map bar x position to audio fraction (scrolling window)
+        x_offset_frac = (x - playhead_x) / vid_w
+        audio_frac = current_frac + x_offset_frac * visible_frac
+        audio_frac = max(0.0, min(1.0, audio_frac))
 
-    for i in range(n_bars):
-        energy = current_bands[i]
-        bar_h = max(2, int(energy * bar_max_h))
+        env_idx = min(n_envs - 1, int(audio_frac * n_envs))
+        amplitude = coarse_envs[env_idx]
 
-        x_lo = x_start + i * (_BAR_WIDTH + _BAR_GAP)
-        x_hi = min(vid_w, x_lo + _BAR_WIDTH)
-        y_top = max(0, y_bottom - bar_h)
+        bar_h = max(1, int(amplitude * zone_half_h))
 
-        if x_lo >= vid_w or x_hi <= x_lo:
-            continue
-        h = y_bottom - y_top
-        if h <= 0:
-            continue
+        y0 = max(0, center_y - bar_h)
+        y1 = min(vid_h, center_y + bar_h)
+        frame[y0:y1, x : x + _BAR_W] = _BAR_COLOR
 
-        # Glow: expanded rectangle, lower alpha, tip color
-        gx_lo = max(0, x_lo - _BAR_GLOW_WIDTH)
-        gx_hi = min(vid_w, x_hi + _BAR_GLOW_WIDTH)
-        gy_top = max(0, y_top - _BAR_GLOW_WIDTH)
-        glow_draw.rectangle([gx_lo, gy_top, gx_hi - 1, y_bottom - 1], fill=glow_rgba)
+        x += stride
 
-        # Gradient: t=0.0 at bottom (base color), t=1.0 at top (tip color)
-        t = np.linspace(0.0, 1.0, h, dtype=np.float32)[::-1]  # shape (h,)
-
-        r_ch = np.clip(
-            _BAR_BASE_COLOR[0] + t * (_BAR_TIP_COLOR[0] - _BAR_BASE_COLOR[0]), 0, 255
-        ).astype(np.uint8)
-        g_ch = np.clip(
-            _BAR_BASE_COLOR[1] + t * (_BAR_TIP_COLOR[1] - _BAR_BASE_COLOR[1]), 0, 255
-        ).astype(np.uint8)
-        b_ch = np.clip(
-            _BAR_BASE_COLOR[2] + t * (_BAR_TIP_COLOR[2] - _BAR_BASE_COLOR[2]), 0, 255
-        ).astype(np.uint8)
-        a_ch = np.full(h, int(_BAR_ALPHA * 255), dtype=np.uint8)
-
-        # Stack to (h, 4) then broadcast to (h, bar_w, 4)
-        bar_colors = np.stack([r_ch, g_ch, b_ch, a_ch], axis=1)  # (h, 4)
-        bar_w = x_hi - x_lo
-        bar_arr[y_top:y_bottom, x_lo:x_hi] = np.broadcast_to(
-            bar_colors[:, np.newaxis, :], (h, bar_w, 4)
-        )
-
-    # Composite: video base → glow → bars
-    base = Image.fromarray(video_frame, mode="RGB").convert("RGBA")
-    bar_img = Image.fromarray(bar_arr, mode="RGBA")
-    composited = Image.alpha_composite(base, glow_overlay)
-    composited = Image.alpha_composite(composited, bar_img)
-    return np.array(composited.convert("RGB"), dtype=np.uint8)
+    return frame
 
 
 async def execute(
     input: WorkflowInputSchema, ctx: StepContext
 ) -> WaveformOverlayStepOutput | SkippedStepOutput:
-    """Composite animated vertical equalizer bars onto the stitched video.
+    """Generate standalone animated waveform visualization video.
 
-    Produces a WAVEFORM_VIDEO blob: the original video frames with
-    equalizer bars composited at the bottom-center.  Bar heights react to
-    narrator audio frequency band energy derived via per-frame FFT analysis.
+    Produces a WAVEFORM_VIDEO blob: near-black full-frame background with
+    scrolling symmetric white bars in the lower half, amplitude-driven from
+    a high-resolution audio envelope.
 
     Args:
         input: Workflow input schema.
@@ -331,37 +238,27 @@ async def execute(
         fps, vid_w, vid_h = await _ffprobe_video(str(video_in))
         log.info("waveform_overlay: video %dx%d @%.2ffps", vid_w, vid_h, fps)
 
-        # Decode audio and compute per-frame FFT frequency bands
+        # Decode audio and compute high-res envelope
         samples = await _decode_audio_f32(str(audio_in))
-        band_energies = _compute_fft_bands(samples, fps)
+        coarse_envs = _compute_envelope(samples, _COARSE_STEPS)
+
+        # Pre-filled background (near-black, reused every frame)
+        background: np.ndarray[Any, np.dtype[np.uint8]] = np.zeros(
+            (vid_h, vid_w, 3), dtype=np.uint8
+        )
+        background[:] = _BG_COLOR
 
         duration_sec = stitch_out.total_duration_sec
         total_frames = max(1, int(duration_sec * fps))
 
         log.info("waveform_overlay: rendering %d frames", total_frames)
 
-        # -- video reader: decode input video to raw RGB24 frames --
-        reader_cmd = [
-            "ffmpeg", "-y",
-            "-i", str(video_in),
-            "-f", "rawvideo",
-            "-pix_fmt", "rgb24",
-            "-v", "error",
-            "pipe:1",
-        ]
-        reader_proc = await asyncio.create_subprocess_exec(
-            *reader_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        frame_bytes = vid_w * vid_h * 3
-
+        # Launch ffmpeg: PNG frames on stdin + audio file → output video
         ffmpeg_cmd = [
             "ffmpeg", "-y",
-            "-f", "rawvideo",
-            "-pix_fmt", "rgb24",
-            "-s", f"{vid_w}x{vid_h}",
-            "-r", f"{fps:.6f}",
+            "-f", "image2pipe",
+            "-framerate", f"{fps:.6f}",
+            "-vcodec", "png",
             "-i", "pipe:0",
             "-i", str(audio_in),
             "-c:v", "libx264",
@@ -369,33 +266,31 @@ async def execute(
             "-c:a", "copy",
             str(video_out),
         ]
-        writer_proc = await asyncio.create_subprocess_exec(
+
+        proc = await asyncio.create_subprocess_exec(
             *ffmpeg_cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
 
-        assert reader_proc.stdout is not None
-        assert writer_proc.stdin is not None
+        assert proc.stdin is not None
 
+        # Render and stream frames to ffmpeg
         for frame_idx in range(total_frames):
-            raw = await reader_proc.stdout.readexactly(frame_bytes)
-            video_frame = np.frombuffer(raw, dtype=np.uint8).reshape(
-                (vid_h, vid_w, 3)
+            frame_arr = _render_frame(
+                background, coarse_envs,
+                frame_idx, total_frames, duration_sec, vid_w, vid_h,
             )
-            overlay = _render_overlay_frame(
-                video_frame, band_energies, frame_idx, vid_w, vid_h,
-            )
-            writer_proc.stdin.write(overlay.tobytes())
+            pil_frame = Image.fromarray(frame_arr, mode="RGB")
+            buf = io.BytesIO()
+            pil_frame.save(buf, format="PNG")
+            proc.stdin.write(buf.getvalue())
 
-        writer_proc.stdin.close()
-        _, stderr_bytes = await writer_proc.communicate()
+        proc.stdin.close()
+        _, stderr_bytes = await proc.communicate()
 
-        # Clean up reader
-        await reader_proc.communicate()
-
-        if writer_proc.returncode != 0:
+        if proc.returncode != 0:
             stderr = stderr_bytes.decode("utf-8", errors="replace")
             raise RuntimeError(f"ffmpeg waveform_overlay failed: {stderr}")
 
