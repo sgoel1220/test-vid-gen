@@ -1,15 +1,17 @@
 """waveform_overlay step executor.
 
-Composites an animated waveform onto the stitched video.
+Generates a standalone animated waveform visualization video.
 
-Static symmetric dark-grey bars represent the full audio timeline across the
-bottom strip of the frame. A playhead moves left-to-right as the audio plays.
-Bars are drawn directly onto the video frames.
+Dark navy background, full-width symmetric bars above/below a center
+baseline. A cross/diamond burst at the playhead pulses per word based on
+per-frame audio amplitude. Quiet bars render as tiny nubs (dotted rope).
+Staircase quantization gives a pixelated/quantized aesthetic.
 """
 
 from __future__ import annotations
 
 import asyncio
+import io
 import struct
 import tempfile
 import uuid
@@ -18,6 +20,7 @@ from typing import Any
 
 import numpy as np
 import structlog
+from PIL import Image
 from sqlalchemy import select
 
 from app.engine import SkippedStepOutput, StepContext
@@ -32,13 +35,19 @@ from app.workflows.steps.stitch import StitchStepOutput
 log = structlog.get_logger(__name__)
 
 # --- Visual constants ---
-_BAR_COLOR = (80, 80, 80)          # Dark grey bars
-_BAR_W = 2                         # Bar width in pixels
-_BAR_GAP = 2                       # Gap between bars (stride = 4px)
-_BAR_CENTER_Y_FRAC = 0.88          # Center line of bar strip (bottom 25%)
-_BAR_ZONE_HALF_FRAC = 0.10         # Half-height of bar zone as fraction of frame
-_COARSE_STEPS = 10000              # Envelope resolution
-_SAMPLE_RATE = 22050               # Audio decoding sample rate (Hz)
+_BG_COLOR = (26, 32, 48)          # #1a2030  dark navy background
+_BAR_COLOR = (58, 74, 94)         # #3a4a5e  muted blue-grey bars
+_SHADOW_COLOR = (16, 22, 34)      # slightly darker drop shadow
+_BAR_W = 3                        # bar width in pixels
+_BAR_GAP = 1                      # gap between bars (stride = 4px)
+_QUIET_H_MIN = 2                  # minimum nub height during silence
+_QUIET_H_MAX = 14                 # max background waveform shape height
+_BURST_H_MAX = 60                 # peak burst half-height from center line
+_BURST_BARS = 24                  # bars on each side of playhead that taper
+_BURST_STEPS = 8                  # staircase quantization levels
+_SHADOW_OFFSET = 3                # drop shadow y offset in pixels
+_COARSE_STEPS = 400               # envelope resolution for background shape
+_SAMPLE_RATE = 22050              # audio decoding sample rate (Hz)
 
 
 async def _ffprobe_video(path: str) -> tuple[float, int, int]:
@@ -108,12 +117,17 @@ def _compute_envelope(
 def _compute_frame_amplitudes(
     samples: np.ndarray[Any, np.dtype[np.float32]], fps: float
 ) -> list[float]:
-    """Compute per-frame RMS amplitude normalized 0→1."""
+    """Compute per-frame RMS amplitude normalized 0→1.
+
+    One value per video frame — gives per-word/syllable reactivity since
+    amplitude naturally rises during stressed syllables and drops in pauses.
+    """
     samples_per_frame = max(1, int(_SAMPLE_RATE / fps))
     total_frames = (len(samples) + samples_per_frame - 1) // samples_per_frame
     amps: list[float] = []
     for i in range(total_frames):
-        seg = samples[i * samples_per_frame : (i + 1) * samples_per_frame]
+        start = i * samples_per_frame
+        seg = samples[start : start + samples_per_frame]
         rms = float(np.sqrt(np.mean(seg**2))) if len(seg) > 0 else 0.0
         amps.append(rms)
     max_val = max(amps) if any(amps) else 1.0
@@ -123,7 +137,7 @@ def _compute_frame_amplitudes(
 
 
 def _render_frame(
-    video_frame: np.ndarray[Any, np.dtype[np.uint8]],
+    background: np.ndarray[Any, np.dtype[np.uint8]],
     coarse_envs: list[float],
     frame_amps: list[float],
     frame_idx: int,
@@ -131,31 +145,52 @@ def _render_frame(
     vid_w: int,
     vid_h: int,
 ) -> np.ndarray[Any, np.dtype[np.uint8]]:
-    """Composite waveform bars onto a video frame.
+    """Render one waveform visualization frame.
 
-    Bar heights = envelope shape × current frame amplitude, so bars animate
-    up/down with the audio. The playhead moves left-to-right. Bars confined
-    to a bottom strip centered at _BAR_CENTER_Y_FRAC.
+    Draws full-width symmetric bars centered vertically. Near the playhead,
+    applies a cross/diamond burst whose height scales with per-frame audio
+    amplitude. Staircase quantization gives a pixelated aesthetic.
     """
-    frame: np.ndarray[Any, np.dtype[np.uint8]] = video_frame.copy()
+    frame: np.ndarray[Any, np.dtype[np.uint8]] = background.copy()
+    center_y = vid_h // 2
+    progress = frame_idx / max(1, total_frames - 1)
+    playhead_x = int(progress * vid_w)
 
-    center_y = int(vid_h * _BAR_CENTER_Y_FRAC)
-    zone_half_h = int(vid_h * _BAR_ZONE_HALF_FRAC)
+    amp_idx = min(frame_idx, len(frame_amps) - 1)
+    current_amp = frame_amps[amp_idx]
 
-    current_amp = frame_amps[min(frame_idx, len(frame_amps) - 1)]
-    n_envs = len(coarse_envs)
+    n_coarse = len(coarse_envs)
     stride = _BAR_W + _BAR_GAP
 
     x = 0
     while x + _BAR_W <= vid_w:
-        audio_frac = x / vid_w
-        env_idx = min(n_envs - 1, int(audio_frac * n_envs))
-        # Animate: envelope shape × current amplitude
-        bar_h = max(1, int(coarse_envs[env_idx] * current_amp * zone_half_h))
+        # Background waveform height from coarse envelope
+        coarse_idx = min(n_coarse - 1, int((x / vid_w) * n_coarse))
+        bg_env = coarse_envs[coarse_idx]
+        bg_h = _QUIET_H_MIN + int(bg_env * (_QUIET_H_MAX - _QUIET_H_MIN))
 
+        # Cross/diamond burst near the playhead
+        dist_bars = abs(x - playhead_x) / stride
+        if dist_bars < _BURST_BARS:
+            # Staircase quantization: creates stepped/pixelated diamond shape
+            raw_scale = 1.0 - dist_bars / _BURST_BARS
+            scale = round(raw_scale * _BURST_STEPS) / _BURST_STEPS
+            burst_h = int(scale * _BURST_H_MAX * current_amp)
+            bar_h = max(bg_h, burst_h)
+        else:
+            bar_h = bg_h
+
+        # Drop shadow (drawn first, shifted down)
+        sy0 = max(0, center_y - bar_h + _SHADOW_OFFSET)
+        sy1 = min(vid_h, center_y + bar_h + _SHADOW_OFFSET)
+        if sy1 > sy0:
+            frame[sy0:sy1, x : x + _BAR_W] = _SHADOW_COLOR
+
+        # Bar (symmetric above and below center)
         y0 = max(0, center_y - bar_h)
         y1 = min(vid_h, center_y + bar_h)
-        frame[y0:y1, x : x + _BAR_W] = _BAR_COLOR
+        if y1 > y0:
+            frame[y0:y1, x : x + _BAR_W] = _BAR_COLOR
 
         x += stride
 
@@ -167,9 +202,9 @@ async def execute(
 ) -> WaveformOverlayStepOutput | SkippedStepOutput:
     """Generate standalone animated waveform visualization video.
 
-    Produces a WAVEFORM_VIDEO blob: near-black full-frame background with
-    scrolling symmetric white bars in the lower half, amplitude-driven from
-    a high-resolution audio envelope.
+    Produces a WAVEFORM_VIDEO blob: dark navy full-frame background with
+    symmetric waveform bars and a cross/diamond burst at the playhead that
+    pulses per word based on audio amplitude.
 
     Args:
         input: Workflow input schema.
@@ -239,39 +274,28 @@ async def execute(
         fps, vid_w, vid_h = await _ffprobe_video(str(video_in))
         log.info("waveform_overlay: video %dx%d @%.2ffps", vid_w, vid_h, fps)
 
-        # Decode audio and compute envelope + per-frame amplitudes
+        # Decode audio and compute envelopes
         samples = await _decode_audio_f32(str(audio_in))
         coarse_envs = _compute_envelope(samples, _COARSE_STEPS)
         frame_amps = _compute_frame_amplitudes(samples, fps)
 
+        # Pre-filled background (dark navy, reused every frame)
+        background: np.ndarray[Any, np.dtype[np.uint8]] = np.zeros(
+            (vid_h, vid_w, 3), dtype=np.uint8
+        )
+        background[:] = _BG_COLOR
+
         duration_sec = stitch_out.total_duration_sec
         total_frames = max(1, int(duration_sec * fps))
-        frame_bytes = vid_w * vid_h * 3
 
         log.info("waveform_overlay: rendering %d frames", total_frames)
 
-        # Reader: decode input video to raw RGB24 frames
-        reader_cmd = [
+        # Launch ffmpeg: PNG frames on stdin + audio file → output video
+        ffmpeg_cmd = [
             "ffmpeg", "-y",
-            "-i", str(video_in),
-            "-f", "rawvideo",
-            "-pix_fmt", "rgb24",
-            "-v", "error",
-            "pipe:1",
-        ]
-        reader_proc = await asyncio.create_subprocess_exec(
-            *reader_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
-        # Writer: raw RGB24 frames + audio → output video
-        writer_cmd = [
-            "ffmpeg", "-y",
-            "-f", "rawvideo",
-            "-pix_fmt", "rgb24",
-            "-s", f"{vid_w}x{vid_h}",
-            "-r", f"{fps:.6f}",
+            "-f", "image2pipe",
+            "-framerate", f"{fps:.6f}",
+            "-vcodec", "png",
             "-i", "pipe:0",
             "-i", str(audio_in),
             "-c:v", "libx264",
@@ -279,30 +303,31 @@ async def execute(
             "-c:a", "copy",
             str(video_out),
         ]
-        writer_proc = await asyncio.create_subprocess_exec(
-            *writer_cmd,
+
+        proc = await asyncio.create_subprocess_exec(
+            *ffmpeg_cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
 
-        assert reader_proc.stdout is not None
-        assert writer_proc.stdin is not None
+        assert proc.stdin is not None
 
+        # Render and stream frames to ffmpeg
         for frame_idx in range(total_frames):
-            raw = await reader_proc.stdout.readexactly(frame_bytes)
-            video_frame = np.frombuffer(raw, dtype=np.uint8).reshape((vid_h, vid_w, 3))
-            composited = _render_frame(
-                video_frame, coarse_envs, frame_amps,
+            frame_arr = _render_frame(
+                background, coarse_envs, frame_amps,
                 frame_idx, total_frames, vid_w, vid_h,
             )
-            writer_proc.stdin.write(composited.tobytes())
+            pil_frame = Image.fromarray(frame_arr, mode="RGB")
+            buf = io.BytesIO()
+            pil_frame.save(buf, format="PNG")
+            proc.stdin.write(buf.getvalue())
 
-        writer_proc.stdin.close()
-        _, stderr_bytes = await writer_proc.communicate()
-        await reader_proc.communicate()
+        proc.stdin.close()
+        _, stderr_bytes = await proc.communicate()
 
-        if writer_proc.returncode != 0:
+        if proc.returncode != 0:
             stderr = stderr_bytes.decode("utf-8", errors="replace")
             raise RuntimeError(f"ffmpeg waveform_overlay failed: {stderr}")
 
