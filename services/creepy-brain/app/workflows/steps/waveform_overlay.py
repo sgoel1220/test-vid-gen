@@ -152,9 +152,7 @@ def _render_frame(
     amplitude. Staircase quantization gives a pixelated aesthetic.
     """
     frame: np.ndarray[Any, np.dtype[np.uint8]] = background.copy()
-    # Slightly above center; mirror drawn at vid_h - center_y
-    center_y = int(vid_h * 0.38)
-    mirror_y = vid_h - center_y
+    center_y = vid_h // 2
     progress = frame_idx / max(1, total_frames - 1)
     playhead_x = int(progress * vid_w)
 
@@ -174,6 +172,7 @@ def _render_frame(
         # Cross/diamond burst near the playhead
         dist_bars = abs(x - playhead_x) / stride
         if dist_bars < _BURST_BARS:
+            # Staircase quantization: creates stepped/pixelated diamond shape
             raw_scale = 1.0 - dist_bars / _BURST_BARS
             scale = round(raw_scale * _BURST_STEPS) / _BURST_STEPS
             burst_h = int(scale * _BURST_H_MAX * current_amp)
@@ -181,18 +180,17 @@ def _render_frame(
         else:
             bar_h = bg_h
 
-        for cy in (center_y, mirror_y):
-            # Drop shadow
-            sy0 = max(0, cy - bar_h + _SHADOW_OFFSET)
-            sy1 = min(vid_h, cy + bar_h + _SHADOW_OFFSET)
-            if sy1 > sy0:
-                frame[sy0:sy1, x : x + _BAR_W] = _SHADOW_COLOR
+        # Drop shadow (drawn first, shifted down)
+        sy0 = max(0, center_y - bar_h + _SHADOW_OFFSET)
+        sy1 = min(vid_h, center_y + bar_h + _SHADOW_OFFSET)
+        if sy1 > sy0:
+            frame[sy0:sy1, x : x + _BAR_W] = _SHADOW_COLOR
 
-            # Bar
-            y0 = max(0, cy - bar_h)
-            y1 = min(vid_h, cy + bar_h)
-            if y1 > y0:
-                frame[y0:y1, x : x + _BAR_W] = _BAR_COLOR
+        # Bar (symmetric above and below center)
+        y0 = max(0, center_y - bar_h)
+        y1 = min(vid_h, center_y + bar_h)
+        if y1 > y0:
+            frame[y0:y1, x : x + _BAR_W] = _BAR_COLOR
 
         x += stride
 
