@@ -284,16 +284,11 @@ class VastAIProvider:
         offer = _as_instance(offers_raw[0])
         offer_id = int(offer["id"])
 
-        # Build Docker-style env string: "-e KEY=VAL -e KEY2=VAL2"
-        # Vast.ai create_instance passes env through to the container runtime.
-        env_parts: list[str] = [f"-e {k}={v}" for k, v in spec.env.items()]
-        # Publish the service port(s) so port mapping appears in the instance
-        # response. Without explicit -p flags the container port is not mapped
-        # to a host port, which prevents _build_endpoint from ever producing a
-        # reachable URL.
-        for p in spec.ports:
-            env_parts.append(f"-p {p}:{p}")
-        env_str = " ".join(env_parts) if env_parts else ""
+        # The SDK accepts env as a dict and extra as a Docker-run flag string
+        # for additional options like port publishing.
+        env_dict: dict[str, str] = dict(spec.env)
+        extra_parts: list[str] = [f"-p {p}:{p}" for p in spec.ports]
+        extra_str = " ".join(extra_parts) if extra_parts else None
 
         def _create() -> object:
             kwargs: dict[str, object] = dict(
@@ -302,8 +297,10 @@ class VastAIProvider:
                 disk=float(spec.disk_size_gb),
                 label=idempotency_key,
             )
-            if env_str:
-                kwargs["env"] = env_str
+            if env_dict:
+                kwargs["env"] = env_dict
+            if extra_str:
+                kwargs["extra"] = extra_str
             return self._client.create_instance(**kwargs)
 
         try:
