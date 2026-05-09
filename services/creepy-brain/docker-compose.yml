@@ -1,9 +1,6 @@
 services:
   brain:
-    build:
-      context: ../..
-      dockerfile: services/creepy-brain/Dockerfile
-    image: creepy-brain:latest
+    image: ghcr.io/sgoel1220/creepy-brain:latest
     container_name: creepy-brain
     ports:
       - "8006:8006"
@@ -39,15 +36,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
-
-  dozzle:
-    image: amir20/dozzle:latest
-    container_name: creepy-brain-dozzle
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    ports:
-      - "8080:8080"
     restart: unless-stopped
 
   uptime-kuma:
