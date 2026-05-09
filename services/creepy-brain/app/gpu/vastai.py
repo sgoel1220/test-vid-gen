@@ -144,6 +144,7 @@ class VastAIProvider:
         max_dph: float = 2.0,
         geo: str = "",
         cuda_min: float = 12.0,
+        max_inet_down_cost_per_tb: float = 0.0,  # $/TB; 0 = no filter
     ) -> None:
         from vastai import VastAI
 
@@ -152,6 +153,7 @@ class VastAIProvider:
         self._max_dph = max_dph
         self._geo = geo
         self._cuda_min = cuda_min
+        self._max_inet_down_cost_per_tb = max_inet_down_cost_per_tb
 
     def _parse_pod(
         self, instance: dict[str, Any], service_port: int | None = None
@@ -201,6 +203,10 @@ class VastAIProvider:
             parts.append(f"inet_down>={spec.min_download}")
         if spec.min_upload > 0:
             parts.append(f"inet_up>={spec.min_upload}")
+        if self._max_inet_down_cost_per_tb > 0:
+            # Vast.ai inet_down_cost is in $/GB; convert from $/TB
+            max_per_gb = self._max_inet_down_cost_per_tb / 1000
+            parts.append(f"inet_down_cost<={max_per_gb}")
         if spec.cloud_type == "SECURE":
             parts.append("verified=true")
         if self._geo:

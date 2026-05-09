@@ -15,7 +15,7 @@ def get_provider(provider: str = "runpod", **kwargs: Any) -> GpuProvider:
         **kwargs: Provider-specific keyword arguments.
             RunPod: api_key (str)
             VastAI: api_key (str), min_reliability (float), max_dph (float),
-                    geo (str), cuda_min (float)
+                    geo (str), cuda_min (float), max_inet_down_cost_per_tb (float)
     """
     if provider == "vastai":
         return VastAIProvider(
@@ -24,6 +24,7 @@ def get_provider(provider: str = "runpod", **kwargs: Any) -> GpuProvider:
             max_dph=float(kwargs.get("max_dph", 2.0)),
             geo=str(kwargs.get("geo", "")),
             cuda_min=float(kwargs.get("cuda_min", 12.0)),
+            max_inet_down_cost_per_tb=float(kwargs.get("max_inet_down_cost_per_tb", 0.0)),
         )
     return RunPodProvider(str(kwargs["api_key"]))
 
@@ -48,6 +49,7 @@ def get_provider_from_settings(provider_name: str | None = None) -> GpuProvider:
             max_dph=settings.vastai_max_dph,
             geo=settings.vastai_geo,
             cuda_min=settings.vastai_cuda_min,
+            max_inet_down_cost_per_tb=settings.vastai_max_inet_down_cost_per_tb,
         )
     return get_provider("runpod", api_key=settings.runpod_api_key)
 

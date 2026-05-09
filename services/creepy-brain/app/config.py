@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     vastai_max_dph: float = 2.0
     vastai_geo: str = ""
     vastai_cuda_min: float = 12.0
+    vastai_max_inet_down_cost_per_tb: float = 0.004  # $/TB; 0 = no filter
 
     # GPU pod configuration
     gpu_type: str = "NVIDIA RTX A4000"
