@@ -105,9 +105,27 @@ def _compute_envelope(
     return [v / max_val for v in envs]
 
 
+def _compute_frame_amplitudes(
+    samples: np.ndarray[Any, np.dtype[np.float32]], fps: float
+) -> list[float]:
+    """Compute per-frame RMS amplitude normalized 0→1."""
+    samples_per_frame = max(1, int(_SAMPLE_RATE / fps))
+    total_frames = (len(samples) + samples_per_frame - 1) // samples_per_frame
+    amps: list[float] = []
+    for i in range(total_frames):
+        seg = samples[i * samples_per_frame : (i + 1) * samples_per_frame]
+        rms = float(np.sqrt(np.mean(seg**2))) if len(seg) > 0 else 0.0
+        amps.append(rms)
+    max_val = max(amps) if any(amps) else 1.0
+    if max_val < 1e-9:
+        max_val = 1.0
+    return [v / max_val for v in amps]
+
+
 def _render_frame(
     video_frame: np.ndarray[Any, np.dtype[np.uint8]],
     coarse_envs: list[float],
+    frame_amps: list[float],
     frame_idx: int,
     total_frames: int,
     vid_w: int,
@@ -115,26 +133,25 @@ def _render_frame(
 ) -> np.ndarray[Any, np.dtype[np.uint8]]:
     """Composite waveform bars onto a video frame.
 
-    Static bars span the full width representing the entire audio timeline.
-    The playhead moves left-to-right. Bars are confined to a bottom strip
-    centered at _BAR_CENTER_Y_FRAC with half-height _BAR_ZONE_HALF_FRAC.
+    Bar heights = envelope shape × current frame amplitude, so bars animate
+    up/down with the audio. The playhead moves left-to-right. Bars confined
+    to a bottom strip centered at _BAR_CENTER_Y_FRAC.
     """
     frame: np.ndarray[Any, np.dtype[np.uint8]] = video_frame.copy()
 
     center_y = int(vid_h * _BAR_CENTER_Y_FRAC)
     zone_half_h = int(vid_h * _BAR_ZONE_HALF_FRAC)
 
+    current_amp = frame_amps[min(frame_idx, len(frame_amps) - 1)]
     n_envs = len(coarse_envs)
     stride = _BAR_W + _BAR_GAP
 
     x = 0
     while x + _BAR_W <= vid_w:
-        # Each bar maps to a fixed position in the audio timeline
         audio_frac = x / vid_w
         env_idx = min(n_envs - 1, int(audio_frac * n_envs))
-        amplitude = coarse_envs[env_idx]
-
-        bar_h = max(1, int(amplitude * zone_half_h))
+        # Animate: envelope shape × current amplitude
+        bar_h = max(1, int(coarse_envs[env_idx] * current_amp * zone_half_h))
 
         y0 = max(0, center_y - bar_h)
         y1 = min(vid_h, center_y + bar_h)
@@ -222,9 +239,10 @@ async def execute(
         fps, vid_w, vid_h = await _ffprobe_video(str(video_in))
         log.info("waveform_overlay: video %dx%d @%.2ffps", vid_w, vid_h, fps)
 
-        # Decode audio and compute high-res envelope
+        # Decode audio and compute envelope + per-frame amplitudes
         samples = await _decode_audio_f32(str(audio_in))
         coarse_envs = _compute_envelope(samples, _COARSE_STEPS)
+        frame_amps = _compute_frame_amplitudes(samples, fps)
 
         duration_sec = stitch_out.total_duration_sec
         total_frames = max(1, int(duration_sec * fps))
@@ -275,7 +293,7 @@ async def execute(
             raw = await reader_proc.stdout.readexactly(frame_bytes)
             video_frame = np.frombuffer(raw, dtype=np.uint8).reshape((vid_h, vid_w, 3))
             composited = _render_frame(
-                video_frame, coarse_envs,
+                video_frame, coarse_envs, frame_amps,
                 frame_idx, total_frames, vid_w, vid_h,
             )
             writer_proc.stdin.write(composited.tobytes())
