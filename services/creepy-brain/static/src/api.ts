@@ -262,6 +262,7 @@ export interface SfxStepParams {
 export interface CreateWorkflowRequest {
   premise: string;
   voice_name: string;
+  manual_story_text?: string;
   story_params?: StoryStepParams;
   tts_params?: TtsStepParams;
   image_params?: ImageStepParams;

@@ -26,6 +26,17 @@ export function mount(container: HTMLElement): void {
           <label for="wf-premise">Premise</label>
           <textarea id="wf-premise" rows="2" placeholder="A house at the edge of town..." required></textarea>
         </div>
+        <div class="form-row">
+          <label for="wf-story-mode">Story source</label>
+          <select id="wf-story-mode">
+            <option value="ai">AI Generated</option>
+            <option value="manual">Write My Own</option>
+          </select>
+        </div>
+        <div class="form-row" id="wf-manual-row" style="display:none">
+          <label for="wf-manual-story">Story text</label>
+          <textarea id="wf-manual-story" rows="12" placeholder="Paste or write your full story here..."></textarea>
+        </div>
         <div class="form-row-inline">
           <div class="form-field">
             <label for="wf-voice">Voice</label>
@@ -52,6 +63,17 @@ export function mount(container: HTMLElement): void {
 
   const form = document.getElementById("wf-create") as HTMLFormElement;
   form.addEventListener("submit", handleCreate);
+
+  const storyModeEl = document.getElementById("wf-story-mode") as HTMLSelectElement;
+  const manualRowEl = document.getElementById("wf-manual-row") as HTMLElement;
+  const stepParamsEl = document.getElementById("wf-step-params") as HTMLElement;
+
+  storyModeEl.addEventListener("change", () => {
+    const isManual = storyModeEl.value === "manual";
+    manualRowEl.style.display = isManual ? "" : "none";
+    const storySection = stepParamsEl.querySelector(".step-section[data-step='story_params']") as HTMLElement | null;
+    if (storySection) storySection.style.display = isManual ? "none" : "";
+  });
 
   // Filters
   const filtersEl = document.getElementById("wf-filters")!;
@@ -113,8 +135,13 @@ async function handleCreate(e: Event): Promise<void> {
   const voice = (document.getElementById("wf-voice") as HTMLSelectElement).value;
   const errEl = document.getElementById("wf-create-error")!;
   const btn = document.getElementById("wf-submit") as HTMLButtonElement;
+  const storyMode = (document.getElementById("wf-story-mode") as HTMLSelectElement).value;
+  const manualStoryText = storyMode === "manual"
+    ? (document.getElementById("wf-manual-story") as HTMLTextAreaElement).value.trim()
+    : undefined;
 
   if (!premise || !voice || !schemaReady) return;
+  if (storyMode === "manual" && !manualStoryText) return;
 
   btn.disabled = true;
   btn.textContent = "Creating...";
@@ -133,6 +160,7 @@ async function handleCreate(e: Event): Promise<void> {
     const req = {
       premise,
       voice_name: voice,
+      manual_story_text: manualStoryText,
       ...stepParams,
       target_word_count: storyP?.["target_word_count"] as number | undefined,
       generate_images: imageP?.["enabled"] as boolean | undefined,

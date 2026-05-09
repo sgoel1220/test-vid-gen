@@ -390,6 +390,17 @@ function mount(container) {
           <label for="wf-premise">Premise</label>
           <textarea id="wf-premise" rows="2" placeholder="A house at the edge of town..." required></textarea>
         </div>
+        <div class="form-row">
+          <label for="wf-story-mode">Story source</label>
+          <select id="wf-story-mode">
+            <option value="ai">AI Generated</option>
+            <option value="manual">Write My Own</option>
+          </select>
+        </div>
+        <div class="form-row" id="wf-manual-row" style="display:none">
+          <label for="wf-manual-story">Story text</label>
+          <textarea id="wf-manual-story" rows="12" placeholder="Paste or write your full story here..."></textarea>
+        </div>
         <div class="form-row-inline">
           <div class="form-field">
             <label for="wf-voice">Voice</label>
@@ -414,6 +425,15 @@ function mount(container) {
   loadSchema();
   const form = document.getElementById("wf-create");
   form.addEventListener("submit", handleCreate);
+  const storyModeEl = document.getElementById("wf-story-mode");
+  const manualRowEl = document.getElementById("wf-manual-row");
+  const stepParamsEl = document.getElementById("wf-step-params");
+  storyModeEl.addEventListener("change", () => {
+    const isManual = storyModeEl.value === "manual";
+    manualRowEl.style.display = isManual ? "" : "none";
+    const storySection = stepParamsEl.querySelector(".step-section[data-step='story_params']");
+    if (storySection) storySection.style.display = isManual ? "none" : "";
+  });
   const filtersEl = document.getElementById("wf-filters");
   for (const s of STATUSES) {
     const btn = document.createElement("button");
@@ -466,7 +486,10 @@ async function handleCreate(e) {
   const voice = document.getElementById("wf-voice").value;
   const errEl = document.getElementById("wf-create-error");
   const btn = document.getElementById("wf-submit");
+  const storyMode = document.getElementById("wf-story-mode").value;
+  const manualStoryText = storyMode === "manual" ? document.getElementById("wf-manual-story").value.trim() : void 0;
   if (!premise || !voice || !schemaReady) return;
+  if (storyMode === "manual" && !manualStoryText) return;
   btn.disabled = true;
   btn.textContent = "Creating...";
   errEl.style.display = "none";
@@ -480,6 +503,7 @@ async function handleCreate(e) {
     const req = {
       premise,
       voice_name: voice,
+      manual_story_text: manualStoryText,
       ...stepParams,
       target_word_count: storyP?.["target_word_count"],
       generate_images: imageP?.["enabled"],
