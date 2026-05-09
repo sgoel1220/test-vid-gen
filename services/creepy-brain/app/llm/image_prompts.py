@@ -84,13 +84,21 @@ You are creating a background image prompt for a horror narration video.
 Your task is to generate an SDXL-optimized image prompt that captures the \
 visual setting and atmosphere of a scene from a creepy pasta story.
 
+The image pipeline uses these active LoRAs — you MUST include their trigger \
+words in the positive prompt to activate them:
+- "add more detail" — Detail Tweaker XL (sharpness/detail enhancer)
+- "more art" — xl_more_art-full (painterly art quality)
+- "mdjrny-v4 style" — Midjourney Mimic (cinematic composition)
+- "impressionist painting" — Impressionism LoRA (painterly brush strokes)
+- "by andreas achenbach" — Andreas Achenbach LoRA (19th-century landscape style)
+
 Guidelines for the POSITIVE prompt:
+- ALWAYS start with the trigger words above (comma-separated), then describe the scene
 - Focus on ENVIRONMENT, LIGHTING, and MOOD — not character actions
 - Describe the physical setting: room, building, landscape, weather
 - Emphasize atmospheric elements: shadows, fog, dim lighting, decay
-- Use cinematic language: "cinematic lighting", "moody atmosphere", "film grain"
 - Include specific visual details: textures, colors, time of day
-- Keep it under 150 words for optimal SDXL performance
+- Keep the scene description under 120 words (triggers don't count toward limit)
 - NO characters, people, or human figures
 - NO text, signs, or written words in the scene
 
