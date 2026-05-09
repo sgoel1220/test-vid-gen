@@ -70,6 +70,7 @@ module = [
     "prometheus_fastapi_instrumentator.*",
     "runpod.*",
     "soundfile.*",
+    "vastai.*",
     "structlog.*",
 ]
 ignore_missing_imports = true

@@ -212,9 +212,9 @@ async def workflow_gpu_pod(
             result = await do_work(url)
     """
     from app.config import settings  # lazy — avoids gpu → workflows circular dep
-    from app.gpu import get_provider  # lazy — same reason
+    from app.gpu import get_provider_from_settings  # lazy — same reason
 
-    provider = get_provider(settings.runpod_api_key)
+    provider = get_provider_from_settings()
     async with gpu_pod(
         provider,
         session_maker,
