@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+import requests
 
 from app.models.enums import GpuPodStatus, GpuProvider as GpuProviderName
 
@@ -238,7 +239,7 @@ class VastAIProvider:
 
     async def create_pod(self, spec: GpuPodSpec, idempotency_key: str) -> GpuPod:
         """Create a new Vast.ai instance, or return an existing one with the same label."""
-        pull_stuck_timeout_sec = 480
+        pull_stuck_timeout_sec = 1200
         service_port = spec.ports[0] if spec.ports else 8005
 
         existing = await self._find_pod_by_label(idempotency_key, service_port)
@@ -382,7 +383,11 @@ class VastAIProvider:
         raise RuntimeError(f"Vast.ai instance {pod_id} not found after start")
 
     async def terminate_pod(self, pod_id: str) -> bool:
-        """Destroy a Vast.ai instance."""
+        """Destroy a Vast.ai instance.
+
+        Returns True when the instance is gone (destroyed or already did not exist).
+        Returns False only on unexpected errors where the instance state is unknown.
+        """
 
         def _destroy() -> object:
             return self._client.destroy_instance(id=int(pod_id))
@@ -390,6 +395,13 @@ class VastAIProvider:
         try:
             await asyncio.to_thread(_destroy)
             return True
+        except requests.exceptions.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                # Instance already gone on Vast.ai's side — treat as terminated.
+                log.info("vastai destroy_instance: pod %s already gone (404); treating as terminated", pod_id)
+                return True
+            log.exception("vastai destroy_instance failed pod_id=%s", pod_id)
+            return False
         except Exception:
             log.exception("vastai destroy_instance failed pod_id=%s", pod_id)
             return False
@@ -399,7 +411,7 @@ class VastAIProvider:
         pod_id: str,
         timeout_sec: int = 1200,
         service_port: int | None = None,
-        pull_stuck_timeout_sec: int = 480,
+        pull_stuck_timeout_sec: int = 1200,
     ) -> GpuPod:
         """Wait for a Vast.ai instance to pass the HTTP health check."""
         loop = asyncio.get_event_loop()

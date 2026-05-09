@@ -69,6 +69,7 @@ module = [
     "PIL.*",
     "prometheus_client.*",
     "prometheus_fastapi_instrumentator.*",
+    "requests.*",
     "runpod.*",
     "soundfile.*",
     "vastai.*",
