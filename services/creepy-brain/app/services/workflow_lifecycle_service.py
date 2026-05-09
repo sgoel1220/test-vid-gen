@@ -26,7 +26,6 @@ PIPELINE_STEP_ORDER: list[StepName] = [
     StepName.TTS_SYNTHESIS,
     StepName.IMAGE_GENERATION,
     StepName.MUSIC_GENERATION,
-    StepName.SFX_GENERATION,
     StepName.STITCH_FINAL,
     StepName.WAVEFORM_OVERLAY,
 ]
