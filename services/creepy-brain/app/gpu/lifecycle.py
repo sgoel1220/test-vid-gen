@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+
+if TYPE_CHECKING:
+    from app.config import GpuTierName
 
 from app.gpu.base import GpuPod, GpuPodSpec, GpuProvider
 from app.models.enums import GpuProvider as GpuProviderEnum
@@ -199,12 +203,17 @@ async def workflow_gpu_pod(
     idempotency_key: str,
     workflow_id: uuid.UUID | None,
     label: str,
+    gpu_tier: "GpuTierName | None" = None,
     service_port: int | None = None,
 ) -> AsyncGenerator[tuple[GpuPod, str], None]:
     """Like ``gpu_pod`` but pulls provider, fallbacks, and timeout from app settings.
 
     Eliminates the per-step boilerplate of constructing a provider and
     forwarding ``gpu_type_fallbacks`` / ``pod_ready_timeout_sec`` by hand.
+
+    When *gpu_tier* is provided, fallbacks come from the tier's GPU list
+    (skipping the first entry which is already ``spec.gpu_type``).
+    Otherwise falls back to the global ``settings.gpu_type_fallbacks``.
 
     Usage::
 
@@ -214,6 +223,13 @@ async def workflow_gpu_pod(
     from app.config import settings  # lazy — avoids gpu → workflows circular dep
     from app.gpu import get_provider_from_settings  # lazy — same reason
 
+    # Determine fallbacks: tier-specific or global
+    if gpu_tier is not None:
+        tier = settings.gpu_tier(gpu_tier)
+        fallbacks = tier.gpu_types[1:]  # skip first (already in spec.gpu_type)
+    else:
+        fallbacks = settings.gpu_type_fallbacks
+
     provider = get_provider_from_settings()
     async with gpu_pod(
         provider,
@@ -222,7 +238,7 @@ async def workflow_gpu_pod(
         idempotency_key=idempotency_key,
         workflow_id=workflow_id,
         label=label,
-        gpu_type_fallbacks=settings.gpu_type_fallbacks,
+        gpu_type_fallbacks=fallbacks,
         timeout_sec=settings.pod_ready_timeout_sec,
         service_port=service_port,
     ) as result:

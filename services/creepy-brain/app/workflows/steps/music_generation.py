@@ -76,16 +76,14 @@ _DEFAULT_SCENE_DURATION_SEC = 30.0  # fallback when TTS durations are unavailabl
 
 def _music_pod_spec() -> GpuPodSpec:
     """Create GpuPodSpec for the music server."""
-    return GpuPodSpec(
-        gpu_type=settings.gpu_type,
+    return GpuPodSpec.from_tier_with_image(
+        "small",
         image=settings.music_server_image,
-        disk_size_gb=settings.gpu_container_disk_gb,
         ports=[settings.music_server_port],
-        cloud_type=settings.gpu_cloud_type,
     )
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Audio helpers
 # ---------------------------------------------------------------------------
 
@@ -464,6 +462,7 @@ async def execute(
         idempotency_key=f"music-{workflow_run_id}",
         workflow_id=workflow_id,
         label="music",
+        gpu_tier="small",
         service_port=settings.music_server_port,
     ) as (pod, endpoint_url):
         new_seg_results, new_seg_wav = await _generate_pending_segments(

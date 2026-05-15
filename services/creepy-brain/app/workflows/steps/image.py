@@ -125,13 +125,11 @@ class ImageStepOutput(BaseModel):
 
 def _image_pod_spec() -> GpuPodSpec:
     """Create GpuPodSpec for the image server (separate from TTS)."""
-    return GpuPodSpec(
-        gpu_type=settings.gpu_type,
+    return GpuPodSpec.from_tier_with_image(
+        "medium",
         image=settings.image_server_image,
-        disk_size_gb=settings.gpu_container_disk_gb,
-        volume_gb=settings.gpu_volume_gb,
         ports=[settings.image_server_port],
-        cloud_type=settings.gpu_cloud_type,
+        volume_gb=settings.gpu_volume_gb,
     )
 
 
@@ -260,6 +258,7 @@ async def execute(
         idempotency_key=f"img-{workflow_run_id}",
         workflow_id=workflow_id_uuid,
         label="image",
+        gpu_tier="medium",
         service_port=settings.image_server_port,
     ) as (pod, endpoint_url):
         new_results = await _generate_images_from_prompts(

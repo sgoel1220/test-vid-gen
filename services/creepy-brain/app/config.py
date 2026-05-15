@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.validation_limits import (
@@ -10,6 +10,16 @@ from app.validation_limits import (
     WORKFLOW_TARGET_WORD_COUNT_MAX,
     WORKFLOW_TARGET_WORD_COUNT_MIN,
 )
+
+
+
+GpuTierName = Literal["small", "medium", "large"]
+
+
+class GpuTier(BaseModel):
+    """Ordered list of GPU types to try, cheapest first."""
+
+    gpu_types: list[str]  # First = preferred (cheapest), last = fallback (pricier)
 
 
 class Settings(BaseSettings):
@@ -20,6 +30,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+
     )
 
     # Server settings
@@ -57,6 +68,34 @@ class Settings(BaseSettings):
     gpu_container_disk_gb: int = 25
     gpu_volume_gb: int = 0  # No persistent volume
     gpu_port: int = 8005
+    # Per-step GPU tiers — override via env vars as JSON lists, e.g.:
+    # GPU_TIER_SMALL='["NVIDIA RTX 3060","NVIDIA RTX 4060 Ti"]'
+    gpu_tier_small: list[str] = Field(default_factory=lambda: [
+        "NVIDIA RTX 3060",
+        "NVIDIA RTX 4060 Ti",
+        "NVIDIA RTX 3070",
+        "NVIDIA RTX 3080",
+    ])
+    gpu_tier_medium: list[str] = Field(default_factory=lambda: [
+        "NVIDIA RTX A4000",
+        "NVIDIA RTX 4070 Ti",
+        "NVIDIA RTX 3080 Ti",
+        "NVIDIA RTX A5000",
+    ])
+    gpu_tier_large: list[str] = Field(default_factory=lambda: [
+        "NVIDIA RTX A5000",
+        "NVIDIA RTX A6000",
+        "NVIDIA RTX 4090",
+    ])
+
+    def gpu_tier(self, name: "GpuTierName") -> GpuTier:
+        """Resolve a named GPU tier to its ordered list of GPU types."""
+        mapping: dict[str, list[str]] = {
+            "small": self.gpu_tier_small,
+            "medium": self.gpu_tier_medium,
+            "large": self.gpu_tier_large,
+        }
+        return GpuTier(gpu_types=mapping[name])
 
     # TTS settings
     tts_default_voice: str = "old_man_low.wav"

@@ -79,12 +79,10 @@ def _cue_hash(description: str, position: str, duration_sec: float) -> str:
 
 def _sfx_pod_spec() -> GpuPodSpec:
     """Create GpuPodSpec for the sfx-server pod."""
-    return GpuPodSpec(
-        gpu_type=settings.gpu_type,
+    return GpuPodSpec.from_tier_with_image(
+        "small",
         image=settings.sfx_server_image,
-        disk_size_gb=settings.gpu_container_disk_gb,
         ports=[settings.sfx_server_port],
-        cloud_type=settings.gpu_cloud_type,
     )
 
 
@@ -415,6 +413,7 @@ async def execute(
         idempotency_key=f"sfx-{workflow_run_id}",
         workflow_id=workflow_id_uuid,
         label="sfx",
+        gpu_tier="small",
         service_port=settings.sfx_server_port,
     ) as (pod, endpoint_url):
         new_clips = await _generate_sfx_clips(

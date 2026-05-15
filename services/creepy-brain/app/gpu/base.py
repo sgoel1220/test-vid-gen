@@ -9,8 +9,13 @@ TERMINATED – pod has exited or been terminated
 ERROR     – provider reported an error state
 """
 
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from app.config import GpuTierName
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -51,6 +56,42 @@ class GpuPodSpec(BaseModel):
             image=settings.gpu_image,
             disk_size_gb=settings.gpu_container_disk_gb,
             ports=[settings.gpu_port],
+            cloud_type=settings.gpu_cloud_type,
+        )
+
+    @classmethod
+    def from_tier(cls, tier_name: "GpuTierName") -> "GpuPodSpec":
+        """Create spec using the first GPU type from the named tier."""
+        from app.config import settings
+
+        tier = settings.gpu_tier(tier_name)
+        return cls(
+            gpu_type=tier.gpu_types[0],
+            image=settings.gpu_image,
+            disk_size_gb=settings.gpu_container_disk_gb,
+            ports=[settings.gpu_port],
+            cloud_type=settings.gpu_cloud_type,
+        )
+
+    @classmethod
+    def from_tier_with_image(
+        cls,
+        tier_name: "GpuTierName",
+        *,
+        image: str,
+        ports: list[int],
+        volume_gb: int | None = None,
+    ) -> "GpuPodSpec":
+        """Create spec from a tier with custom image and ports."""
+        from app.config import settings
+
+        tier = settings.gpu_tier(tier_name)
+        return cls(
+            gpu_type=tier.gpu_types[0],
+            image=image,
+            disk_size_gb=settings.gpu_container_disk_gb,
+            volume_gb=volume_gb,
+            ports=ports,
             cloud_type=settings.gpu_cloud_type,
         )
 

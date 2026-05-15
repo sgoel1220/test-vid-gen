@@ -263,10 +263,11 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
     workflow_id_for_pod = get_optional_workflow_id(workflow_run_id)
     async with workflow_gpu_pod(
         session_maker,
-        spec=GpuPodSpec.from_config(),
+        spec=GpuPodSpec.from_tier("small"),
         idempotency_key=f"tts-{workflow_run_id}",
         workflow_id=workflow_id_for_pod,
         label="tts",
+        gpu_tier="small",
         service_port=settings.gpu_port,
     ) as (pod, endpoint_url):
         all_chunks_result = await _synthesize_all_chunks(
