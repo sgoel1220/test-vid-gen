@@ -170,8 +170,9 @@ class WorkflowEngine:
         log = logging.getLogger("app.engine.nonstop")
 
         # Cancel any existing nonstop loop for this workflow.
-        if wid in self._nonstop_tasks:
-            self._nonstop_tasks[wid].cancel()
+        old_task = self._nonstop_tasks.pop(wid, None)
+        if old_task is not None:
+            old_task.cancel()
 
         async def _nonstop_loop() -> None:
             start = _time.monotonic()
@@ -206,24 +207,42 @@ class WorkflowEngine:
                     if task is not None:
                         try:
                             await asyncio.shield(task)
-                        except (asyncio.CancelledError, Exception):
-                            pass  # expected on failure
+                        except asyncio.CancelledError:
+                            # Re-raise if OUR task (the nonstop loop) was cancelled,
+                            # not just the inner workflow task.
+                            current = asyncio.current_task()
+                            if current is not None and current.cancelled():
+                                raise
+                        except Exception:
+                            pass  # expected on workflow failure
 
-                    # Check if workflow succeeded.
-                    session_maker = get_optional_session_maker()
-                    if session_maker is not None:
-                        async with session_maker() as session:
-                            from app.models.workflow import Workflow
-                            from sqlalchemy import select as sa_select
-                            row = (await session.execute(
-                                sa_select(Workflow.status).where(Workflow.id == workflow_id)
-                            )).scalar_one_or_none()
-                            if row is not None and row.value == "completed":
-                                log.info("nonstop %s: workflow completed after %d attempts", wid, attempt)
-                                break
-                            if row is not None and row.value not in ("failed", "paused"):
-                                log.info("nonstop %s: workflow status=%s, stopping loop", wid, row.value)
-                                break
+                    # Check if workflow reached a terminal or retryable state.
+                    should_stop = False
+                    try:
+                        session_maker = get_optional_session_maker()
+                        if session_maker is not None:
+                            async with session_maker() as session:
+                                from app.models.workflow import Workflow
+                                from sqlalchemy import select as sa_select
+                                row = (await session.execute(
+                                    sa_select(Workflow.status).where(Workflow.id == workflow_id)
+                                )).scalar_one_or_none()
+                                if row is not None and row.value == "completed":
+                                    log.info("nonstop %s: workflow completed after %d attempts", wid, attempt)
+                                    should_stop = True
+                                elif row is not None and row.value == "cancelled":
+                                    log.info("nonstop %s: workflow cancelled, stopping loop", wid)
+                                    should_stop = True
+                                elif row is not None and row.value not in ("failed", "paused", "running"):
+                                    log.info("nonstop %s: workflow status=%s, stopping loop", wid, row.value)
+                                    should_stop = True
+                                # "failed", "paused", "running" all mean: keep retrying.
+                                # "running" can happen if _fail_workflow had a DB error.
+                    except Exception:
+                        log.exception("nonstop %s: status check failed, will retry", wid)
+
+                    if should_stop:
+                        break
 
                     # Backoff before next attempt.
                     delay = min(backoff_sec * (2 ** (attempt - 1)), backoff_max_sec)
@@ -233,8 +252,17 @@ class WorkflowEngine:
                     delay = min(delay, remaining)
                     log.info("nonstop %s: backing off %.1fs before next attempt", wid, delay)
                     await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                log.info("nonstop %s: loop cancelled after %d attempts", wid, attempt)
+                raise
+            except Exception:
+                log.exception("nonstop %s: loop crashed after %d attempts", wid, attempt)
             finally:
-                self._nonstop_tasks.pop(wid, None)
+                # Only remove ourselves if we are still the registered task.
+                # A replacement loop may have already overwritten our entry.
+                registered = self._nonstop_tasks.get(wid)
+                if registered is not None and registered is asyncio.current_task():
+                    self._nonstop_tasks.pop(wid, None)
 
         task = asyncio.create_task(_nonstop_loop(), name=f"nonstop-{wid}")
         self._nonstop_tasks[wid] = task

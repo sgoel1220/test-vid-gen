@@ -124,6 +124,19 @@ class WorkflowTaskSupervisor:
             raise
         except Exception as exc:
             log.error("engine: workflow %s unhandled error: %s", run_id, exc, exc_info=True)
+            # Best-effort: mark workflow FAILED so the nonstop loop can detect it.
+            try:
+                from app.engine.db_helpers import get_optional_session_maker
+                session_maker = get_optional_session_maker()
+                if session_maker is not None:
+                    async with session_maker() as session:
+                        from app.services.workflow_service import WorkflowService
+                        await WorkflowService(session).fail_workflow(
+                            uuid.UUID(run_id), str(exc),
+                        )
+                        await session.commit()
+            except Exception:
+                log.exception("engine: workflow %s failed to set FAILED status after crash", run_id)
         finally:
             self.tasks.pop(run_id, None)
 
