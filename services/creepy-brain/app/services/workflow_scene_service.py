@@ -77,6 +77,21 @@ class WorkflowSceneService:
         scene.image_negative_prompt = image_negative_prompt
         await self._session.flush()
 
+    async def save_scene_music_prompt(
+        self,
+        workflow_id: uuid.UUID,
+        scene_index: int,
+        music_prompt: str,
+        music_intensity: int,
+        music_tts_intensity: float,
+    ) -> None:
+        """Save music mood prompt for a scene before GPU generation (flush only)."""
+        scene = await self._get_scene_or_raise(workflow_id, scene_index)
+        scene.music_prompt = music_prompt
+        scene.music_intensity = music_intensity
+        scene.music_tts_intensity = music_tts_intensity
+        await self._session.flush()
+
     async def complete_scene_image(
         self,
         workflow_id: uuid.UUID,

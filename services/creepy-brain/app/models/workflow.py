@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Enum as SQLEnum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -149,6 +149,12 @@ class WorkflowScene(BaseModel):
     image_negative_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Image generation result
+
+    # Music prompt (saved before GPU spin-up, mirrors image_prompt pattern)
+    music_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    music_intensity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    music_tts_intensity: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     image_status: Mapped[ChunkStatus] = mapped_column(
         SQLEnum(ChunkStatus, native_enum=True, values_callable=lambda e: [m.value for m in e]),
         nullable=False,

@@ -48,9 +48,11 @@ from app.models.json_schemas import (
     MusicSegmentResult,
     WorkflowInputSchema,
 )
-from app.models.workflow import WorkflowBlob
+from app.models.workflow import WorkflowBlob, WorkflowScene
 from app.services import blob_service
+from app.services.workflow_read_repository import get_scenes_for_workflow
 from app.services.workflow_service import (
+    WorkflowService,
     get_chunks_for_image_step,
     get_optional_workflow_id,
 )
@@ -322,9 +324,13 @@ async def execute(
 
     session_maker = get_session_maker()
 
-    # --- 2. Get chunks from DB ---
+    # --- 2. Get chunks and existing scenes from DB ---
     async with session_maker() as session:
         chunk_data = await get_chunks_for_image_step(session, workflow_id)
+        existing_scenes = await get_scenes_for_workflow(session, workflow_id)
+    existing_scene_map: dict[int, WorkflowScene] = {
+        s.scene_index: s for s in existing_scenes
+    }
 
     if not chunk_data:
         raise ValueError(
@@ -396,19 +402,53 @@ async def execute(
     )
 
     # --- 5. Generate music mood prompts for pending scenes (before GPU spin-up) ---
+    # Mirrors image_generation: check DB for saved prompts first, call LLM only
+    # for scenes without a saved prompt, then persist new prompts to DB.
     from app.llm.client import set_llm_workflow_context  # noqa: PLC0415
 
     set_llm_workflow_context(workflow_id)
     pending_moods: list[MusicMoodResult] = []
     try:
         for scene in pending_scenes:
-            mood = await generate_music_mood(scene.combined_text)
+            db_scene = existing_scene_map.get(scene.scene_index)
+            if db_scene is not None and db_scene.music_prompt:
+                # Reuse persisted mood prompt — skip LLM call
+                mood = MusicMoodResult(
+                    prompt=db_scene.music_prompt,
+                    intensity=db_scene.music_intensity if db_scene.music_intensity is not None else 5,
+                    tts_intensity=db_scene.music_tts_intensity if db_scene.music_tts_intensity is not None else 0.5,
+                )
+                log.info(
+                    "music_generation: scene %d mood prompt loaded from DB "
+                    "(intensity=%d)",
+                    scene.scene_index,
+                    mood.intensity,
+                )
+            else:
+                mood = await generate_music_mood(scene.combined_text)
+                log.info(
+                    "music_generation: scene %d mood prompt generated "
+                    "(intensity=%d)",
+                    scene.scene_index,
+                    mood.intensity,
+                )
+                # Persist to DB so retries skip this LLM call
+                async with session_maker() as session:
+                    svc = WorkflowService(session)
+                    await svc.get_or_create_scene(
+                        workflow_id=workflow_id,
+                        scene_index=scene.scene_index,
+                        chunk_indices=scene.chunk_indices,
+                    )
+                    await svc.save_scene_music_prompt(
+                        workflow_id=workflow_id,
+                        scene_index=scene.scene_index,
+                        music_prompt=mood.prompt,
+                        music_intensity=mood.intensity,
+                        music_tts_intensity=mood.tts_intensity,
+                    )
+                    await session.commit()
             pending_moods.append(mood)
-            log.info(
-                "music_generation: scene %d mood prompt generated (intensity=%d)",
-                scene.scene_index,
-                mood.intensity,
-            )
     finally:
         set_llm_workflow_context(None)
 
