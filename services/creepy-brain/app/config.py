@@ -74,6 +74,7 @@ class Settings(BaseSettings):
         "NVIDIA RTX 3060",
         "NVIDIA RTX 4060 Ti",
         "NVIDIA RTX 3070",
+        "NVIDIA RTX 4070 Super",
         "NVIDIA RTX 3080",
     ])
     gpu_tier_medium: list[str] = Field(default_factory=lambda: [
