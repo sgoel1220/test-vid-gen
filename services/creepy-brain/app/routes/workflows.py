@@ -6,7 +6,7 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -474,6 +474,42 @@ async def resume_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowResp
         )
 
     await WorkflowLifecycleService(db).resume_workflow(workflow_id, engine)
+    await db.refresh(workflow)
+    return _to_response(workflow)
+
+
+# ── Resume Non-Stop ──────────────────────────────────────────────────────────
+
+
+class ResumeNonstopRequest(BaseModel):
+    """Request body for non-stop resume with a time budget."""
+
+    duration_hours: float = Field(default=1.0, gt=0, le=24)
+
+
+@router.post("/{workflow_id}/resume-nonstop", response_model=WorkflowResponse)
+async def resume_nonstop(
+    workflow_id: uuid.UUID,
+    body: ResumeNonstopRequest,
+    db: DbSession,
+) -> WorkflowResponse:
+    """Start a time-limited auto-retry loop for a failed workflow.
+
+    The engine will keep resuming the workflow from its failed step,
+    backing off between attempts, until it succeeds or the time budget
+    (``duration_hours``) expires. Cancel via DELETE /{id} (cancel).
+    """
+    workflow = await _get_workflow_or_404(workflow_id, db)
+    if workflow.status != WorkflowStatus.FAILED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can only resume-nonstop FAILED workflows (current: {workflow.status})",
+        )
+
+    await engine.resume_nonstop(
+        workflow_id,
+        duration_sec=body.duration_hours * 3600,
+    )
     await db.refresh(workflow)
     return _to_response(workflow)
 

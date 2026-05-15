@@ -13,6 +13,7 @@ import {
   cancelWorkflow,
   pauseWorkflow,
   resumeWorkflow,
+  resumeNonstop,
   forkWorkflow,
   type WorkflowDetailResponse,
   type WorkflowLogEntry,
@@ -140,6 +141,19 @@ function renderActions(wf: WorkflowDetailResponse): void {
   if (wf.status === "paused" || wf.status === "failed") {
     btns.push('<button id="act-resume" class="btn">Resume</button>');
   }
+  if (wf.status === "failed") {
+    btns.push(
+      '<span class="nonstop-group" style="display:inline-flex;align-items:center;gap:4px">' +
+      '<button id="act-nonstop" class="btn">Resume Non-Stop</button>' +
+      '<select id="nonstop-duration" style="padding:4px 6px;border-radius:4px;border:1px solid #555;background:#222;color:#ccc">' +
+      '<option value="0.5">30 min</option>' +
+      '<option value="1" selected>1 hr</option>' +
+      '<option value="2">2 hr</option>' +
+      '<option value="4">4 hr</option>' +
+      '</select>' +
+      '</span>',
+    );
+  }
   if (wf.status === "running" || wf.status === "paused" || wf.status === "pending") {
     btns.push('<button id="act-cancel" class="btn btn-danger">Cancel</button>');
   }
@@ -201,6 +215,16 @@ function attachActionListeners(wf: WorkflowDetailResponse): void {
   });
   document.getElementById("act-resume")?.addEventListener("click", () => {
     runAction(() => resumeWorkflow(wf.id));
+  });
+  document.getElementById("act-nonstop")?.addEventListener("click", () => {
+    const sel = document.getElementById("nonstop-duration") as HTMLSelectElement | null;
+    const hours = parseFloat(sel?.value ?? "1");
+    if (!confirm(`Resume non-stop for ${hours >= 1 ? hours + " hour(s)" : (hours * 60) + " minutes"}?`)) return;
+    runAction(
+      () => resumeNonstop(wf.id, hours),
+      false,
+      `Resuming non-stop (${hours >= 1 ? hours + "h" : (hours * 60) + "m"})…`,
+    );
   });
   document.getElementById("act-cancel")?.addEventListener("click", () => {
     if (confirm("Cancel this workflow?")) {

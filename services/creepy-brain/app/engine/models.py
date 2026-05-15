@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Any is deliberate here: each workflow can define its own validated input model.
 StepFn = Callable[[Any, "StepContext"], Awaitable[BaseModel]]
@@ -91,6 +91,34 @@ class StepDef(BaseModel):
         default=None,
         description="Attribute name on WorkflowInputSchema holding this step's params",
     )
+    retry_duration_sec: float | None = Field(
+        default=None,
+        description="Keep retrying the step for up to this many seconds. "
+                    "Mutually exclusive with max_retries when set.",
+    )
+    retry_backoff_sec: float = Field(
+        default=5.0,
+        ge=0,
+        description="Seconds to wait between retry attempts (fixed backoff).",
+    )
+    retry_backoff_max_sec: float = Field(
+        default=60.0,
+        ge=0,
+        description="Maximum backoff cap when using exponential backoff.",
+    )
+    retry_backoff_strategy: Literal["fixed", "exponential"] = Field(
+        default="fixed",
+        description="Backoff strategy between retries.",
+    )
+
+    @model_validator(mode="after")
+    def _check_retry_mutual_exclusion(self) -> "StepDef":
+        if self.retry_duration_sec is not None and self.max_retries > 0:
+            raise ValueError(
+                "Cannot set both max_retries > 0 and retry_duration_sec; "
+                "use one retry strategy at a time."
+            )
+        return self
 
 
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time as _time
 import uuid
 from collections.abc import Coroutine
 from importlib import import_module
@@ -53,6 +55,7 @@ class WorkflowEngine:
             self._task_supervisor,
             self._create_runner,
         )
+        self._nonstop_tasks: dict[str, asyncio.Task[None]] = {}
 
     @property
     def _registry(self) -> dict[str, WorkflowDef]:
@@ -150,12 +153,107 @@ class WorkflowEngine:
             set_workflow_status=self._set_workflow_status,
         )
 
+    async def resume_nonstop(
+        self,
+        workflow_id: uuid.UUID,
+        duration_sec: float,
+        backoff_sec: float = 10.0,
+        backoff_max_sec: float = 120.0,
+    ) -> None:
+        """Start an auto-retry loop that keeps resuming a failed workflow for *duration_sec*.
+
+        The loop resumes the workflow, waits for it to finish, and if it fails again,
+        waits with exponential backoff before retrying — until the time budget runs out.
+        Cancel via :meth:`cancel_nonstop` (called by the existing Cancel endpoint).
+        """
+        wid = str(workflow_id)
+        log = logging.getLogger("app.engine.nonstop")
+
+        # Cancel any existing nonstop loop for this workflow.
+        if wid in self._nonstop_tasks:
+            self._nonstop_tasks[wid].cancel()
+
+        async def _nonstop_loop() -> None:
+            start = _time.monotonic()
+            attempt = 0
+            try:
+                while True:
+                    elapsed = _time.monotonic() - start
+                    remaining = duration_sec - elapsed
+                    if remaining <= 0:
+                        log.info("nonstop %s: time budget exhausted after %d attempts", wid, attempt)
+                        break
+
+                    attempt += 1
+                    log.info(
+                        "nonstop %s: attempt %d (elapsed=%.0fs, remaining=%.0fs)",
+                        wid, attempt, elapsed, remaining,
+                    )
+
+                    # Resume the workflow (cold-start or hot-restart).
+                    try:
+                        session_maker = get_optional_session_maker()
+                        if session_maker is not None:
+                            async with session_maker() as session:
+                                from app.services.workflow_lifecycle_service import WorkflowLifecycleService
+                                await WorkflowLifecycleService(session).resume_workflow(workflow_id, self)
+                                await session.commit()
+                    except Exception:
+                        log.exception("nonstop %s: resume call failed", wid)
+
+                    # Wait for the workflow task to finish.
+                    task = self._task_supervisor.tasks.get(wid)
+                    if task is not None:
+                        try:
+                            await asyncio.shield(task)
+                        except (asyncio.CancelledError, Exception):
+                            pass  # expected on failure
+
+                    # Check if workflow succeeded.
+                    session_maker = get_optional_session_maker()
+                    if session_maker is not None:
+                        async with session_maker() as session:
+                            from app.models.workflow import Workflow
+                            from sqlalchemy import select as sa_select
+                            row = (await session.execute(
+                                sa_select(Workflow.status).where(Workflow.id == workflow_id)
+                            )).scalar_one_or_none()
+                            if row is not None and row.value == "completed":
+                                log.info("nonstop %s: workflow completed after %d attempts", wid, attempt)
+                                break
+                            if row is not None and row.value not in ("failed", "paused"):
+                                log.info("nonstop %s: workflow status=%s, stopping loop", wid, row.value)
+                                break
+
+                    # Backoff before next attempt.
+                    delay = min(backoff_sec * (2 ** (attempt - 1)), backoff_max_sec)
+                    remaining = duration_sec - (_time.monotonic() - start)
+                    if remaining <= 0:
+                        break
+                    delay = min(delay, remaining)
+                    log.info("nonstop %s: backing off %.1fs before next attempt", wid, delay)
+                    await asyncio.sleep(delay)
+            finally:
+                self._nonstop_tasks.pop(wid, None)
+
+        task = asyncio.create_task(_nonstop_loop(), name=f"nonstop-{wid}")
+        self._nonstop_tasks[wid] = task
+
+    def cancel_nonstop(self, workflow_run_id: str) -> bool:
+        """Cancel a running nonstop loop. Returns True if one was found."""
+        task = self._nonstop_tasks.pop(workflow_run_id, None)
+        if task is not None:
+            task.cancel()
+            return True
+        return False
+
     def has_runner(self, workflow_run_id: str) -> bool:
         """Return True if an in-memory runner exists for this workflow."""
         return self._task_supervisor.runners.get(workflow_run_id) is not None
 
     async def cancel(self, workflow_run_id: str) -> None:
         """Cancel a running workflow."""
+        self.cancel_nonstop(workflow_run_id)
         await self._resource_controller.cancel(
             workflow_run_id,
             cancel_task=self._cancel_task,

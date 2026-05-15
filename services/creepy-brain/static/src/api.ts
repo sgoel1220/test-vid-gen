@@ -199,6 +199,14 @@ export function resumeWorkflow(id: string): Promise<WorkflowResponse> {
   return api(`/api/workflows/${id}/resume`, { method: "POST" });
 }
 
+export function resumeNonstop(id: string, durationHours: number): Promise<WorkflowResponse> {
+  return api(`/api/workflows/${id}/resume-nonstop`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ duration_hours: durationHours }),
+  });
+}
+
 export function retryTtsStep(id: string): Promise<WorkflowResponse> {
   return api(`/api/workflows/${id}/retry-step`, {
     method: "POST",

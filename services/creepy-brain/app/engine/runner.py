@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from importlib import import_module
@@ -344,15 +345,59 @@ class WorkflowStepExecutor:
         await self._lifecycle._db_start_step(step.name)
 
         last_error: str = ""
-        for attempt in range(step.max_retries + 1):
-            if attempt > 0:
-                log.info(
-                    "workflow %s: step '%s' retry %d/%d",
-                    self._workflow_id,
-                    step.name,
-                    attempt,
-                    step.max_retries,
-                )
+        time_based = step.retry_duration_sec is not None
+        start_mono = time.monotonic() if time_based else 0.0
+        attempt = 0
+
+        while True:
+            attempt += 1
+            if attempt > 1:
+                if time_based:
+                    # --- Backoff sleep between time-based retries ---
+                    if step.retry_backoff_strategy == "exponential":
+                        delay = min(
+                            step.retry_backoff_sec * (2 ** (attempt - 2)),
+                            step.retry_backoff_max_sec,
+                        )
+                    else:
+                        delay = step.retry_backoff_sec
+
+                    elapsed = time.monotonic() - start_mono
+                    remaining = step.retry_duration_sec - elapsed  # type: ignore[operator]
+                    if remaining <= 0:
+                        break
+                    delay = min(delay, remaining)
+                    log.info(
+                        "workflow %s: step '%s' retry %d (elapsed=%.1fs, remaining=%.1fs, backoff=%.1fs)",
+                        self._workflow_id,
+                        step.name,
+                        attempt - 1,
+                        elapsed,
+                        remaining,
+                        delay,
+                    )
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                else:
+                    # Count-based: no delay (preserves original behavior)
+                    log.info(
+                        "workflow %s: step '%s' retry %d/%d",
+                        self._workflow_id,
+                        step.name,
+                        attempt - 1,
+                        step.max_retries,
+                    )
+
+            # --- Check time budget before attempting ---
+            if time_based:
+                elapsed = time.monotonic() - start_mono
+                if elapsed >= step.retry_duration_sec and attempt > 1:  # type: ignore[operator]
+                    break
+
+            # --- Check count budget ---
+            if not time_based and attempt > step.max_retries + 1:
+                break
+
             try:
                 wid_tok = workflow_id_var.set(str(self._workflow_id))
                 step_tok = step_name_var.set(step.name)
