@@ -91,8 +91,8 @@ class Settings(BaseSettings):
     # Music tier: ACE-Step 1.5 needs ~16 GB (DiT + 1.7B LLM), so 12 GB GPUs are excluded.
     gpu_tier_music: list[str] = Field(default_factory=lambda: [
         "NVIDIA RTX A5000",
-        "NVIDIA RTX A6000",
         "NVIDIA RTX 4090",
+        "NVIDIA RTX A6000",
     ])
 
     def gpu_tier(self, name: "GpuTierName") -> GpuTier:
