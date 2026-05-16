@@ -388,8 +388,24 @@ async def execute(
         assert reader_proc.stdout is not None
         assert writer_proc.stdin is not None
 
-        for frame_idx in range(total_frames):
-            raw = await reader_proc.stdout.readexactly(frame_bytes)
+        frame_idx = 0
+        buf = bytearray()
+        while True:
+            chunk = await reader_proc.stdout.read(frame_bytes - len(buf))
+            if not chunk:
+                # True EOF — discard any partial frame at stream end
+                if buf:
+                    log.warning(
+                        "waveform_overlay: partial frame at EOF (%d/%d bytes), discarding",
+                        len(buf),
+                        frame_bytes,
+                    )
+                break
+            buf.extend(chunk)
+            if len(buf) < frame_bytes:
+                continue  # need more data to complete this frame
+            raw = bytes(buf)
+            buf = bytearray()
             video_frame = np.frombuffer(raw, dtype=np.uint8).reshape(
                 (vid_h, vid_w, 3)
             )
@@ -397,16 +413,24 @@ async def execute(
                 video_frame, band_energies, frame_idx, vid_w, vid_h,
             )
             writer_proc.stdin.write(overlay.tobytes())
+            frame_idx += 1
 
+        log.info("waveform_overlay: wrote %d frames", frame_idx)
         writer_proc.stdin.close()
         _, stderr_bytes = await writer_proc.communicate()
 
-        # Clean up reader
-        await reader_proc.communicate()
+        # Clean up reader and capture stderr for diagnostics
+        _, reader_stderr_bytes = await reader_proc.communicate()
+
+        if reader_proc.returncode != 0:
+            reader_stderr = reader_stderr_bytes.decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"ffmpeg waveform_overlay reader failed (rc={reader_proc.returncode}): {reader_stderr}"
+            )
 
         if writer_proc.returncode != 0:
             stderr = stderr_bytes.decode("utf-8", errors="replace")
-            raise RuntimeError(f"ffmpeg waveform_overlay failed: {stderr}")
+            raise RuntimeError(f"ffmpeg waveform_overlay writer failed: {stderr}")
 
         video_bytes = video_out.read_bytes()
         log.info("waveform_overlay: encoded %d bytes", len(video_bytes))
