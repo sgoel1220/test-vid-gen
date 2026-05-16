@@ -11,11 +11,21 @@ from app.llm.client import generate_structured
 
 log = logging.getLogger(__name__)
 
-# Maximum retries for validation failures
-_MAX_VALIDATION_RETRIES = 2
+# Maximum retries for validation failures (trigger-word misses are recoverable)
+_MAX_VALIDATION_RETRIES = 3
 
 # Maximum word count for prompts (SDXL performs best with concise prompts)
 _MAX_PROMPT_WORDS = 200
+
+# LoRA trigger words that MUST appear in every positive prompt.
+# These activate the text-encoder side of each fused LoRA.
+_REQUIRED_TRIGGER_WORDS: tuple[str, ...] = (
+    "add more detail",
+    "more art",
+    "mdjrny-v4 style",
+    "impressionist painting",
+    "by andreas achenbach",
+)
 
 # Terms that should NOT appear in positive prompts (we want backgrounds only)
 _FORBIDDEN_PROMPT_TERMS = frozenset(
@@ -52,21 +62,29 @@ class ImagePromptResult(BaseModel):
     @field_validator("prompt")
     @classmethod
     def validate_prompt(cls, v: str) -> str:
-        """Validate positive prompt is within word limit and has no forbidden terms."""
+        """Validate positive prompt: word limit, no forbidden terms, all trigger words present."""
         words = v.split()
         if len(words) > _MAX_PROMPT_WORDS:
             raise ValueError(
                 f"Prompt exceeds {_MAX_PROMPT_WORDS} words ({len(words)} words)"
             )
 
-        # Check for forbidden terms (case-insensitive)
         lower_prompt = v.lower()
+
+        # Check for forbidden terms (case-insensitive)
         found_forbidden = [
             term for term in _FORBIDDEN_PROMPT_TERMS if re.search(rf"\b{term}\b", lower_prompt)
         ]
         if found_forbidden:
             raise ValueError(
                 f"Prompt contains forbidden terms (should be background only): {found_forbidden}"
+            )
+
+        # All LoRA trigger words must be present to activate the text-encoder side
+        missing_triggers = [t for t in _REQUIRED_TRIGGER_WORDS if t not in lower_prompt]
+        if missing_triggers:
+            raise ValueError(
+                f"Prompt is missing required LoRA trigger words: {missing_triggers}"
             )
 
         return v
