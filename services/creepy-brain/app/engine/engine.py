@@ -139,6 +139,7 @@ class WorkflowEngine:
 
     async def pause(self, workflow_run_id: str) -> None:
         """Pause a running workflow."""
+        self.cancel_nonstop(workflow_run_id)
         await self._resource_controller.pause(
             workflow_run_id,
             cancel_task=self._cancel_task,
@@ -210,8 +211,10 @@ class WorkflowEngine:
                         except asyncio.CancelledError:
                             # Re-raise if OUR task (the nonstop loop) was cancelled,
                             # not just the inner workflow task.
+                            # Use cancelling() (Python 3.11+): cancelled() only returns
+                            # True after the task is done, not while handling the error.
                             current = asyncio.current_task()
-                            if current is not None and current.cancelled():
+                            if current is not None and current.cancelling() > 0:
                                 raise
                         except Exception:
                             pass  # expected on workflow failure
@@ -233,10 +236,13 @@ class WorkflowEngine:
                                 elif row is not None and row.value == "cancelled":
                                     log.info("nonstop %s: workflow cancelled, stopping loop", wid)
                                     should_stop = True
-                                elif row is not None and row.value not in ("failed", "paused", "running"):
+                                elif row is not None and row.value == "paused":
+                                    log.info("nonstop %s: workflow paused, stopping loop", wid)
+                                    should_stop = True
+                                elif row is not None and row.value not in ("failed", "running"):
                                     log.info("nonstop %s: workflow status=%s, stopping loop", wid, row.value)
                                     should_stop = True
-                                # "failed", "paused", "running" all mean: keep retrying.
+                                # "failed", "running" all mean: keep retrying.
                                 # "running" can happen if _fail_workflow had a DB error.
                     except Exception:
                         log.exception("nonstop %s: status check failed, will retry", wid)

@@ -329,7 +329,8 @@ async def retry_workflow(workflow_id: uuid.UUID, db: DbSession) -> WorkflowRespo
 async def cancel_workflow(workflow_id: uuid.UUID, db: DbSession) -> None:
     """Cancel a running workflow and terminate any active GPU pods."""
     workflow = await _get_workflow_or_404(workflow_id, db)
-    if workflow.status not in {WorkflowStatus.PENDING, WorkflowStatus.RUNNING, WorkflowStatus.PAUSED}:
+    # FAILED is included so operators can cancel during nonstop-retry backoff windows.
+    if workflow.status not in {WorkflowStatus.PENDING, WorkflowStatus.RUNNING, WorkflowStatus.PAUSED, WorkflowStatus.FAILED}:
         raise HTTPException(
             status_code=400,
             detail=f"Cannot cancel workflow in status: {workflow.status}",
@@ -447,10 +448,11 @@ async def pause_workflow(workflow_id: uuid.UUID, db: DbSession) -> None:
     The workflow can be resumed later via POST /{id}/resume.
     """
     workflow = await _get_workflow_or_404(workflow_id, db)
-    if workflow.status != WorkflowStatus.RUNNING:
+    # FAILED is included so operators can pause during nonstop-retry backoff windows.
+    if workflow.status not in {WorkflowStatus.RUNNING, WorkflowStatus.FAILED}:
         raise HTTPException(
             status_code=400,
-            detail=f"Can only pause RUNNING workflows (current: {workflow.status})",
+            detail=f"Can only pause RUNNING or FAILED workflows (current: {workflow.status})",
         )
 
     await engine.pause(str(workflow_id))
