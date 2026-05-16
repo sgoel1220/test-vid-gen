@@ -32,8 +32,23 @@ Write a complete horror story following these rules:
 - Lingering unease over jump scares — the horror should grow slowly
 - Never name the monster/entity/force explicitly — let the listener fill the gap
 - Sentence rhythm matters for audio: vary length. Short. Then longer flowing sentences that build. Then short again.
-- Avoid complex punctuation (em-dashes, semicolons) — must read aloud naturally
 - No chapter breaks, no section headers — single flowing narrative
+
+**TTS Prosody Cues (critical — these directly control how the voice sounds):**
+
+The story text is fed directly into a TTS engine with no post-processing. Punctuation and sentence structure ARE the voice direction. Use these intentionally:
+
+- **Ellipses `...`** → audible pause, hesitation. Use before reveals, after wrong details, when narrator trails off in fear. *"The door was open... it hadn't been open before."*
+- **Em-dashes `—`** → abrupt break, interrupted thought. Use when the narrator catches themselves, stops mid-sentence, or recoils. *"I reached for the handle — and then I heard it."*
+- **Sentence fragments** → staccato delivery, panic. Use at peak horror moments. *"Nothing. Just silence. Then the smell."*
+- **Stuttering/repetition** → voice trembling. Use sparingly at peak fear. *"It was — it was looking at me. It had been looking at me the whole time."*
+- **Short paragraph after long one** → the voice drops, lands heavy. Use for the key horror beat after a build.
+
+**Intensity mapping (match prose structure to story position):**
+- Opening 20%: Long sentences, flowing prose, no fragments. Calm voice.
+- Middle 30–60%: Occasional ellipses, one em-dash break per paragraph.
+- Climax 60–85%: Fragments, ellipses, em-dashes, stutter. Sentences shorten dramatically.
+- Denouement 85–100%: Returns to longer sentences but with one final short fragment for the closing beat.
 
 **YouTube Retention Rules (critical):**
 - **Hook in the first 3 sentences**: hint at something wrong immediately — a missing person, an abandoned tool, a detail that doesn't fit. Do not open with pure reflection. The listener must feel tension before 30 seconds.
@@ -60,6 +75,7 @@ Read the draft and evaluate against all of the following:
 2. **Wave tension**: Are there micro-escalations every 4–6 paragraphs in the middle section? If the tone is flat, insert them.
 3. **Prose quality**: Are there clichés? ("heart pounding", "blood ran cold", "spine tingling") — replace every one.
 4. **Audio rhythm**: Read 3 random paragraphs aloud mentally. Do they flow without stumbling?
+5. **TTS prosody**: Does the climax (60–85%) use fragments, ellipses, and em-dashes? Does the opening feel calm by comparison? If the whole story uses the same sentence length and punctuation density, it will sound flat — vary it.
 5. **Climax reinforcement**: Is the peak moment described twice in different ways? If not, add the reinforcement.
 6. **Ending beat**: Does the final paragraph end with something concrete and threatening, not just mood? If not, sharpen it.
 7. **Dialogue rule**: Any quoted dialogue from other characters? Remove it.
@@ -74,6 +90,7 @@ Apply every fix identified in Step 3. Do not skip any item. Specifically:
 - If micro-escalations are missing, add them now — do not leave the middle flat.
 - If the climax is subtle, add one reinforcing paragraph immediately after the peak moment.
 - If the ending lacks a concrete beat, write one — a sound, a detail, a discovery — that closes with dread not resignation.
+- If the climax section reads like the opening (same sentence length, no fragments, no ellipses), revise it — add fragments, em-dash breaks, and hesitation to match the peak intensity.
 
 ---
 
