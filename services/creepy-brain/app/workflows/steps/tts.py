@@ -112,6 +112,7 @@ def _positional_intensity(chunk_index: int, total_chunks: int) -> float:
 _MAX_CHUNK_RETRIES = 2  # up to 3 total attempts per chunk
 _MAX_REQUEUE_ROUNDS = 2  # additional retry rounds for failed chunks
 _SYNTHESIZE_TIMEOUT_SEC = 120
+_MAX_ELLIPSIS_PIECES = 4  # cap on ... splits per chunk; beyond this, fall through unsplit
 
 
 class TtsChunkResult(BaseModel):
@@ -396,7 +397,7 @@ async def _synthesize_all_chunks(
                     "chunk %d intensity=%.2f → exag=%.3f cfg=%.3f",
                     idx, intensity, exag, cfg,
                 )
-                synthesis_result = await _synthesize_with_retry(
+                synthesis_result = await _synthesize_chunk_with_pauses(
                     client=client,
                     chunk_text=chunk_text,
                     chunk_index=idx,
@@ -515,6 +516,152 @@ async def _synthesize_all_chunks(
     return TtsAllChunksResult(
         chunk_results=chunk_results,
         total_duration_sec=total_duration_sec,
+    )
+
+
+def _stitch_wav_with_silence(wav_pieces: list[bytes], pause_sec: float) -> bytes:
+    """Concatenate WAV byte-strings with silence between each piece.
+
+    Args:
+        wav_pieces: Non-empty list of PCM WAV byte-strings.
+        pause_sec: Duration of silence inserted between pieces (seconds).
+
+    Returns:
+        A single PCM_16 WAV byte-string.
+    """
+    if len(wav_pieces) == 1:
+        return wav_pieces[0]
+
+    arrays: list[np.ndarray[tuple[int, ...], np.dtype[np.float32]]] = []
+    sample_rate: int = 24000  # Chatterbox default; overwritten from first piece
+
+    for i, piece in enumerate(wav_pieces):
+        arr: np.ndarray[tuple[int, ...], np.dtype[np.float32]]
+        arr, sr = sf.read(io.BytesIO(piece), dtype="float32")
+        sample_rate = sr
+        arrays.append(arr)
+        if i < len(wav_pieces) - 1:
+            silence: np.ndarray[tuple[int, ...], np.dtype[np.float32]] = np.zeros(
+                int(pause_sec * sr), dtype=np.float32
+            )
+            arrays.append(silence)
+
+    combined: np.ndarray[tuple[int, ...], np.dtype[np.float32]] = np.concatenate(arrays)
+    combined_int16 = (np.clip(combined, -1.0, 1.0) * 32767).astype(np.int16)
+    buf = io.BytesIO()
+    sf.write(buf, combined_int16, sample_rate, format="wav", subtype="PCM_16")
+    return buf.getvalue()
+
+
+async def _synthesize_chunk_with_pauses(
+    client: httpx.AsyncClient,
+    chunk_text: str,
+    chunk_index: int,
+    voice_name: str,
+    max_retries: int,
+    seed_offset: int = 0,
+    exaggeration: float | None = None,
+    cfg_weight: float | None = None,
+) -> ChunkSynthesisResult:
+    """Synthesize a chunk, inserting configurable silence at every ``...``.
+
+    Splits *chunk_text* on ``...``, synthesizes each sub-piece independently
+    (preserving retry logic), then stitches the results together with
+    ``settings.tts_ellipsis_pause_sec`` of silence between pieces.
+
+    Falls through to :func:`_synthesize_with_retry` unchanged when the text
+    contains no ellipsis.
+
+    Args:
+        client: Configured httpx client pointing at the TTS pod.
+        chunk_text: Text to synthesize (may contain ``...``).
+        chunk_index: Zero-based chunk position (for logging).
+        voice_name: Voice ID to pass to the TTS endpoint.
+        max_retries: Maximum additional attempts after the first try per piece.
+        seed_offset: Shifts seed range for re-queued chunks.
+        exaggeration: Override exaggeration (None = use global setting).
+        cfg_weight: Override cfg_weight (None = use global setting).
+
+    Returns:
+        Combined :class:`ChunkSynthesisResult` with stitched WAV bytes.
+    """
+    pieces = [p.strip() for p in chunk_text.split("...") if p.strip()]
+
+    if len(pieces) <= 1 or len(pieces) > _MAX_ELLIPSIS_PIECES:
+        if len(pieces) > _MAX_ELLIPSIS_PIECES:
+            log.debug(
+                "chunk %d: %d ellipsis pieces exceeds cap (%d); synthesizing unsplit",
+                chunk_index, len(pieces), _MAX_ELLIPSIS_PIECES,
+            )
+        return await _synthesize_with_retry(
+            client=client,
+            chunk_text=chunk_text,
+            chunk_index=chunk_index,
+            voice_name=voice_name,
+            max_retries=max_retries,
+            seed_offset=seed_offset,
+            exaggeration=exaggeration,
+            cfg_weight=cfg_weight,
+        )
+
+    log.debug("chunk %d: splitting on '...' → %d sub-pieces", chunk_index, len(pieces))
+
+    wav_pieces: list[bytes] = []
+    max_attempts_used: int = 0
+    total_duration: float = 0.0
+    all_passed: bool = True
+
+    for i, piece in enumerate(pieces):
+        # Stagger seed_offset so sub-pieces don't collide with each other or
+        # with requeue rounds in the outer loop.
+        sub_seed_offset = seed_offset + i * (max_retries + 1)
+        result = await _synthesize_with_retry(
+            client=client,
+            chunk_text=piece,
+            chunk_index=chunk_index,
+            voice_name=voice_name,
+            max_retries=max_retries,
+            seed_offset=sub_seed_offset,
+            exaggeration=exaggeration,
+            cfg_weight=cfg_weight,
+        )
+        if result.wav_bytes:
+            wav_pieces.append(result.wav_bytes)
+        max_attempts_used = max(max_attempts_used, result.attempts_used)
+        total_duration += result.duration_sec
+        if not result.validation_passed:
+            all_passed = False
+            log.warning(
+                "chunk %d sub-piece %d/%d failed validation",
+                chunk_index, i + 1, len(pieces),
+            )
+
+    if not wav_pieces:
+        return ChunkSynthesisResult(
+            wav_bytes=b"",
+            attempts_used=max_attempts_used,
+            duration_sec=0.0,
+            validation_passed=False,
+        )
+
+    pause_sec = settings.tts_ellipsis_pause_sec
+    silence_total = pause_sec * (len(wav_pieces) - 1)
+
+    log.debug(
+        "chunk %d: stitching %d sub-pieces with %.2fs silence each (total silence=%.2fs)",
+        chunk_index, len(wav_pieces), pause_sec, silence_total,
+    )
+
+    stitched = _stitch_wav_with_silence(wav_pieces, pause_sec)
+
+    # Validate the final stitched audio — re-encoding + silence insertion can
+    # shift voiced_ratio below thresholds even when each sub-piece passed.
+    stitched_validation = validate_chunk_audio(stitched)
+    return ChunkSynthesisResult(
+        wav_bytes=stitched,
+        attempts_used=max_attempts_used,
+        duration_sec=stitched_validation.duration_sec,
+        validation_passed=stitched_validation.passed,
     )
 
 
