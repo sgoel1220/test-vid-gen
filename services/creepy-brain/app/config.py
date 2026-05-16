@@ -115,6 +115,7 @@ class Settings(BaseSettings):
     tts_min_p: float = 0.05
     tts_top_p: float = 1.0
     tts_chunk_size: int = 300
+    tts_normalize_via_llm: bool = False
 
     # Scene grouping settings (for image generation)
     chunks_per_scene: Annotated[int, Field(ge=1)] = 7  # Number of TTS chunks per image scene

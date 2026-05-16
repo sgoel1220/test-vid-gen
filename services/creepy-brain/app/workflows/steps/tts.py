@@ -217,11 +217,14 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> TtsStepOutput
             "tts_synthesis: using cached normalized text from DB (%d chunks)", len(chunks)
         )
     else:
-        # --- 2a. Normalize full text (LLM call, cached in-process by text hash) ---
-        normalized_full_text = await normalize_text(full_text)
+        # --- 2a. Optionally normalize via LLM (disabled by default) ---
+        if settings.tts_normalize_via_llm:
+            tts_text = await normalize_text(full_text)
+        else:
+            tts_text = full_text
 
-        # --- 3. Chunk normalized text ---
-        chunks = chunk_text_by_sentences(normalized_full_text, chunk_size=settings.tts_chunk_size)
+        # --- 3. Chunk text ---
+        chunks = chunk_text_by_sentences(tts_text, chunk_size=settings.tts_chunk_size)
         if not chunks:
             raise ValueError("text chunking produced zero chunks")
 
