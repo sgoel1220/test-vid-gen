@@ -77,7 +77,7 @@ _DEFAULT_SCENE_DURATION_SEC = 30.0  # fallback when TTS durations are unavailabl
 def _music_pod_spec() -> GpuPodSpec:
     """Create GpuPodSpec for the music server."""
     return GpuPodSpec.from_tier_with_image(
-        "small",
+        "music",
         image=settings.music_server_image,
         ports=[settings.music_server_port],
         disk_size_gb=settings.music_server_container_disk_gb,
