@@ -463,7 +463,7 @@ async def execute(
         idempotency_key=f"music-{workflow_run_id}",
         workflow_id=workflow_id,
         label="music",
-        gpu_tier="medium",
+        gpu_tier="music",
         service_port=settings.music_server_port,
     ) as (pod, endpoint_url):
         new_seg_results, new_seg_wav = await _generate_pending_segments(

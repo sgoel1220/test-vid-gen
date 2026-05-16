@@ -13,7 +13,7 @@ from app.validation_limits import (
 
 
 
-GpuTierName = Literal["small", "medium", "large"]
+GpuTierName = Literal["small", "medium", "large", "music"]
 
 
 class GpuTier(BaseModel):
@@ -88,6 +88,12 @@ class Settings(BaseSettings):
         "NVIDIA RTX A6000",
         "NVIDIA RTX 4090",
     ])
+    # Music tier: ACE-Step 1.5 needs ~16 GB (DiT + 1.7B LLM), so 12 GB GPUs are excluded.
+    gpu_tier_music: list[str] = Field(default_factory=lambda: [
+        "NVIDIA RTX A5000",
+        "NVIDIA RTX A6000",
+        "NVIDIA RTX 4090",
+    ])
 
     def gpu_tier(self, name: "GpuTierName") -> GpuTier:
         """Resolve a named GPU tier to its ordered list of GPU types."""
@@ -95,6 +101,7 @@ class Settings(BaseSettings):
             "small": self.gpu_tier_small,
             "medium": self.gpu_tier_medium,
             "large": self.gpu_tier_large,
+            "music": self.gpu_tier_music,
         }
         return GpuTier(gpu_types=mapping[name])
 
