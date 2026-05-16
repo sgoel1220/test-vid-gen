@@ -66,8 +66,9 @@ _SYNTHESIZE_PATH = "/synthesize"
 def _intensity_to_tts_params(intensity: float) -> tuple[float, float]:
     """Map scene intensity [0, 1] to (exaggeration, cfg_weight).
 
-    At intensity=0.0: minimal exaggeration, moderate cfg_weight (calm).
-    At intensity=1.0: max exaggeration, low cfg_weight (desperate, fast-paced).
+    At intensity=0.0: calm narration — low exaggeration, moderate cfg_weight.
+    At intensity=1.0: peak horror — high exaggeration, very low cfg_weight
+    (strained, trembling, slower delivery).
 
     Args:
         intensity: Scene intensity in [0.0, 1.0].
@@ -76,9 +77,36 @@ def _intensity_to_tts_params(intensity: float) -> tuple[float, float]:
         Tuple of (exaggeration, cfg_weight).
     """
     t = max(0.0, min(1.0, intensity))
-    exaggeration = 0.25 + t * (0.85 - 0.25)  # 0.25 → 0.85
-    cfg_weight = 0.40 - t * (0.40 - 0.15)  # 0.40 → 0.15
+    exaggeration = 0.30 + t * (0.85 - 0.30)  # 0.30 → 0.85
+    cfg_weight = 0.45 - t * (0.45 - 0.15)  # 0.45 → 0.15
     return round(exaggeration, 3), round(cfg_weight, 3)
+
+
+def _positional_intensity(chunk_index: int, total_chunks: int) -> float:
+    """Compute intensity from chunk position using a horror escalation curve.
+
+    The curve starts low (calm opening), builds through the middle, and peaks
+    near 85% of the story (climax), with a slight drop for the denouement.
+
+    Args:
+        chunk_index: Zero-based chunk position.
+        total_chunks: Total number of chunks in the story.
+
+    Returns:
+        Intensity value in [0.0, 1.0].
+    """
+    if total_chunks <= 1:
+        return 0.5
+    t = chunk_index / (total_chunks - 1)
+    # Sigmoid-ish curve: slow start, steep middle, peaks at ~85%
+    import math
+    # Shift peak to 0.85 of the story
+    raw = 1.0 / (1.0 + math.exp(-10 * (t - 0.55)))
+    # Slight drop after 90% (denouement)
+    if t > 0.90:
+        falloff = 1.0 - 0.3 * ((t - 0.90) / 0.10)
+        raw *= falloff
+    return round(max(0.0, min(1.0, raw)), 3)
 
 # Synthesis parameters (timeouts and retries only - TTS params come from config)
 _MAX_CHUNK_RETRIES = 2  # up to 3 total attempts per chunk
@@ -358,6 +386,13 @@ async def _synthesize_all_chunks(
             failed: list[tuple[int, str]] = []
 
             for idx, chunk_text in pending:
+                # Compute per-chunk intensity from position in story
+                intensity = _positional_intensity(idx, total_chunk_count)
+                exag, cfg = _intensity_to_tts_params(intensity)
+                log.debug(
+                    "chunk %d intensity=%.2f → exag=%.3f cfg=%.3f",
+                    idx, intensity, exag, cfg,
+                )
                 synthesis_result = await _synthesize_with_retry(
                     client=client,
                     chunk_text=chunk_text,
@@ -365,6 +400,8 @@ async def _synthesize_all_chunks(
                     voice_name=voice_name,
                     max_retries=_MAX_CHUNK_RETRIES,
                     seed_offset=seed_offset,
+                    exaggeration=exag,
+                    cfg_weight=cfg,
                 )
 
                 # Encode WAV → MP3 (best-effort; never blocks saving the WAV)
@@ -485,6 +522,8 @@ async def _synthesize_with_retry(
     voice_name: str,
     max_retries: int,
     seed_offset: int = 0,
+    exaggeration: float | None = None,
+    cfg_weight: float | None = None,
 ) -> ChunkSynthesisResult:
     """Synthesize a single chunk, retrying on validation failure.
 
@@ -494,6 +533,9 @@ async def _synthesize_with_retry(
         chunk_index: Zero-based chunk position (for logging).
         voice_name: Voice ID to pass to the TTS endpoint.
         max_retries: Maximum additional attempts after the first try.
+        seed_offset: Shifts seed range for re-queued chunks.
+        exaggeration: Override exaggeration (None = use global setting).
+        cfg_weight: Override cfg_weight (None = use global setting).
 
     Returns:
         Pydantic model with WAV bytes, attempts, duration, and validation status.
@@ -502,6 +544,9 @@ async def _synthesize_with_retry(
     """
     best_wav: bytes = b""
     best_duration: float = 0.0
+
+    effective_exaggeration = exaggeration if exaggeration is not None else settings.tts_exaggeration
+    effective_cfg_weight = cfg_weight if cfg_weight is not None else settings.tts_cfg_weight
 
     for attempt in range(max_retries + 1):
         # Increment seed on retry so we get different audio each attempt.
@@ -515,8 +560,8 @@ async def _synthesize_with_retry(
                     "text": chunk_text,
                     "voice": voice_name,
                     "seed": seed,
-                    "exaggeration": settings.tts_exaggeration,
-                    "cfg_weight": settings.tts_cfg_weight,
+                    "exaggeration": effective_exaggeration,
+                    "cfg_weight": effective_cfg_weight,
                     "temperature": settings.tts_temperature,
                     "repetition_penalty": settings.tts_repetition_penalty,
                     "min_p": settings.tts_min_p,
@@ -542,10 +587,12 @@ async def _synthesize_with_retry(
 
         if validation.passed:
             log.debug(
-                "chunk %d passed on attempt %d (dur=%.1fs)",
+                "chunk %d passed on attempt %d (dur=%.1fs exag=%.2f cfg=%.2f)",
                 chunk_index,
                 attempt + 1,
                 validation.duration_sec,
+                effective_exaggeration,
+                effective_cfg_weight,
             )
             return ChunkSynthesisResult(
                 wav_bytes=candidate,
