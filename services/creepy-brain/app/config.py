@@ -141,6 +141,7 @@ class Settings(BaseSettings):
 
     # GPU pod lifecycle
     pod_ready_timeout_sec: int = 600  # 10 minutes to wait for pod ready (cold image pull)
+    music_server_pod_ready_timeout_sec: int = 1800  # 30 min — music image is ~9.4 GB, needs longer pull time
 
     # Cost tracking settings
     daily_cost_alert_threshold_cents: int = 1000  # $10

@@ -465,6 +465,7 @@ async def execute(
         label="music",
         gpu_tier="music",
         service_port=settings.music_server_port,
+        pod_ready_timeout_sec=settings.music_server_pod_ready_timeout_sec,
     ) as (pod, endpoint_url):
         new_seg_results, new_seg_wav = await _generate_pending_segments(
             endpoint_url=endpoint_url,

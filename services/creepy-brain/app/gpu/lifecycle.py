@@ -205,6 +205,7 @@ async def workflow_gpu_pod(
     label: str,
     gpu_tier: "GpuTierName | None" = None,
     service_port: int | None = None,
+    pod_ready_timeout_sec: int | None = None,
 ) -> AsyncGenerator[tuple[GpuPod, str], None]:
     """Like ``gpu_pod`` but pulls provider, fallbacks, and timeout from app settings.
 
@@ -239,7 +240,7 @@ async def workflow_gpu_pod(
         workflow_id=workflow_id,
         label=label,
         gpu_type_fallbacks=fallbacks,
-        timeout_sec=settings.pod_ready_timeout_sec,
+        timeout_sec=pod_ready_timeout_sec if pod_ready_timeout_sec is not None else settings.pod_ready_timeout_sec,
         service_port=service_port,
     ) as result:
         yield result
