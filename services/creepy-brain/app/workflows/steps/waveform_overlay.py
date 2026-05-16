@@ -24,12 +24,11 @@ from sqlalchemy import select
 
 from app.engine import SkippedStepOutput, StepContext
 from app.models.enums import BlobType
-from app.models.json_schemas import WaveformOverlayStepOutput, WorkflowInputSchema
+from app.models.json_schemas import StitchFinalStepOutput, WaveformOverlayStepOutput, WorkflowInputSchema
 from app.models.workflow import WorkflowBlob
 from app.services import blob_service
 from app.services.workflow_service import get_optional_workflow_id
 from app.workflows.db_helpers import get_session_maker
-from app.workflows.steps.stitch import StitchStepOutput
 
 log = structlog.get_logger(__name__)
 
@@ -308,7 +307,7 @@ async def execute(
         )
 
     # --- Get stitch_final output ---
-    stitch_out = ctx.get_parent_output("stitch_final", StitchStepOutput)
+    stitch_out = ctx.get_parent_output("stitch_final", StitchFinalStepOutput)
     if stitch_out is None or isinstance(stitch_out, SkippedStepOutput):
         log.info("waveform_overlay: skipping — stitch_final was skipped or missing")
         return SkippedStepOutput(reason="stitch_final skipped or missing")

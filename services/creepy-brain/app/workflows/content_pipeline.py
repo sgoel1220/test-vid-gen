@@ -29,6 +29,7 @@ from app.models.json_schemas import (
 )
 from app.engine.models import StepOutputMap
 from app.models.json_schemas import (
+    StitchFinalStepOutput,
     WaveformOverlayStepOutput,
     WorkflowInputSchema,
     WorkflowResultSchema,
@@ -108,7 +109,7 @@ async def _on_pipeline_complete(workflow_run_id: str, outputs: StepOutputMap) ->
             await session.commit()
         return
 
-    if not isinstance(stitch_out, stitch.StitchStepOutput):
+    if not isinstance(stitch_out, StitchFinalStepOutput):
         log.warning("on_complete: stitch_final output missing or wrong type")
         return
 

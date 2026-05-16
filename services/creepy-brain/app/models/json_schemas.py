@@ -243,9 +243,16 @@ class StitchFinalStepOutput(BaseModel):
     """Output from stitch_final step."""
 
     step_type: Literal["stitch_final"] = "stitch_final"
-    final_video_blob_id: uuid.UUID
-    total_duration_sec: float
-    file_size_bytes: int
+    final_audio_blob_id: str = Field(description="UUID of the final MP3 blob")
+    final_video_blob_id: str | None = Field(
+        default=None, description="UUID of the final video blob (if created)"
+    )
+    subtitle_srt_blob_id: str | None = Field(
+        default=None, description="UUID of the SRT subtitle blob (if created)"
+    )
+    chunk_count: int = Field(ge=0, description="Number of audio chunks stitched")
+    total_duration_sec: float = Field(ge=0, description="Total audio duration in seconds")
+    file_size_bytes: int = Field(default=0, description="Final video file size in bytes")
 
 
 class WaveformOverlayStepOutput(BaseModel):

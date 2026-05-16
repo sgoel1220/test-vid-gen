@@ -16,7 +16,6 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 import structlog
-from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -25,7 +24,7 @@ from app.engine import StepContext
 from app.audio.encoding import encode_wav_to_mp3
 from app.config import settings
 from app.models.enums import BlobType, ChunkStatus
-from app.models.json_schemas import MusicGenerationStepOutput, SfxGenerationStepOutput, WorkflowInputSchema
+from app.models.json_schemas import MusicGenerationStepOutput, SfxGenerationStepOutput, StitchFinalStepOutput, WorkflowInputSchema
 from app.models.workflow import WorkflowBlob
 from app.services import blob_service
 from app.services.workflow_service import (
@@ -89,23 +88,7 @@ def _crossfade_concat(
     return result
 
 
-class StitchStepOutput(BaseModel):
-    """Output of the stitch_final step."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    final_audio_blob_id: str = Field(description="UUID of the final MP3 blob")
-    final_video_blob_id: str | None = Field(
-        default=None, description="UUID of the final video blob (if created)"
-    )
-    subtitle_srt_blob_id: str | None = Field(
-        default=None, description="UUID of the SRT subtitle blob (if created)"
-    )
-    chunk_count: int = Field(ge=0, description="Number of audio chunks stitched")
-    total_duration_sec: float = Field(ge=0, description="Total audio duration in seconds")
-
-
-async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOutput:
+async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchFinalStepOutput:
     """Stitch audio chunks and optionally create video with images.
 
     Supports resume: if final audio/video blobs already exist for this
@@ -164,7 +147,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
             chunk_count = len([c for c in chunk_data if c.tts_status == ChunkStatus.COMPLETED])
             total_dur = sum(c.duration_sec or 0.0 for c in chunk_data if c.tts_status == ChunkStatus.COMPLETED)
 
-            return StitchStepOutput(
+            return StitchFinalStepOutput(
                 final_audio_blob_id=str(existing_audio_id),
                 final_video_blob_id=str(existing_video_id) if existing_video_id else None,
                 subtitle_srt_blob_id=str(existing_srt_id) if existing_srt_id else None,
@@ -321,7 +304,7 @@ async def execute(input: WorkflowInputSchema, ctx: StepContext) -> StitchStepOut
             srt_blob_id = srt_blob.id
         log.info("stitch_final: saved SRT blob_id=%s", srt_blob_id)
 
-    output = StitchStepOutput(
+    output = StitchFinalStepOutput(
         final_audio_blob_id=str(audio_blob_id),
         final_video_blob_id=None,
         subtitle_srt_blob_id=str(srt_blob_id) if srt_blob_id is not None else None,
