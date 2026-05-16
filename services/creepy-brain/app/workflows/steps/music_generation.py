@@ -80,6 +80,7 @@ def _music_pod_spec() -> GpuPodSpec:
         "small",
         image=settings.music_server_image,
         ports=[settings.music_server_port],
+        disk_size_gb=settings.music_server_container_disk_gb,
     )
 
 

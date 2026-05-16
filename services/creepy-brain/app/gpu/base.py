@@ -81,6 +81,7 @@ class GpuPodSpec(BaseModel):
         image: str,
         ports: list[int],
         volume_gb: int | None = None,
+        disk_size_gb: int | None = None,
     ) -> "GpuPodSpec":
         """Create spec from a tier with custom image and ports."""
         from app.config import settings
@@ -89,7 +90,7 @@ class GpuPodSpec(BaseModel):
         return cls(
             gpu_type=tier.gpu_types[0],
             image=image,
-            disk_size_gb=settings.gpu_container_disk_gb,
+            disk_size_gb=disk_size_gb if disk_size_gb is not None else settings.gpu_container_disk_gb,
             volume_gb=volume_gb,
             ports=ports,
             cloud_type=settings.gpu_cloud_type,

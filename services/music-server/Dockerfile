@@ -82,7 +82,18 @@ EOF
 COPY services/music-server/requirements.txt /app/requirements.txt
 RUN uv pip install --system --no-cache -r /app/requirements.txt
 
-# Copy server
+# Download ACE-Step model weights at build time to eliminate cold-start downloads.
+# All components (DiT, VAE, text encoder, LLM) live in the unified ACE-Step/Ace-Step1.5 repo.
+# They are downloaded to /app/ace-step/checkpoints/ — the path the runtime expects.
+# Bump ACE_STEP_MODEL_REV in docker-build.yml build-args to force a re-download.
+ARG ACE_STEP_MODEL_REV=19671f406d603126926c1b7e2adc169acbcade22
+RUN mkdir -p /app/ace-step/checkpoints && \
+    HF_HUB_ENABLE_HF_TRANSFER=1 \
+    huggingface-cli download ACE-Step/Ace-Step1.5 \
+        --revision "${ACE_STEP_MODEL_REV}" \
+        --local-dir /app/ace-step/checkpoints
+
+# Copy server (after model weights so server.py edits don't invalidate the weights layer)
 COPY services/music-server/server.py /app/server.py
 
 # Create required directories
@@ -90,9 +101,8 @@ RUN mkdir -p /app/hf_cache
 
 EXPOSE 8007
 
-# Probe /ready (503 until models loaded) so the container is only marked
-# healthy when the DiT + LLM are fully initialized.
-HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=5 \
+# Models are now baked in — startup is local I/O + GPU init only, so 90s is sufficient.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=5 \
     CMD curl -fsS http://127.0.0.1:8007/ready >/dev/null || exit 1
 
 CMD ["python", "/app/server.py"]

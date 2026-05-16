@@ -125,6 +125,8 @@ class Settings(BaseSettings):
     # Music server GPU pod configuration
     music_server_image: str = "ghcr.io/sgoel1220/music-server:main"
     music_server_port: int = 8007
+    # Baked model weights add ~9.4 GiB to the image; 50 GB gives adequate headroom.
+    music_server_container_disk_gb: int = 50
     sfx_server_image: str = "ghcr.io/sgoel1220/sfx-server:main"
     sfx_server_port: int = 8008
     music_volume_db: float = -20.0  # static duck level under narration

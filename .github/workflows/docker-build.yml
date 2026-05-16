@@ -151,6 +151,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             ${{ (matrix.service.name == 'comfyui-serverless' || matrix.service.name == 'image-server-v2' || matrix.service.name == 'image-server-v2-baked' || matrix.service.name == 'image-server-v2-serverless-baked' || matrix.service.name == 'comfyui-serverless-vast' || matrix.service.name == 'comfyui-vast-base') && format('CIVITAI_TOKEN={0}', secrets.CIVITAI_TOKEN) || '' }}
+            ${{ matrix.service.name == 'music-server' && 'ACE_STEP_MODEL_REV=19671f406d603126926c1b7e2adc169acbcade22' || '' }}
           # All GPU services use registry cache: combined layers exceed GHA's 10 GB
           # repo limit, and shared pytorch base layers are deduplicated in GHCR.
           # creepy-brain is CPU-only (~500 MB) so GHA cache is fine there.
