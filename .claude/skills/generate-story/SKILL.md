@@ -22,7 +22,7 @@ If the premise could benefit from grounding in real-world details (a specific pr
 
 Write a complete horror story following these rules:
 
-**Length:** 3000–5000 words (long-form for audio; ~45–60 min narration)
+**Length:** 5000–7000 words (long-form for audio; ~50–70 min narration at TTS pace)
 
 **NARRATOR_VOICE_RULES (embed all of these):**
 - Single narrator: old male, first-person past tense ("I remember when…", "That was the night I…")
@@ -33,6 +33,15 @@ Write a complete horror story following these rules:
 - Never name the monster/entity/force explicitly — let the listener fill the gap
 - Sentence rhythm matters for audio: vary length. Short. Then longer flowing sentences that build. Then short again.
 - No chapter breaks, no section headers — single flowing narrative
+- This is AUDIO ONLY — no references to visual layout, "as mentioned above", or spatial page concepts. The listener hears a continuous stream.
+
+**TTS-Friendly Text Rules (the engine reads this raw — avoid tripping it up):**
+- Spell out all numbers: "three" not "3", "nineteen eighty-four" not "1984"
+- No ALL-CAPS words (TTS may spell them letter-by-letter). Use prose emphasis instead: "It was *wrong*" → "It was deeply, fundamentally wrong."
+- No parenthetical asides — restructure as separate sentences
+- Keep sentences under ~40 words. The TTS chunks text at ~300 characters; very long sentences get split at unnatural points.
+- Use simple, phonetically unambiguous character/place names (2-3 syllables, common pronunciation). Avoid names the TTS might mangle (Siobhan, Cthulhu, Xochitl).
+- No URLs, emails, code, or non-prose content
 
 **TTS Prosody Cues (critical — these directly control how the voice sounds):**
 
@@ -44,11 +53,19 @@ The story text is fed directly into a TTS engine with no post-processing. Punctu
 - **Stuttering/repetition** → voice trembling. Use sparingly at peak fear. *"It was — it was looking at me. It had been looking at me the whole time."*
 - **Short paragraph after long one** → the voice drops, lands heavy. Use for the key horror beat after a build.
 
+**Prosody anti-patterns (do NOT do these):**
+- No more than 2 ellipses per paragraph — overuse sounds glitchy
+- Stuttering/repetition max 2–3 times in the entire story — more sounds like a speech impediment
+- Never stack fragments for more than 3 consecutive sentences — it loses impact
+- Don't use em-dashes in the calm opening sections — save them for when tension exists
+- Don't start multiple consecutive paragraphs with the same prosody device
+
 **Intensity mapping (match prose structure to story position):**
-- Opening 20%: Long sentences, flowing prose, no fragments. Calm voice.
-- Middle 30–60%: Occasional ellipses, one em-dash break per paragraph.
-- Climax 60–85%: Fragments, ellipses, em-dashes, stutter. Sentences shorten dramatically.
-- Denouement 85–100%: Returns to longer sentences but with one final short fragment for the closing beat.
+- Hook (first 3 sentences): One short punchy sentence allowed to set tension, then ease into flowing prose.
+- Opening 5–20%: Long sentences, flowing prose, no fragments. Calm voice. Establish normalcy.
+- Middle 20–60%: Occasional ellipses (1 per 2-3 paragraphs), one em-dash break per major paragraph. Tension builds subtly.
+- Climax 60–85%: Fragments, ellipses, em-dashes, stutter. Sentences shorten dramatically. Paragraphs get shorter.
+- Denouement 85–100%: Returns to longer sentences but retains one final short fragment and one ellipsis for the closing beat. Not fully calm — the ending should still have edge.
 
 **YouTube Retention Rules (critical):**
 - **Hook in the first 3 sentences**: hint at something wrong immediately — a missing person, an abandoned tool, a detail that doesn't fit. Do not open with pure reflection. The listener must feel tension before 30 seconds.
@@ -76,10 +93,12 @@ Read the draft and evaluate against all of the following:
 3. **Prose quality**: Are there clichés? ("heart pounding", "blood ran cold", "spine tingling") — replace every one.
 4. **Audio rhythm**: Read 3 random paragraphs aloud mentally. Do they flow without stumbling?
 5. **TTS prosody**: Does the climax (60–85%) use fragments, ellipses, and em-dashes? Does the opening feel calm by comparison? If the whole story uses the same sentence length and punctuation density, it will sound flat — vary it.
-5. **Climax reinforcement**: Is the peak moment described twice in different ways? If not, add the reinforcement.
-6. **Ending beat**: Does the final paragraph end with something concrete and threatening, not just mood? If not, sharpen it.
-7. **Dialogue rule**: Any quoted dialogue from other characters? Remove it.
-8. **Length**: Is the story at least 3000 words? If under, expand the environment, backstory, or disturbance sections.
+6. **Prosody overuse**: Are there more than 2 ellipses in any paragraph? More than 3 stutters total? Fix.
+7. **TTS-hostile content**: Any numbers not spelled out? ALL-CAPS? Parentheticals? Sentences over 40 words? Fix.
+8. **Climax reinforcement**: Is the peak moment described twice in different ways? If not, add the reinforcement.
+9. **Ending beat**: Does the final paragraph end with something concrete and threatening, not just mood? If not, sharpen it.
+10. **Dialogue rule**: Any quoted dialogue from other characters? Remove it.
+11. **Length**: Is the story at least 5000 words? If under, expand the environment, backstory, or escalation sections.
 
 ---
 
@@ -91,6 +110,7 @@ Apply every fix identified in Step 3. Do not skip any item. Specifically:
 - If the climax is subtle, add one reinforcing paragraph immediately after the peak moment.
 - If the ending lacks a concrete beat, write one — a sound, a detail, a discovery — that closes with dread not resignation.
 - If the climax section reads like the opening (same sentence length, no fragments, no ellipses), revise it — add fragments, em-dash breaks, and hesitation to match the peak intensity.
+- If TTS-hostile content exists (numbers, caps, long sentences), fix it inline — do not leave for later.
 
 ---
 
