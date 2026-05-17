@@ -13,6 +13,7 @@ services:
       - POSTGRES_USER=creepy_brain
       - POSTGRES_PASSWORD=dev_password
       - POSTGRES_DB=creepy_brain
+      - POD_READY_TIMEOUT_SEC=1800
       # - JSON_LOGS=true  # Set to false for pretty dev logs, true for production JSON
       # ANTHROPIC_API_KEY and LLM_MODEL are loaded from .env (copy .env.example → .env)
     depends_on:
