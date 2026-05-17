@@ -143,6 +143,7 @@ class Settings(BaseSettings):
 
     # GPU pod lifecycle
     pod_ready_timeout_sec: int = 600  # 10 minutes to wait for pod ready (cold image pull)
+    image_server_pod_ready_timeout_sec: int = 1800  # 30 min — ComfyUI image is large, needs longer pull time
     music_server_pod_ready_timeout_sec: int = 1800  # 30 min — music image is ~9.4 GB, needs longer pull time
 
     # Cost tracking settings

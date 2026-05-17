@@ -53,7 +53,7 @@ from app.workflows.db_helpers import get_session_maker
 log = logging.getLogger(__name__)
 
 _GENERATE_PATH = "/generate"
-_GENERATE_TIMEOUT_SEC = 180  # 3 minutes per image generation
+_GENERATE_TIMEOUT_SEC = 600  # 10 minutes per image generation (ComfyUI can be slow)
 
 # PNG magic bytes
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -260,6 +260,7 @@ async def execute(
         label="image",
         gpu_tier="medium",
         service_port=settings.image_server_port,
+        pod_ready_timeout_sec=settings.image_server_pod_ready_timeout_sec,
     ) as (pod, endpoint_url):
         new_results = await _generate_images_from_prompts(
             endpoint_url=endpoint_url,
